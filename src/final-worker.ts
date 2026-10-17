@@ -21,7 +21,7 @@ import { loadSaaSFeatureFlags } from "./saas/flags.js";
 import { SaaSStore } from "./saas/store.js";
 import { registerWebsiteRoutes } from "./saas/website-routes.js";
 import { registerAdminRoutes } from "./saas/admin-routes.js";
-import { registerInternalConnectionStatus } from "./saas/connection-status.js";
+import { classifyGoogleConnectionFailure, registerInternalConnectionStatus } from "./saas/connection-status.js";
 import { verifyRazorpaySignature } from "./saas/razorpay.js";
 import { parseRazorpayEvent } from "./saas/billing-events.js";
 import { RazorpayClient } from "./saas/razorpay-client.js";
@@ -220,8 +220,7 @@ export default {
                 const token=await auth.getAccessToken();
                 return token.token?'authorized':'reauthorization_required';
               }catch(error){
-                const message=error instanceof Error?error.message:'';
-                return message==='Google grant unavailable'||message.includes('invalid_grant')?'reauthorization_required':'unavailable';
+                return classifyGoogleConnectionFailure(error);
               }
             },
             loadMcpStatus: async websiteUserId => {
@@ -258,8 +257,7 @@ export default {
               } catch (error) {
                 const response = (error as { response?: { status?: number }; status?: number }).response;
                 const status = response?.status ?? (error as { status?: number }).status;
-                const message = error instanceof Error ? error.message : "";
-                if (status === 401 || /invalid_grant|refresh.token|grant unavailable/i.test(message)) return unavailable("reauthorization_required");
+                if (status === 401 || classifyGoogleConnectionFailure(error) === "reauthorization_required") return unavailable("reauthorization_required");
                 if (status === 403) return unavailable("permission_denied");
                 return unavailable("api_error");
               }
