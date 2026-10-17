@@ -8,6 +8,11 @@ export type ClassroomClients = {
   publicPageLimit?: number;
 };
 
+export class TeacherCourseAccessError extends Error {
+  readonly code = "teacher_course_access_required";
+  constructor() { super("teacher_course_access_required"); }
+}
+
 export function createClients(auth: OAuth2Client): ClassroomClients {
   return {
     classroom: classroom({ version: "v1", auth }),
@@ -78,6 +83,66 @@ export async function listMySubmissions(clients: ClassroomClients, courseId: str
     const { data } = await clients.classroom.courses.courseWork.studentSubmissions.list({ courseId, courseWorkId, userId: "me", pageSize: 100, pageToken });
     return { items: data.studentSubmissions ?? [], nextPageToken: data.nextPageToken };
   }, clients.publicPageLimit);
+}
+
+/** List only courses for which Google confirms the current identity is a teacher. */
+export async function listMyTeacherCourses(clients: ClassroomClients): Promise<classroom_v1.Schema$Course[]> {
+  const listed = await allPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.list({ teacherId: "me", courseStates: ["ACTIVE"], pageSize: 100, pageToken });
+    return { items: data.courses ?? [], nextPageToken: data.nextPageToken };
+  }, clients.publicPageLimit);
+  const verified: classroom_v1.Schema$Course[] = [];
+  for (const course of listed) {
+    if (!course.id) continue;
+    try {
+      await clients.classroom.courses.teachers.get({ courseId: course.id, userId: "me" });
+      verified.push(course);
+    } catch (error) {
+      if (!isPermissionOrNotFound(error)) throw error;
+    }
+  }
+  return verified;
+}
+
+/** Roster access is checked against Google's teacher membership endpoint on every request. */
+export async function listTeacherCourseStudents(clients: ClassroomClients, courseId: string): Promise<classroom_v1.Schema$Student[]> {
+  await assertTeacherForCourse(clients, courseId);
+  return allPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.students.list({ courseId, pageSize: 100, pageToken });
+    return { items: data.students ?? [], nextPageToken: data.nextPageToken };
+  }, clients.publicPageLimit);
+}
+
+export async function listTeacherCourseWork(clients: ClassroomClients, courseId: string): Promise<classroom_v1.Schema$CourseWork[]> {
+  await assertTeacherForCourse(clients, courseId);
+  return allPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.courseWork.list({ courseId, pageSize: 100, pageToken, orderBy: "updateTime desc" });
+    return { items: data.courseWork ?? [], nextPageToken: data.nextPageToken };
+  }, clients.publicPageLimit);
+}
+
+/** Submission reads re-check teacher membership and confirm the coursework belongs to the requested course. */
+export async function listTeacherCourseSubmissions(clients: ClassroomClients, courseId: string, courseWorkId: string): Promise<classroom_v1.Schema$StudentSubmission[]> {
+  await assertTeacherForCourse(clients, courseId);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(courseWorkId)) throw new TeacherCourseAccessError();
+  const work = await clients.classroom.courses.courseWork.get({ courseId, id: courseWorkId });
+  if (work.data.courseId !== courseId) throw new TeacherCourseAccessError();
+  return allPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.courseWork.studentSubmissions.list({ courseId, courseWorkId, pageSize: 100, pageToken });
+    return { items: data.studentSubmissions ?? [], nextPageToken: data.nextPageToken };
+  }, clients.publicPageLimit);
+}
+
+async function assertTeacherForCourse(clients: ClassroomClients, courseId: string): Promise<void> {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(courseId)) throw new TeacherCourseAccessError();
+  try { await clients.classroom.courses.teachers.get({ courseId, userId: "me" }); }
+  catch (error) { if (isPermissionOrNotFound(error)) throw new TeacherCourseAccessError(); throw error; }
+}
+
+function isPermissionOrNotFound(error: unknown): boolean {
+  const value = error as { code?: unknown; status?: unknown; response?: { status?: unknown } };
+  const status = value?.response?.status ?? value?.status ?? value?.code;
+  return status === 403 || status === 404 || status === "403" || status === "404";
 }
 
 export function dueAt(item: classroom_v1.Schema$CourseWork): string | null {

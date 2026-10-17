@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, describe, it, expect } from "vitest";
+import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { SaaSMigration } from "./schema.js";
 import { SaaSStore } from "./store.js";
@@ -166,7 +166,7 @@ describe("Account portal with isolated PostgreSQL persistence", () => {
        const teacherHeaders=studentHeaders;
       const dashboard=await fetch(origin+"/app",{headers:teacherHeaders,redirect:"manual"});expect(dashboard.status).toBe(303);expect(dashboard.headers.get("location")).toBe("/app/teacher");
       const page=await fetch(origin+"/app/teacher",{headers:teacherHeaders});expect(page.status).toBe(200);const html=await page.text();
-      expect(html).toContain("Synthetic demonstration");expect(html).toContain("Gradebook writeback is disabled");expect(html).toContain("verified Google teacher authorization");
+      expect(html).toContain("Synthetic demonstration");expect(html).toContain("Gradebook writeback is disabled");expect(html).toContain("verified teacher membership");
       expect(html).toContain("/app/assets/teacher.js");expect(html).toContain('href="/app/teacher" aria-current="page">Teacher demo');expect(html).toContain("@media(max-width:760px)");expect(realConnectionChecks).toBe(0);
       const teacherScript=await fetch(origin+"/app/assets/teacher.js").then(response=>response.text());expect(()=>new Function(teacherScript)).not.toThrow();
       const anonymous=await fetch(origin+"/api/teacher-demo/packet");expect(anonymous.status).toBe(401);
@@ -204,6 +204,34 @@ describe("Account portal with isolated PostgreSQL persistence", () => {
       const response=await fetch(origin+"/api/dashboard/preference",{method:"POST",headers:{cookie:`cd_session=${session.token}`,origin,"content-type":"application/x-www-form-urlencoded"},body:"dashboard=teacher",redirect:"manual"});
       expect(response.status).toBe(303);expect(response.headers.get("location")).toBe("/app/teacher");expect(response.headers.get("set-cookie")).toBeNull();
       expect(await store.dashboardPreference(user.id)).toBe("teacher");
+    }finally{await new Promise<void>(r=>server.close(()=>r()));}
+  });
+  it("requires an explicit, same-session teacher OAuth flow before exposing live teacher reads",async()=>{
+    const user=await store.upsertGoogleIdentity(identity("teacher-consent"));
+    await store.setDashboardPreference(user.id,"teacher");
+    await store.db.query("INSERT INTO classroom_desk_connections (website_user_id,mcp_user_id) VALUES ($1,$2)",[user.id,"teacher-consent-mcp"]);
+    const session=await store.sessions.create(user.id);
+    const auth=new PostgresPublicAuthStore(store.db,randomBytes(32).toString("base64"));await auth.migrate();
+    const complete=vi.fn(async()=>{}),begin=vi.fn(async(_mcp:string,state:string)=>`https://accounts.google.com/auth?state=${state}`);
+    const app=express();app.use(express.urlencoded({extended:false,limit:"4kb"}));
+    registerWebsiteRoutes(app,{store,secureCookies:false,oauth:{clientId:"synthetic-client",clientSecret:"synthetic-secret",callbackUrl:"http://127.0.0.1/unused",origin:"http://127.0.0.1"},oauthStateStore:auth,teacherAuthorization:{begin,complete},teacherData:{courses:async()=>{throw new Error("teacher_authorization_required")},coursework:async()=>[],students:async()=>[],submissions:async()=>[]}});
+    const server=createServer(app);await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));
+    const origin=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
+    try{
+      const headers={cookie:`cd_session=${session.token}`,origin};
+      const start=await fetch(origin+"/api/teacher/authorize",{method:"POST",headers,redirect:"manual"});
+      expect(start.status).toBe(303);expect(begin).toHaveBeenCalledOnce();
+      const location=new URL(start.headers.get("location")!);const state=location.searchParams.get("state")!;
+      expect(state).toMatch(/^[A-Za-z0-9_-]{32}$/);
+      const stateCookie=start.headers.get("set-cookie")!.split(";")[0]!;
+      const callback=await fetch(`${origin}/auth/google/callback?state=${state}&code=synthetic-code`,{headers:{cookie:`cd_session=${session.token}; ${stateCookie}`},redirect:"manual"});
+      expect(callback.status).toBe(303);expect(callback.headers.get("location")).toBe("/app/teacher?authorization=complete");
+      expect(complete).toHaveBeenCalledWith("teacher-consent-mcp",state,"synthetic-code",expect.stringMatching(/^[A-Za-z0-9_-]{40,64}$/));
+      const replay=await fetch(`${origin}/auth/google/callback?state=${state}&code=synthetic-code`,{headers:{cookie:`cd_session=${session.token}; ${stateCookie}`},redirect:"manual"});
+      expect(replay.status).toBe(400);expect(complete).toHaveBeenCalledOnce();
+      const live=await fetch(origin+"/api/teacher/live/courses",{headers:{cookie:`cd_session=${session.token}`}});
+      expect(live.status).toBe(403);expect(await live.json()).toMatchObject({error:"teacher_authorization_required",authorizationUrl:"/app/teacher"});
+      const anonymous=await fetch(origin+"/api/teacher/live/courses");expect(anonymous.status).toBe(401);
     }finally{await new Promise<void>(r=>server.close(()=>r()));}
   });
   it("does not grant billing administration to a Student through the customer billing allowlist", async () => {

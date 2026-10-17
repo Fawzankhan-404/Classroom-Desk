@@ -10,8 +10,9 @@ import { D1SqlDatabase } from "./public/d1-database.js";
 import { createClients } from "./classroom.js";
 import { getStudentOverview } from "./v2/student.js";
 import { createV2CombinedServer } from "./v2/server.js";
-import { V2_BETA_SCOPES } from "./v2/scopes.js";
-import { GOOGLE_CANONICAL_CLASSROOM_SCOPES } from "./scopes.js";
+import { V2_BETA_SCOPES, isExactV2GoogleGrant } from "./v2/scopes.js";
+import { TEACHER_CLASSROOM_SCOPES, hasTeacherClassroomScopes } from "./scopes.js";
+import { listMyTeacherCourses, listTeacherCourseStudents, listTeacherCourseSubmissions, listTeacherCourseWork } from "./classroom.js";
 import { DurableAttachmentAuthorizationStore } from "./v2/attachments.js";
 import { GoogleDriveAttachmentReader } from "./v2/attachment-content.js";
 import { buildOnePickAuthorizationUrl, parseOnePickCallback, DRIVE_FILE_SCOPE } from "./v2/picker.js";
@@ -63,9 +64,7 @@ type Bindings = {
 };
 
 const betaGrant = (scopes: string[]) => {
-  const actual = new Set(scopes);
-  const accepted = [new Set(V2_BETA_SCOPES), new Set([...GOOGLE_CANONICAL_CLASSROOM_SCOPES, "https://www.googleapis.com/auth/drive.file"] )];
-  return accepted.some((expected) => actual.size === expected.size && [...expected].every((scope) => actual.has(scope)));
+  return isExactV2GoogleGrant(scopes);
 };
 
 export const pickerUrl = buildPickerUrl;
@@ -229,6 +228,28 @@ export default {
               try { return await saasStore.accountStatusForMcpUser(subject, requestOrigin); }
               catch { return { state: "STATUS_UNAVAILABLE", message: "Access status could not be checked right now.", plan: null, expiresAt: null, linked: true }; }
             },
+            teacherAuthorization: bindings.V2_GOOGLE_OAUTH_CLIENT_ID && bindings.V2_GOOGLE_OAUTH_CLIENT_SECRET ? {
+              begin: (mcpUserId, state, verifier) => publicProvider.beginTeacherAuthorization(mcpUserId, state, verifier, `${requestOrigin}/auth/google/callback`),
+              complete: (mcpUserId, state, code, verifier) => publicProvider.completeTeacherAuthorization(mcpUserId, state, code, verifier, `${requestOrigin}/auth/google/callback`),
+            } : undefined,
+            teacherData: {
+              courses: async websiteUserId => {
+                const clients = await teacherClientsFor(websiteUserId, saasStore, store, publicProvider);
+                return (await listMyTeacherCourses(clients)).map(course => ({ id: course.id, name: course.name, section: course.section, state: course.courseState, updateTime: course.updateTime }));
+              },
+              coursework: async (websiteUserId, courseId) => {
+                const clients = await teacherClientsFor(websiteUserId, saasStore, store, publicProvider);
+                return (await listTeacherCourseWork(clients, courseId)).map(work => ({ id: work.id, title: work.title, dueDate: work.dueDate, dueTime: work.dueTime, state: work.state, maxPoints: work.maxPoints, updateTime: work.updateTime }));
+              },
+              students: async (websiteUserId, courseId) => {
+                const clients = await teacherClientsFor(websiteUserId, saasStore, store, publicProvider);
+                return (await listTeacherCourseStudents(clients, courseId)).map(student => ({ userId: student.userId, name: student.profile?.name?.fullName ?? "Student" }));
+              },
+              submissions: async (websiteUserId, courseId, courseWorkId) => {
+                const clients = await teacherClientsFor(websiteUserId, saasStore, store, publicProvider);
+                return (await listTeacherCourseSubmissions(clients, courseId, courseWorkId)).map(submission => ({ id: submission.id, userId: submission.userId, state: submission.state, assignedGrade: submission.assignedGrade, draftGrade: submission.draftGrade, late: submission.late, updateTime: submission.updateTime }));
+              },
+            },
             loadClassroomDashboard: async (websiteUserId) => {
               const mcpUserId = await saasStore.getLinkedMcpUserId(websiteUserId);
               const unavailable = (sync: "not_connected" | "reauthorization_required" | "permission_denied" | "api_error") => ({ courses: null, assignmentsShown: null, upcomingAssignments: null, missingAssignments: null, sync });
@@ -337,3 +358,12 @@ export default {
     }
   },
 };
+
+async function teacherClientsFor(websiteUserId: string, saasStore: SaaSStore, authStore: PostgresPublicAuthStore, provider: PublicOAuthProvider) {
+  const mcpUserId = await saasStore.getLinkedMcpUserId(websiteUserId);
+  if (!mcpUserId) throw new Error("teacher_authorization_required");
+  const grant = await authStore.getGrant(mcpUserId);
+  if (!grant || !hasTeacherClassroomScopes(grant.scopes)) throw new Error("teacher_authorization_required");
+  const auth = await provider.googleAuthForUser(mcpUserId);
+  return { ...createClients(auth), publicPageLimit: 5 };
+}

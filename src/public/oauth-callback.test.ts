@@ -167,6 +167,28 @@ describe("public OAuth callback behavior", () => {
     } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
   });
 
+  it("reports a missing Google refresh token through the registered callback without minting an MCP code", async () => {
+    const { origin, store, server } = await startHarness();
+    const redirectUri = `${origin}/chatgpt/callback`;
+    const client = await registerClient(origin, redirectUri);
+    vi.spyOn(OAuth2Client.prototype, "getToken").mockResolvedValue({ tokens: { access_token: "synthetic-access", scope: GOOGLE_CANONICAL_CLASSROOM_SCOPES.join(" ") } } as never);
+    vi.spyOn(OAuth2Client.prototype, "revokeToken").mockResolvedValue({} as never);
+    try {
+      const request = await beginAuthorization(origin, client.client_id, redirectUri, "missing-refresh-state");
+      const google = await beginGoogle(origin, request.connectUrl!);
+      const userId = (await store.getFlow(google.flowId))?.userId;
+      const callback = await fetch(`${origin}/oauth/google/callback?${new URLSearchParams({ state: google.googleUrl.searchParams.get("state")!, code: "synthetic-code-without-refresh" })}`, { redirect: "manual" });
+      expect(callback.status).toBe(303);
+      const redirected = new URL(callback.headers.get("location")!);
+      expect(redirected.origin + redirected.pathname).toBe(redirectUri);
+      expect(redirected.searchParams.get("error")).toBe("access_denied");
+      expect(redirected.searchParams.get("state")).toBe("missing-refresh-state");
+      expect(redirected.searchParams.has("code")).toBe(false);
+      expect(await store.getGrant(userId!)).toBeUndefined();
+      expect(await store.getCode(redirected.searchParams.get("code") ?? "")).toBeUndefined();
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+  });
+
   it("rejects an authorization redirect URI that was not registered by the client", async () => {
     const { origin, server } = await startHarness();
     try {

@@ -5,7 +5,7 @@ import type { OAuthServerProvider, AuthorizationParams } from "@modelcontextprot
 import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { GoogleFlow, GoogleGrant, InternalCode, PublicAuthStore } from "./store.js";
-import { isExactPublicGoogleGrant, PUBLIC_CLASSROOM_SCOPES } from "../scopes.js";
+import { hasTeacherClassroomScopes, isExactPublicGoogleGrant, isExactPublicTeacherGoogleGrant, PUBLIC_CLASSROOM_SCOPES, TEACHER_CLASSROOM_SCOPES } from "../scopes.js";
 import { logGrantRefreshFailure, logGoogleAuthorizationFailure, logMcpTokenFailure } from "./log.js";
 
 export const MCP_SCOPE = "mcp:tools";
@@ -41,6 +41,39 @@ export class PublicOAuthProvider implements OAuthServerProvider {
 
   private googleClient(redirectUri = this.config.googleCallbackUrl) {
     return new OAuth2Client(this.config.googleClientId, this.config.googleClientSecret, redirectUri);
+  }
+
+  async beginTeacherAuthorization(userId: string, state: string, verifier: string, callbackUrl: string): Promise<string> {
+    if (!/^[A-Za-z0-9_-]{32}$/.test(state) || !/^[A-Za-z0-9_-]{40,64}$/.test(verifier)) throw new Error("teacher_authorization_state_invalid");
+    const grant = await this.store.getGrant(userId);
+    if (!grant?.googleSubject || !(this.config.googleGrantValidator ? this.config.googleGrantValidator(grant.scopes) : isExactPublicGoogleGrant(grant.scopes))) throw new Error("google_account_reconnect_required");
+    const client = this.googleClient(callbackUrl);
+    return client.generateAuthUrl({
+      access_type: "offline", prompt: "consent", include_granted_scopes: true,
+      scope: [...new Set([...grant.scopes, ...TEACHER_CLASSROOM_SCOPES, "openid", "email", "profile"])],
+      state, nonce: state, code_challenge: createPkceChallenge(verifier), code_challenge_method: "S256",
+    } as never);
+  }
+
+  async completeTeacherAuthorization(userId: string, state: string, code: string, verifier: string, callbackUrl: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{32}$/.test(state) || !/^[A-Za-z0-9_-]{40,64}$/.test(verifier) || code.length < 1 || code.length > 2048) throw new Error("teacher_authorization_state_invalid");
+    const existing = await this.store.getGrant(userId);
+    if (!existing?.googleSubject || !(this.config.googleGrantValidator ? this.config.googleGrantValidator(existing.scopes) : isExactPublicGoogleGrant(existing.scopes))) throw new Error("google_account_reconnect_required");
+    const client = this.googleClient(callbackUrl);
+    const { tokens } = await client.getToken({ code, codeVerifier: verifier });
+    if (!tokens.id_token) throw new Error("google_identity_missing");
+    const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: this.config.googleClientId });
+    const identity = ticket.getPayload();
+    if (!identity?.sub || identity.sub !== existing.googleSubject || identity.nonce !== state) throw new Error("google_identity_mismatch");
+    const identityScopes = new Set(["openid", "email", "profile", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"]);
+    const granted = new Set((tokens.scope ?? "").split(/\s+/).filter((scope) => scope && !identityScopes.has(scope)));
+    const validTeacherGrant = this.config.googleGrantValidator
+      ? this.config.googleGrantValidator([...granted])
+      : isExactPublicTeacherGoogleGrant([...granted]);
+    if (!hasTeacherClassroomScopes([...granted]) || !validTeacherGrant) throw new Error("teacher_scope_mismatch");
+    const current = await this.store.getGrant(userId);
+    if (!current || current.googleSubject !== existing.googleSubject) throw new Error("google_identity_changed");
+    await this.store.putGrant({ ...current, refreshToken: tokens.refresh_token ?? current.refreshToken, scopes: [...granted], updatedAt: Date.now() });
   }
 
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {

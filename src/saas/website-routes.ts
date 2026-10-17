@@ -14,7 +14,11 @@ import { renderExperienceSelector, renderTeacherDashboard, type DashboardPrefere
 import { teacherDashboardScript } from "./teacher-dashboard-script.js";
 
 export interface WebsiteOAuthStateStore { putEphemeral(kind: string, key: string, value: unknown, owner: string, expiresAt: number): Promise<void>; takeEphemeral<T>(kind: string, key: string): Promise<T | undefined>; }
-export interface WebsiteRouteOptions { store: SaaSStore; oauth?: WebsiteOAuthConfig; oauthStateStore?: WebsiteOAuthStateStore; secureCookies: boolean; razorpay?: RazorpayClient; razorpayKeyId?: string; razorpayKeySecret?: string; razorpayPlanIds?: { student?: string; teacher?: string }; billingEnabled?: boolean; billingAllowlistUuids?: ReadonlySet<string>; teacherFeaturesEnabled?: boolean; referralRewardsEnabled?: boolean; loadConnectionStatus?: (websiteUserId:string)=>Promise<ConnectionStatus>; loadMcpStatus?: (websiteUserId:string)=>Promise<{ state: string; message: string; plan: string | null; expiresAt: string | null; linked: boolean }>; loadClassroomDashboard?: (websiteUserId: string) => Promise<StudentDashboardData>; }
+export interface WebsiteRouteOptions {
+  store: SaaSStore; oauth?: WebsiteOAuthConfig; oauthStateStore?: WebsiteOAuthStateStore; secureCookies: boolean; razorpay?: RazorpayClient; razorpayKeyId?: string; razorpayKeySecret?: string; razorpayPlanIds?: { student?: string; teacher?: string }; billingEnabled?: boolean; billingAllowlistUuids?: ReadonlySet<string>; teacherFeaturesEnabled?: boolean; referralRewardsEnabled?: boolean; loadConnectionStatus?: (websiteUserId:string)=>Promise<ConnectionStatus>; loadMcpStatus?: (websiteUserId:string)=>Promise<{ state: string; message: string; plan: string | null; expiresAt: string | null; linked: boolean }>; loadClassroomDashboard?: (websiteUserId: string) => Promise<StudentDashboardData>;
+  teacherAuthorization?: { begin(mcpUserId: string, state: string, verifier: string): Promise<string>; complete(mcpUserId: string, state: string, code: string, verifier: string): Promise<void> };
+  teacherData?: { courses(websiteUserId: string): Promise<unknown[]>; coursework(websiteUserId: string, courseId: string): Promise<unknown[]>; students(websiteUserId: string, courseId: string): Promise<unknown[]>; submissions(websiteUserId: string, courseId: string, courseWorkId: string): Promise<unknown[]> };
+}
 
 const WEBSITE_LOGIN_STATE_KIND = "website_login";
 const WEBSITE_LOGIN_STATE_OWNER = "website-login";
@@ -68,6 +72,21 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
     const code = typeof req.query.code === "string" ? req.query.code : "";
     if (!browserStartedLogin(req.get("cookie"),state,options.secureCookies)) return res.status(400).type("html").send(message("Sign-in could not be completed.","Start sign-in again in this browser. Your account was not changed."));
     res.setHeader("Set-Cookie",loginCookie(options.secureCookies));
+    let teacherFlow: { userId: string; sessionId: string; mcpUserId: string; verifier: string } | undefined;
+    try { teacherFlow = options.oauthStateStore ? await options.oauthStateStore.takeEphemeral("teacher_consent", state) as typeof teacherFlow : undefined; }
+    catch { return res.status(400).type("html").send(message("Teacher authorization could not be completed.", "Your current Google connection was not changed. Start the teacher authorization again.")); }
+    if (teacherFlow) {
+      const session = await currentSession(req.get("cookie"), options.store);
+      if (!session || session.id !== teacherFlow.sessionId || session.userId !== teacherFlow.userId || await options.store.getLinkedMcpUserId(session.userId) !== teacherFlow.mcpUserId) return res.status(400).type("html").send(message("Teacher authorization expired.", "Your account session or Classroom connection changed. Sign in and start again."));
+      if (!code || !options.teacherAuthorization) return res.status(400).type("html").send(message("Teacher authorization was not granted.", "Your existing Classroom access remains unchanged."));
+      try {
+        await options.teacherAuthorization.complete(teacherFlow.mcpUserId, state, code, teacherFlow.verifier);
+        res.setHeader("Cache-Control", "no-store");
+        return res.redirect(303, "/app/teacher?authorization=complete");
+      } catch {
+        return res.status(400).type("html").send(message("Teacher access could not be verified.", "Your existing Classroom access remains unchanged. Confirm the same Google account and try again."));
+      }
+    }
     let stored: { verifier: string; returnTo: string } | undefined;
     try { stored = options.oauthStateStore ? await options.oauthStateStore.takeEphemeral<{ verifier: string; returnTo: string }>(WEBSITE_LOGIN_STATE_KIND, state) : undefined; }
     catch { return res.status(400).type("html").send(message("Sign-in could not be completed.", "Return to Classroom Desk and start again.")); }
@@ -120,6 +139,43 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
     res.setHeader("Cache-Control", "no-store");
     return res.redirect(303, preference === "teacher" ? "/app/teacher" : "/app");
   });
+  app.post("/api/teacher/authorize", async (req, res) => {
+    const session = await currentSession(req.get("cookie"), options.store);
+    if (!session) return res.status(401).json({ error: "login_required" });
+    if (await options.store.dashboardPreference(session.userId) !== "teacher") return res.status(403).json({ error: "teacher_experience_required" });
+    if (!options.teacherAuthorization || !options.oauthStateStore) return res.status(503).json({ error: "teacher_authorization_unavailable" });
+    const mcpUserId = await options.store.getLinkedMcpUserId(session.userId);
+    if (!mcpUserId) return res.status(409).json({ error: "classroom_connection_required", message: "Connect Classroom Desk in ChatGPT before requesting teacher access." });
+    const flow = createLoginState();
+    try {
+      await options.oauthStateStore.putEphemeral("teacher_consent", flow.state, { userId: session.userId, sessionId: session.id, mcpUserId, verifier: flow.verifier }, session.userId, flow.createdAt + WEBSITE_LOGIN_STATE_TTL_MS);
+      const url = await options.teacherAuthorization.begin(mcpUserId, flow.state, flow.verifier);
+      res.setHeader("Set-Cookie", loginCookie(options.secureCookies, flow.state));
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(303, url);
+    } catch (error) {
+      return res.status(error instanceof Error && error.message === "google_account_reconnect_required" ? 409 : 503).json({ error: error instanceof Error && error.message === "google_account_reconnect_required" ? "google_account_reconnect_required" : "teacher_authorization_unavailable" });
+    }
+  });
+  const teacherDataResponse = async (req: express.Request, res: express.Response, read: (websiteUserId: string) => Promise<unknown[]>) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = await currentSession(req.get("cookie"), options.store);
+    if (!session) return res.status(401).json({ error: "login_required" });
+    if (await options.store.dashboardPreference(session.userId) !== "teacher") return res.status(403).json({ error: "teacher_experience_required" });
+    if (!options.teacherData) return res.status(503).json({ error: "teacher_data_unavailable" });
+    try { res.setHeader("Cache-Control", "no-store"); return res.json({ data: await read(session.userId), gradebookWriteback: false }); }
+    catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      const detail = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : code;
+      if (code === "teacher_authorization_required" || detail === "teacher_authorization_required") return res.status(403).json({ error: "teacher_authorization_required", authorizationUrl: "/app/teacher" });
+      if (code === "teacher_course_access_required" || detail === "teacher_course_access_required") return res.status(403).json({ error: "teacher_course_access_required" });
+      return res.status(502).json({ error: "classroom_api_unavailable" });
+    }
+  };
+  app.get("/api/teacher/live/courses", (req, res) => teacherDataResponse(req, res, (userId) => options.teacherData!.courses(userId)));
+  app.get("/api/teacher/live/courses/:courseId/coursework", (req, res) => teacherDataResponse(req, res, (userId) => options.teacherData!.coursework(userId, req.params.courseId ?? "")));
+  app.get("/api/teacher/live/courses/:courseId/students", (req, res) => teacherDataResponse(req, res, (userId) => options.teacherData!.students(userId, req.params.courseId ?? "")));
+  app.get("/api/teacher/live/courses/:courseId/coursework/:courseWorkId/submissions", (req, res) => teacherDataResponse(req, res, (userId) => options.teacherData!.submissions(userId, req.params.courseId ?? "", req.params.courseWorkId ?? "")));
   app.get("/api/teacher-demo/packet", async (req, res) => {
     const session = await currentSession(req.get("cookie"), options.store);
     if (!session) return res.status(401).json({ error: "login_required" });
