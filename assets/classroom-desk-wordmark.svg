@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 96" role="img" aria-labelledby="title">
   <title id="title">Classroom Desk</title>
+  <rect width="390" height="96" rx="18" fill="#f8f7f3"/>
   <rect x="4" y="4" width="88" height="88" rx="18" fill="#e8f1eb"/>
   <g fill="none" stroke="#166c48" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M20 18h56a6 6 0 0 1 6 6v45H14V24a6 6 0 0 1 6-6Z"/>
