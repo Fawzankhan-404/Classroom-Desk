@@ -46,7 +46,7 @@ No material exploitable finding was confirmed in those areas. In particular, the
 ## Scanner results
 
 - Gitleaks `dir` scan: no leaks found in the candidate working tree (about 3.47 MB scanned).
-- Gitleaks `git` scan: no leaks found in the candidate's two-commit history (two commits scanned).
+- Gitleaks `git` scan: no leaks found in the commits reachable from the final publication `main` branch, including the review report.
 - `node tools/source-secret-check.mjs`: 107 files scanned, no findings. This is a pattern check, not proof that a secret cannot exist.
 - Semgrep `p/security-audit`: 22 rules over 104 TypeScript/JavaScript files; about 100% of parsed lines.
   - Seven HTTP findings are confined to `src/local-e2e.ts`, whose fixed origin is `http://127.0.0.1:8787` for loopback-only local integration tests.
