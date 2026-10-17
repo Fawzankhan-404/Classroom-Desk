@@ -400,11 +400,11 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
     await store.activateTrial(owner.id,"pay_refund",new Date(now.getTime()-3600000),900);
     const invalid={getPayment:async()=>captured("pay_other",{status:"refunded",refund_status:"full"})} as unknown as RazorpayClient;
     expect((await reconcileRecentPayments(db,store,invalid,new Date())).failed).toBe(1);
-    expect((await store.entitlement(owner.id)).allowed).toBe(true);
+    expect((await store.entitlement(owner.id,now)).allowed).toBe(true);
     const wrongAmount={getPayment:async()=>captured("pay_refund",{amount:800,status:"refunded",refund_status:"full"})} as unknown as RazorpayClient;
     expect((await reconcileRecentPayments(db,store,wrongAmount,new Date())).failed).toBe(1);
     const valid={getPayment:async()=>captured("pay_refund",{status:"refunded",refund_status:"full",amount_refunded:900})} as unknown as RazorpayClient;
     expect((await reconcileRecentPayments(db,store,valid,new Date())).refunded).toBe(1);
-    expect((await store.entitlement(owner.id)).allowed).toBe(false);
+    expect((await store.entitlement(owner.id,now)).allowed).toBe(false);
   });
 });
