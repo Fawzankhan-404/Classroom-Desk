@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/classroom-desk-wordmark.svg" width="370" alt="Classroom Desk">
+  <img src="assets/classroom-desk-main-logo.svg" width="370" alt="Classroom Desk">
 
   <p><strong>Your Google Classroom. Smarter with ChatGPT.</strong></p>
   <p>A free, open-source assistant for working with your own Google Classroom in ChatGPT.</p>
