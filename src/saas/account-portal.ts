@@ -87,7 +87,8 @@ function renderStudentDashboard(dashboard: StudentDashboardData): string {
     const href = classroomLink(item.assignmentUrl);
     const due = item.dueAt ? date(new Date(item.dueAt)) : "No due date";
     const flags = [item.missing ? "Missing" : "", item.late ? "Late" : ""].filter(Boolean).join(" · ");
-    return `<li><strong>${href ? `<a href="${html(href)}" target="_blank" rel="noopener noreferrer">${html(item.title)}</a>` : html(item.title)}</strong><span>${html(item.courseName)} · Due ${html(due)} · ${html(item.submissionState)}${flags ? ` · ${html(flags)}` : ""}</span>${item.instructions ? `<p>${html(item.instructions.slice(0, 500))}</p>` : ""}</li>`;
+    const submission = item.submissionState === "UNKNOWN" ? "Submission status unavailable" : item.submissionState;
+    return `<li><strong>${href ? `<a href="${html(href)}" target="_blank" rel="noopener noreferrer">${html(item.title)}</a>` : html(item.title)}</strong><span>${html(item.courseName)} · Due ${html(due)} · ${html(submission)}${flags ? ` · ${html(flags)}` : ""}</span>${item.instructions ? `<p>${html(item.instructions.slice(0, 500))}</p>` : ""}</li>`;
   }).join("")}</ul>` : dashboard.sync === "connected" ? "<p>No assignments were returned for the accessible courses.</p>" : "";
   const announcementItems = announcements.length ? `<ul class="dashboard-list">${announcements.map(item => `<li><strong>${html(item.courseName || "Course announcement")}</strong><p>${html(item.text || "")}</p></li>`).join("")}</ul>` : "<p>No announcements were returned.</p>";
   const materialItems = materials.length ? `<ul class="dashboard-list">${materials.map(item => `<li><strong>${html(item.title || "Untitled material")}</strong><span>${html(item.courseName || "")}</span>${item.description ? `<p>${html(item.description.slice(0, 500))}</p>` : ""}</li>`).join("")}</ul>` : "<p>No learning materials were returned.</p>";

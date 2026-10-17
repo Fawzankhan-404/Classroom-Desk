@@ -24,8 +24,8 @@ function submissionState(submission: classroom_v1.Schema$StudentSubmission | und
   return submission?.state ?? "ASSIGNED";
 }
 
-function assignmentFlags(work: classroom_v1.Schema$CourseWork, submission: classroom_v1.Schema$StudentSubmission | undefined, now: Date) {
-  const state = submissionState(submission);
+function assignmentFlags(work: classroom_v1.Schema$CourseWork, submission: classroom_v1.Schema$StudentSubmission | undefined, now: Date, submissionStatusAvailable = true) {
+  const state = submissionStatusAvailable ? submissionState(submission) : "UNKNOWN";
   const due = dueAt(work);
   const dueMs = due ? Date.parse(due) : Number.NaN;
   const submitted = state === "TURNED_IN" || state === "RETURNED";
@@ -33,15 +33,15 @@ function assignmentFlags(work: classroom_v1.Schema$CourseWork, submission: class
     state,
     dueAt: due,
     late: submission?.late === true,
-    missing: Number.isFinite(dueMs) && dueMs < now.getTime() && !submitted,
+    missing: submissionStatusAvailable && Number.isFinite(dueMs) && dueMs < now.getTime() && !submitted,
     submitted,
     returned: state === "RETURNED",
     reclaimed: state === "RECLAIMED" || state === "RECLAIMED_BY_STUDENT",
   };
 }
 
-function assignmentSummary(course: classroom_v1.Schema$Course, work: classroom_v1.Schema$CourseWork, submission: classroom_v1.Schema$StudentSubmission | undefined, now: Date) {
-  const flags = assignmentFlags(work, submission, now);
+function assignmentSummary(course: classroom_v1.Schema$Course, work: classroom_v1.Schema$CourseWork, submission: classroom_v1.Schema$StudentSubmission | undefined, now: Date, submissionStatusAvailable = true) {
+  const flags = assignmentFlags(work, submission, now, submissionStatusAvailable);
   return {
     courseId: course.id,
     courseName: cleanText(course.name, 300) ?? "Unnamed course",
@@ -92,7 +92,7 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
   if (input.courseQuery && selectedCourses.length === 0) throw new V2WorkflowError("course_not_found", "No accessible course matched that name.");
 
   const bundles = await Promise.all(selectedCourses.slice(0, 25).map(async (course) => {
-    if (!course.id) return { course, coursework: [], submissions: [], announcements: [], materials: [], topics: [], partial: true };
+    if (!course.id) return { course, coursework: [], submissions: [], announcements: [], materials: [], topics: [], partial: true, submissionStatusAvailable: false };
     // A Classroom account can be both a teacher and a student. Google may
     // reject one student-only collection (for example submissions on a
     // teacher-owned course) while allowing the rest. Keep the overview
@@ -107,15 +107,16 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
     const announcements = value<classroom_v1.Schema$Announcement>(2);
     const materials = value<classroom_v1.Schema$CourseWorkMaterial>(3);
     const topics = value<classroom_v1.Schema$Topic>(4);
-    return { course, coursework, submissions, announcements, materials, topics, partial: settled.some((result) => result.status === "rejected") };
+    return { course, coursework, submissions, announcements, materials, topics, partial: settled.some((result) => result.status === "rejected"), submissionStatusAvailable: settled[1]?.status === "fulfilled" };
   }));
 
-  const assignments = bundles.flatMap(({ course, coursework, submissions }) => {
+  const assignments = bundles.flatMap(({ course, coursework, submissions, submissionStatusAvailable }) => {
     const byWork = new Map(submissions.map((submission) => [submission.courseWorkId, submission]));
     return coursework.filter((work) => work.workType === "ASSIGNMENT" || !work.workType).filter((work) => queryMatches(work, course.name, input.searchQuery)).filter((work) => {
-      const flags = assignmentFlags(work, byWork.get(work.id ?? ""), now);
+      if (!submissionStatusAvailable && ["missing", "assigned", "submitted", "returned", "reclaimed"].includes(view)) return false;
+      const flags = assignmentFlags(work, byWork.get(work.id ?? ""), now, submissionStatusAvailable);
       return matchesWindow(view, dueAt(work), flags, now, days);
-    }).map((work) => assignmentSummary(course, work, byWork.get(work.id ?? ""), now));
+    }).map((work) => assignmentSummary(course, work, byWork.get(work.id ?? ""), now, submissionStatusAvailable));
   }).sort((a, b) => {
     if (a.dueAt && b.dueAt) return a.dueAt.localeCompare(b.dueAt);
     if (a.dueAt) return -1;
@@ -138,6 +139,7 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
     partialData: bundles.some((bundle) => bundle.partial),
     summary: {
       courses: selectedCourses.length,
+      submissionStatusAvailable: bundles.every((bundle) => bundle.submissionStatusAvailable),
       assignments: assignments.length,
       missing: assignments.filter((item) => item.missing).length,
       turnedIn: assignments.filter((item) => item.submissionState === "TURNED_IN").length,

@@ -242,8 +242,8 @@ export default {
                 return {
                   courses: overview.summary.courses,
                   assignmentsShown: assignments.length,
-                  upcomingAssignments: assignments.filter((item) => item.dueAt && Date.parse(item.dueAt) >= now && !["TURNED_IN", "RETURNED"].includes(item.submissionState)).length,
-                  missingAssignments: assignments.filter((item) => item.missing).length,
+                  upcomingAssignments: overview.summary.submissionStatusAvailable ? assignments.filter((item) => item.dueAt && Date.parse(item.dueAt) >= now && !["TURNED_IN", "RETURNED"].includes(item.submissionState)).length : null,
+                  missingAssignments: overview.summary.submissionStatusAvailable ? assignments.filter((item) => item.missing).length : null,
                   sync: "connected" as const,
                   partialData: overview.partialData,
                   records: {
