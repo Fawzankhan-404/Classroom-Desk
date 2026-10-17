@@ -92,7 +92,7 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
   if (input.courseQuery && selectedCourses.length === 0) throw new V2WorkflowError("course_not_found", "No accessible course matched that name.");
 
   const bundles = await Promise.all(selectedCourses.slice(0, 25).map(async (course) => {
-    if (!course.id) return { course, coursework: [], submissions: [], announcements: [], materials: [], topics: [] };
+    if (!course.id) return { course, coursework: [], submissions: [], announcements: [], materials: [], topics: [], partial: true };
     // A Classroom account can be both a teacher and a student. Google may
     // reject one student-only collection (for example submissions on a
     // teacher-owned course) while allowing the rest. Keep the overview
@@ -107,7 +107,7 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
     const announcements = value<classroom_v1.Schema$Announcement>(2);
     const materials = value<classroom_v1.Schema$CourseWorkMaterial>(3);
     const topics = value<classroom_v1.Schema$Topic>(4);
-    return { course, coursework, submissions, announcements, materials, topics };
+    return { course, coursework, submissions, announcements, materials, topics, partial: settled.some((result) => result.status === "rejected") };
   }));
 
   const assignments = bundles.flatMap(({ course, coursework, submissions }) => {
@@ -135,6 +135,7 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
   return {
     view,
     generatedAt: now.toISOString(),
+    partialData: bundles.some((bundle) => bundle.partial),
     summary: {
       courses: selectedCourses.length,
       assignments: assignments.length,

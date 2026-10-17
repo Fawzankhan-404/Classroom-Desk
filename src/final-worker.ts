@@ -8,6 +8,7 @@ import { createPublicApp, type RawBodyRequest } from "./public/http.js";
 import { PostgresPublicAuthStore } from "./public/postgres.js";
 import { D1SqlDatabase } from "./public/d1-database.js";
 import { createClients } from "./classroom.js";
+import { getStudentOverview } from "./v2/student.js";
 import { createV2CombinedServer } from "./v2/server.js";
 import { V2_BETA_SCOPES } from "./v2/scopes.js";
 import { GOOGLE_CANONICAL_CLASSROOM_SCOPES } from "./scopes.js";
@@ -231,24 +232,34 @@ export default {
             },
             loadClassroomDashboard: async (websiteUserId) => {
               const mcpUserId = await saasStore.getLinkedMcpUserId(websiteUserId);
-              if (!mcpUserId) return { courses: null, upcomingAssignments: null, missingAssignments: null, sync: "not_connected" as const };
+              const unavailable = (sync: "not_connected" | "reauthorization_required" | "permission_denied" | "api_error") => ({ courses: null, assignmentsShown: null, upcomingAssignments: null, missingAssignments: null, sync });
+              if (!mcpUserId) return unavailable("not_connected");
               try {
                 const auth = await publicProvider.googleAuthForUser(mcpUserId);
-                const classroom = createClients(auth).classroom;
-                const coursesResponse = await classroom.courses.list({ courseStates: ["ACTIVE"], pageSize: 100 });
-                const courses = coursesResponse.data.courses ?? [];
-                let upcomingAssignments = 0;
-                for (const course of courses.slice(0, 20)) {
-                  if (!course.id) continue;
-                  const work = await classroom.courses.courseWork.list({ courseId: course.id, courseWorkStates: ["PUBLISHED"], pageSize: 100 });
-                  for (const item of work.data.courseWork ?? []) {
-                    const due = item.dueDate;
-                    if (due && new Date(Date.UTC(due.year ?? 0, (due.month ?? 1) - 1, due.day ?? 1)).getTime() >= Date.now()) upcomingAssignments++;
-                  }
-                }
-                return { courses: courses.length, upcomingAssignments, missingAssignments: null, sync: "connected" as const };
-              } catch {
-                return { courses: null, upcomingAssignments: null, missingAssignments: null, sync: "reauthorization_required" as const };
+                const overview = await getStudentOverview({ ...createClients(auth), subject: mcpUserId }, { view: "all", limit: 50 });
+                const now = Date.now();
+                const assignments = overview.assignments;
+                return {
+                  courses: overview.summary.courses,
+                  assignmentsShown: assignments.length,
+                  upcomingAssignments: assignments.filter((item) => item.dueAt && Date.parse(item.dueAt) >= now && !["TURNED_IN", "RETURNED"].includes(item.submissionState)).length,
+                  missingAssignments: assignments.filter((item) => item.missing).length,
+                  sync: "connected" as const,
+                  partialData: overview.partialData,
+                  records: {
+                    courses: overview.courses,
+                    assignments: assignments.map((item) => ({ courseName: item.courseName, title: item.title, dueAt: item.dueAt, submissionState: item.submissionState, late: item.late, missing: item.missing, assignmentUrl: item.assignmentUrl, instructions: item.instructions })),
+                    announcements: overview.announcements.map((item) => ({ courseName: item.courseName, text: item.text, updatedAt: item.updatedAt })),
+                    courseMaterials: overview.courseMaterials.map((item) => ({ courseName: item.courseName, title: item.title, description: item.description, updatedAt: item.updatedAt })),
+                  },
+                };
+              } catch (error) {
+                const response = (error as { response?: { status?: number }; status?: number }).response;
+                const status = response?.status ?? (error as { status?: number }).status;
+                const message = error instanceof Error ? error.message : "";
+                if (status === 401 || /invalid_grant|refresh.token|grant unavailable/i.test(message)) return unavailable("reauthorization_required");
+                if (status === 403) return unavailable("permission_denied");
+                return unavailable("api_error");
               }
             },
           });

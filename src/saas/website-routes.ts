@@ -10,11 +10,11 @@ import type {ConnectionStatus} from "./connection-status.js";
 import { z } from "zod";
 import { createReport, rubric, submissions, type TeacherMark } from "../hackathon/domain.js";
 import { approveSyntheticDemoMark, createSyntheticDemoState, saveSyntheticDemoMark, syntheticDemoReport } from "../hackathon/demo-state.js";
-import { renderExperienceSelector, renderTeacherDashboard, type DashboardPreference } from "./account-portal.js";
+import { renderExperienceSelector, renderTeacherDashboard, type DashboardPreference, type StudentDashboardData } from "./account-portal.js";
 import { teacherDashboardScript } from "./teacher-dashboard-script.js";
 
 export interface WebsiteOAuthStateStore { putEphemeral(kind: string, key: string, value: unknown, owner: string, expiresAt: number): Promise<void>; takeEphemeral<T>(kind: string, key: string): Promise<T | undefined>; }
-export interface WebsiteRouteOptions { store: SaaSStore; oauth?: WebsiteOAuthConfig; oauthStateStore?: WebsiteOAuthStateStore; secureCookies: boolean; razorpay?: RazorpayClient; razorpayKeyId?: string; razorpayKeySecret?: string; razorpayPlanIds?: { student?: string; teacher?: string }; billingEnabled?: boolean; billingAllowlistUuids?: ReadonlySet<string>; teacherFeaturesEnabled?: boolean; referralRewardsEnabled?: boolean; loadConnectionStatus?: (websiteUserId:string)=>Promise<ConnectionStatus>; loadMcpStatus?: (websiteUserId:string)=>Promise<{ state: string; message: string; plan: string | null; expiresAt: string | null; linked: boolean }>; loadClassroomDashboard?: (websiteUserId: string) => Promise<{ courses: number | null; upcomingAssignments: number | null; missingAssignments: number | null; sync: "connected" | "reauthorization_required" | "not_connected" }>; }
+export interface WebsiteRouteOptions { store: SaaSStore; oauth?: WebsiteOAuthConfig; oauthStateStore?: WebsiteOAuthStateStore; secureCookies: boolean; razorpay?: RazorpayClient; razorpayKeyId?: string; razorpayKeySecret?: string; razorpayPlanIds?: { student?: string; teacher?: string }; billingEnabled?: boolean; billingAllowlistUuids?: ReadonlySet<string>; teacherFeaturesEnabled?: boolean; referralRewardsEnabled?: boolean; loadConnectionStatus?: (websiteUserId:string)=>Promise<ConnectionStatus>; loadMcpStatus?: (websiteUserId:string)=>Promise<{ state: string; message: string; plan: string | null; expiresAt: string | null; linked: boolean }>; loadClassroomDashboard?: (websiteUserId: string) => Promise<StudentDashboardData>; }
 
 const WEBSITE_LOGIN_STATE_KIND = "website_login";
 const WEBSITE_LOGIN_STATE_OWNER = "website-login";
@@ -175,7 +175,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
     const overview=await options.store.accountOverview(res.locals.accountUser);
     const connectionStatus=overview.linked?(options.loadConnectionStatus?await options.loadConnectionStatus(overview.user.id).catch(()=>'unavailable' as const):'unavailable'):'not_linked';
     const mcpStatus=overview.linked?(options.loadMcpStatus?await options.loadMcpStatus(overview.user.id).catch(()=>({state:"STATUS_UNAVAILABLE",message:"Access status could not be checked right now.",plan:null,expiresAt:null,linked:true})):{state:"STATUS_UNAVAILABLE",message:"Access status could not be checked right now.",plan:null,expiresAt:null,linked:true}):undefined;
-    const dashboard=options.loadClassroomDashboard?await options.loadClassroomDashboard(overview.user.id).catch(()=>({courses:null,upcomingAssignments:null,missingAssignments:null,sync:"reauthorization_required" as const})):undefined;
+    const dashboard=options.loadClassroomDashboard?await options.loadClassroomDashboard(overview.user.id).catch(()=>({courses:null,assignmentsShown:null,upcomingAssignments:null,missingAssignments:null,sync:"api_error" as const})):undefined;
     return res.type("html").send(renderProfile({...overview,connectionStatus,mcpStatus,dashboard}));
   });
   app.get("/app/experience", async (_req, res) => {

@@ -190,7 +190,7 @@ describe("Account portal with isolated PostgreSQL persistence", () => {
        const otherPage=await fetch(origin+"/app",{headers:{cookie:`cd_session=${otherSession.token}`},redirect:"manual"});expect(otherPage.status).toBe(200);expect(await otherPage.text()).toContain("Choose experience");
        const otherApi=await fetch(origin+"/api/teacher-demo/packet",{headers:{cookie:`cd_session=${otherSession.token}`}});expect(otherApi.status).toBe(403);
       const switchStudent=await fetch(origin+"/api/dashboard/preference",{method:"POST",headers:{...teacherHeaders,"content-type":"application/x-www-form-urlencoded"},body:"dashboard=student",redirect:"manual"});expect(switchStudent.status).toBe(303);
-       const studentDashboard=await fetch(origin+"/app",{headers:studentHeaders});expect(studentDashboard.status).toBe(200);const studentHtml=await studentDashboard.text();expect(studentHtml).toContain("My Classroom overview");expect(studentHtml).toContain("3");expect(studentHtml).toContain("Upcoming assignments");expect(studentHtml).toContain("Not available");
+       const studentDashboard=await fetch(origin+"/app",{headers:studentHeaders});expect(studentDashboard.status).toBe(200);const studentHtml=await studentDashboard.text();expect(studentHtml).toContain("My Classroom");expect(studentHtml).toContain("3");expect(studentHtml).toContain("Upcoming assignments");expect(studentHtml).toContain("Assignments shown");expect(studentHtml).not.toContain("undefined");
       expect((await store.getUser(student.id))?.role).toBe("STUDENT");expect(realConnectionChecks).toBe(0);
     }finally{await new Promise<void>(r=>server.close(()=>r()));}
   });
