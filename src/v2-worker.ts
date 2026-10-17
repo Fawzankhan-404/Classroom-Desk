@@ -16,6 +16,7 @@ import { GoogleDriveAttachmentReader } from "./v2/attachment-content.js";
 import { buildOnePickAuthorizationUrl, parseOnePickCallback, DRIVE_FILE_SCOPE } from "./v2/picker.js";
 import { buildPickerUrl } from "./v2/urls.js";
 import { discoverAttachments } from "./v2/attachments.js";
+import { requestWorkerPdf, WORKER_PDF_TRUSTED_HOSTS } from "./v2/worker-pdf.js";
 
 type Bindings = {
   V2_HYPERDRIVE?: { connectionString: string };
@@ -76,7 +77,7 @@ export default {
             oauth.setCredentials(tokens as never);
             return new GoogleDriveAttachmentReader(createClients(oauth).drive).read(attachment);
           } } as GoogleDriveAttachmentReader;
-          return createV2BetaServer({ ...clients, subject: userId, uploadPdf: async (context, name, bytes) => {
+          return createV2BetaServer({ ...clients, subject: userId, downloadOptions: { workerRequest: requestWorkerPdf, trustedHosts: WORKER_PDF_TRUSTED_HOSTS }, uploadPdf: async (context, name, bytes) => {
             const work = (await clients.classroom.courses.courseWork.get({ courseId: context.courseId, id: context.courseWorkId })).data;
             const driveIds = discoverAttachments(work.materials).filter((item) => item.kind === "drive_file" && item.driveFileId).map((item) => item.driveFileId!);
             let accessToken: string | undefined;

@@ -6,12 +6,18 @@ const MAX_REDIRECTS = 3;
 
 export class V2FileError extends Error { constructor(public readonly code: string, message: string) { super(message); } }
 
-async function validateUrl(raw: string, lookup: (host: string) => Promise<ResolvedAddress[]>): Promise<{ url: URL; address: ResolvedAddress }> {
+async function validateUrl(raw: string, lookup: (host: string) => Promise<ResolvedAddress[]>, trustedHosts?: readonly string[]): Promise<{ url: URL; address?: ResolvedAddress }> {
   let url: URL;
   try { url = new URL(raw); } catch { throw new V2FileError("invalid_url", "The generated file URL is invalid."); }
   if (url.protocol !== "https:" || url.username || url.password || !url.hostname || url.hash || (url.port && url.port !== "443")) throw new V2FileError("unsafe_url", "Only public HTTPS file URLs on port 443 are accepted.");
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host.endsWith(".localhost") || (net.isIP(host) !== 0 && isDisallowedAddress(host))) throw new V2FileError("unsafe_url", "The generated file URL points to a private or local destination.");
+  if (host === "localhost" || host.endsWith(".localhost") || (net.isIP(host) !== 0 && (isDisallowedAddress(host) || trustedHosts !== undefined))) throw new V2FileError("unsafe_url", "The generated file URL points to a private or local destination.");
+  if (trustedHosts !== undefined) {
+    if (!trustedHosts.includes(host)) throw new V2FileError("unsafe_url", "The generated file URL is not hosted by an approved file provider.");
+    // The Worker fetch API resolves the host itself and does not expose an IP
+    // pin. The caller must supply an exact provider-owned hostname allowlist.
+    return { url };
+  }
   try {
     const records = await lookup(host);
     if (!records.length || records.some((record) => isDisallowedAddress(record.address))) throw new V2FileError("unsafe_url", "The generated file URL points to a private or local destination.");
@@ -29,10 +35,11 @@ function safeFilename(input: string | undefined): string {
 export type V2File = { download_url: string; file_id: string; mime_type?: string; file_name?: string };
 export type DownloadedPdf = { buffer: Buffer; filename: string; sourceFileId?: string };
 
-export async function downloadPdf(file: V2File, options: { fetchPinned?: PinnedRequest; lookup?: (host: string) => Promise<ResolvedAddress[]>; timeoutMs?: number; maxBytes?: number } = {}): Promise<DownloadedPdf> {
+export async function downloadPdf(file: V2File, options: { fetchPinned?: PinnedRequest; workerRequest?: (url: URL, signal: AbortSignal) => Promise<Response>; trustedHosts?: readonly string[]; lookup?: (host: string) => Promise<ResolvedAddress[]>; timeoutMs?: number; maxBytes?: number } = {}): Promise<DownloadedPdf> {
   if (!file || typeof file.download_url !== "string") throw new V2FileError("missing_file", "A generated PDF file is required.");
   if (file.mime_type && file.mime_type !== "application/pdf") throw new V2FileError("invalid_mime", "Only application/pdf files are accepted.");
-  const fetchPinned = options.fetchPinned ?? requestPinnedHttps; const lookup = options.lookup ?? resolvePublicAddresses; const maxBytes = options.maxBytes ?? MAX_V2_PDF_BYTES; const timeoutMs = options.timeoutMs ?? 15_000;
+  if ((options.workerRequest === undefined) !== (options.trustedHosts === undefined)) throw new V2FileError("unsafe_transport", "The PDF download transport is not safely configured.");
+  const fetchPinned = options.fetchPinned ?? requestPinnedHttps; const workerRequest = options.workerRequest; const trustedHosts = options.trustedHosts; const lookup = options.lookup ?? resolvePublicAddresses; const maxBytes = options.maxBytes ?? MAX_V2_PDF_BYTES; const timeoutMs = options.timeoutMs ?? 15_000;
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
@@ -43,22 +50,25 @@ export async function downloadPdf(file: V2File, options: { fetchPinned?: PinnedR
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let complete = false;
   try {
-    let current = await withinDeadline(validateUrl(file.download_url, lookup));
+    let current = await withinDeadline(validateUrl(file.download_url, lookup, trustedHosts));
     for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
-      response = await withinDeadline(fetchPinned(current.url, current.address, controller.signal, maxBytes));
-      if (response.status >= 300 && response.status < 400) {
+      const received = await withinDeadline(workerRequest
+        ? workerRequest(current.url, controller.signal)
+        : current.address ? fetchPinned(current.url, current.address, controller.signal, maxBytes) : Promise.reject(new V2FileError("unsafe_transport", "The PDF download transport is not safely configured.")));
+      response = received;
+      if (received.status >= 300 && received.status < 400) {
         if (redirect === MAX_REDIRECTS) throw new V2FileError("too_many_redirects", "The generated PDF URL redirected too many times.");
-        const location = response.headers.get("location"); if (!location) throw new V2FileError("invalid_redirect", "The generated PDF redirect was invalid.");
-        void response.body?.cancel().catch(() => {});
+        const location = received.headers.get("location"); if (!location) throw new V2FileError("invalid_redirect", "The generated PDF redirect was invalid.");
+        void received.body?.cancel().catch(() => {});
         response = undefined;
-        current = await withinDeadline(validateUrl(new URL(location, current.url).toString(), lookup)); continue;
+        current = await withinDeadline(validateUrl(new URL(location, current.url).toString(), lookup, trustedHosts)); continue;
       }
-      if (!response.ok) throw new V2FileError("download_failed", "The generated PDF could not be downloaded.");
-      const contentType = ((response.headers.get("content-type") || "").split(";", 1)[0] ?? "").trim().toLowerCase();
+      if (!received.ok) throw new V2FileError("download_failed", "The generated PDF could not be downloaded.");
+      const contentType = ((received.headers.get("content-type") || "").split(";", 1)[0] ?? "").trim().toLowerCase();
       if (contentType !== "application/pdf") throw new V2FileError("invalid_mime", "The generated file is not an application/pdf.");
-      const declared = Number(response.headers.get("content-length") || 0); if (declared > maxBytes) throw new V2FileError("too_large", "The generated PDF is too large.");
-      if (!response.body) throw new V2FileError("download_failed", "The generated PDF response was empty.");
-      reader = response.body.getReader(); const chunks: Uint8Array[] = []; let total = 0;
+      const declared = Number(received.headers.get("content-length") || 0); if (declared > maxBytes) throw new V2FileError("too_large", "The generated PDF is too large.");
+      if (!received.body) throw new V2FileError("download_failed", "The generated PDF response was empty.");
+      reader = received.body.getReader(); const chunks: Uint8Array[] = []; let total = 0;
       while (true) {
         const part = await withinDeadline(reader.read());
         if (part.done) { complete = true; break; }

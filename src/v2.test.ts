@@ -5,6 +5,7 @@ import { downloadPdf, V2FileError } from "./v2/files.js";
 import { isDisallowedAddress } from "./v2/pinned-https.js";
 import { EventEmitter } from "node:events";
 import { createPinnedHttpsRequester } from "./v2/pinned-https.js";
+import { createWorkerPdfRequester, WORKER_PDF_TRUSTED_HOSTS } from "./v2/worker-pdf.js";
 import { getAssignmentContext, saveAssignmentPdf, verifySubmission } from "./v2/workflow.js";
 import { V2_BETA_SCOPES } from "./v2/scopes.js";
 import { attachmentMetadata, getAssignmentWorkspace, getStudentOverview, resolveStudentAssignment } from "./v2/student.js";
@@ -55,6 +56,26 @@ describe("V2 PDF handoff", () => {
     expect(socket.write).toHaveBeenCalledWith(expect.stringContaining("GET /assignment.pdf?sig=redacted HTTP/1.1"));
     expect(socket.write).toHaveBeenCalledWith(expect.stringContaining("Host: files.example.test"));
     expect(await result.text()).toBe("%PDF-1.4");
+  });
+  it("uses Worker fetch only for the exact trusted file host and checks redirects manually", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: "/download/temporary" } }))
+      .mockResolvedValueOnce(response("%PDF-1.7\nsynthetic"));
+    const workerRequest = createWorkerPdfRequester(fetcher as typeof fetch);
+    const lookupSpy = vi.fn(lookup);
+    const result = await downloadPdf({ file_id: "test-file", download_url: "https://files.oaiusercontent.com/file/test" }, { workerRequest, trustedHosts: WORKER_PDF_TRUSTED_HOSTS, lookup: lookupSpy });
+    expect(result.buffer.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(lookupSpy).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ redirect: "manual", credentials: "omit" });
+    expect(fetcher.mock.calls[1]?.[0].toString()).toBe("https://files.oaiusercontent.com/download/temporary");
+  });
+  it("rejects untrusted, private and cross-host Worker redirects before another fetch", async () => {
+    for (const location of ["https://attacker.example/file.pdf", "https://127.0.0.1/admin", "https://169.254.169.254/latest/meta-data"]) {
+      const fetcher = vi.fn(async () => new Response(null, { status: 302, headers: { location } }));
+      await expect(downloadPdf({ file_id: "test-file", download_url: "https://files.oaiusercontent.com/file/test" }, { workerRequest: createWorkerPdfRequester(fetcher as typeof fetch), trustedHosts: WORKER_PDF_TRUSTED_HOSTS })).rejects.toMatchObject({ code: "unsafe_url" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    }
   });
   it("keeps the V2 scope delta isolated", () => { expect(V2_BETA_SCOPES).toContain("https://www.googleapis.com/auth/drive.file"); expect(V2_BETA_SCOPES).not.toContain("https://www.googleapis.com/auth/drive.readonly"); });
 });
