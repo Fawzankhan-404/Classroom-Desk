@@ -1,0 +1,1 @@
+ALTER TABLE classroom_desk_entitlement_grants ADD COLUMN last_operation_id TEXT;

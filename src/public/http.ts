@@ -1,0 +1,642 @@
+import crypto from "node:crypto";
+import { isIP } from "node:net";
+import express, { type NextFunction, type Request, type Response } from "express";
+import { ipKeyGenerator, rateLimit } from "express-rate-limit";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { createClients } from "../classroom.js";
+import type { ClassroomClients } from "../classroom.js";
+import { OAuth2Client } from "googleapis-common";
+import { createServer } from "../server.js";
+import { MCP_OFFLINE_SCOPE, MCP_SCOPE, PublicOAuthProvider } from "./oauth.js";
+import type { PublicAuthStore } from "./store.js";
+import type { RuntimeConfig } from "./config.js";
+import { logHttp } from "./log.js";
+import { faviconSvg, logoSvg } from "./favicon-asset.js";
+import { socialPreviewPngBase64 } from "./social-preview-asset.js";
+import { accessGuidance, MCP_ONBOARDING_TOOLS, registerMcpOnboarding } from "../saas/mcp-access.js";
+import { sessionCookie } from "../saas/sessions.js";
+
+type Session = { userId: string; transport: StreamableHTTPServerTransport; server: McpServer };
+type AuthenticatedRequest = Request & { auth?: AuthInfo };
+export type RawBodyRequest = Request & { rawBody?: Buffer };
+type McpFactory = (auth: OAuth2Client, userId: string) => Promise<McpServer>;
+type PublicAppOptions = { mcpFactory?: McpFactory; resourceName?: string; registerRoutes?: (app: express.Express) => void; entitlementCheck?: (userId: string) => Promise<{ allowed: boolean; reason: string }>; accountIdentity?: (userId: string) => Promise<{ id: string; displayName: string } | null>; publicOnly?: boolean; internalDelegationSecret?: string };
+
+export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, provider = new PublicOAuthProvider(store, config), readyCheck?: () => Promise<void>, clientsFactory: (auth: OAuth2Client) => ClassroomClients = createClients, options: PublicAppOptions = {}) {
+  const app = express();
+  const workerKeyGenerator = config.workerClientIp ? (req: Request) => {
+    const address = req.get("cf-connecting-ip") ?? "";
+    return isIP(address) ? ipKeyGenerator(address, 56) : "missing-cloudflare-ip";
+  } : undefined;
+  const workerOAuthLimit = workerKeyGenerator ? { rateLimit: { keyGenerator: workerKeyGenerator } } : undefined;
+  const sessions = new Map<string, Session>();
+  app.disable("x-powered-by");
+  app.set("trust proxy", config.production ? 1 : false);
+  app.use((req, res, next) => {
+    const started = Date.now();
+    res.once("finish", () => logHttp(req.method, req.path, res.statusCode, Date.now() - started));
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Cache-Control", "no-store, no-transform");
+    if (config.production) res.setHeader("Strict-Transport-Security", "max-age=31536000");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+    if (req.method === "GET" && ["/", "/pricing", "/connect", "/privacy", "/terms", "/refunds", "/support"].includes(req.path)) res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, no-transform");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; img-src 'self' https://d2ol7oe51mr4n9.cloudfront.net; media-src https://d8j0ntlcm91z4.cloudfront.net; style-src 'unsafe-inline'; script-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    const suppliedInternalToken = req.get("x-classroom-internal-token") ?? "";
+    const expectedInternalToken = options.internalDelegationSecret ?? "";
+    const trustedInternal = expectedInternalToken.length > 0 && suppliedInternalToken.length === expectedInternalToken.length && crypto.timingSafeEqual(Buffer.from(suppliedInternalToken), Buffer.from(expectedInternalToken));
+    if (trustedInternal) {
+      req.headers.host = config.origin.host;
+    }
+    let host = "";
+    try { host = new URL(`http://${req.get("host") ?? ""}`).hostname; } catch { /* Invalid Host is rejected below. */ }
+    if (!trustedInternal && req.path !== "/health" && req.path !== "/ready" && host !== config.origin.hostname) {
+      console.log(JSON.stringify({ event: "internal_trust_rejected", path: req.path, headerPresent: suppliedInternalToken.length > 0, lengthMatched: expectedInternalToken.length > 0 && suppliedInternalToken.length === expectedInternalToken.length }));
+      return res.status(400).json({ error: "invalid_host" });
+    }
+    if (req.get("origin") && req.get("origin") !== config.origin.origin) return res.status(403).json({ error: "invalid_origin" });
+    next();
+  });
+  app.use(rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: "draft-8", legacyHeaders: false, keyGenerator: workerKeyGenerator,
+    handler: (_req, res) => res.status(429).json({ error: "rate_limited", message: "Too many requests. Try again later." }),
+  }));
+  app.use(express.urlencoded({ extended: false, limit: "4kb" }));
+  app.use(express.json({ limit: "64kb", verify: (req, _res, buffer) => { (req as RawBodyRequest).rawBody = Buffer.from(buffer); } }));
+
+  const metadataUrl = new URL("/.well-known/oauth-protected-resource/mcp", config.origin).toString();
+  app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
+  app.get("/pricing", (_req, res) => res.redirect(308, "/"));
+  const readyLimit = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false, keyGenerator: workerKeyGenerator,
+    handler: (_req, res) => res.status(429).json({ error: "rate_limited" }),
+  });
+  app.get("/ready", readyLimit, async (_req, res) => {
+    try { await readyCheck?.(); return res.status(200).json({ status: "ready" }); }
+    catch { return res.status(503).json({ status: "unavailable" }); }
+  });
+  const operator = escapeHtml(config.operatorName ?? "Jarvis404");
+  const support = escapeHtml(config.supportEmail ?? "support@example.invalid");
+  const mailto = `mailto:${support}`;
+  const chatgptPluginUrl = config.chatgptPluginUrl ? escapeHtml(config.chatgptPluginUrl) : undefined;
+  app.get("/assets/classroom-desk-favicon.svg", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.type("svg").send(faviconSvg);
+  });
+  app.get("/assets/classroom-desk-logo.svg", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.type("svg").send(logoSvg);
+  });
+  app.get("/assets/classroom-desk-social-card.png", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.type("png").send(Buffer.from(socialPreviewPngBase64, "base64"));
+  });
+  app.get("/assets/connect.js", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=86400, no-transform");
+    res.type("js").send(connectScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript());
+  });
+  app.get("/", (_req, res) => res.type("html").send(page("Classroom Desk", "home", operator, support, config.origin, homeBody(config.stageMedia ?? {}))));
+  app.get("/connect", (_req, res) => res.type("html").send(page("Connect to ChatGPT", "connect", operator, support, config.origin, connectBody(config.mcpResource.href))));
+  app.get("/connect", (_req, res) => res.type("html").send(page("Connect to ChatGPT", "connect", operator, support, config.origin, `
+    <article class="connect-card installation-guide">
+      <div class="hero-logo" aria-label="Classroom Desk logo">${logoSvg}</div>
+      <p class="eyebrow">MCP installation wizard</p>
+      <h1>Set up Classroom Desk in ChatGPT.</h1>
+      <p>ChatGPT controls the connection screen. This guide shows what to expect without attempting cross-origin automation or claiming that setup has completed.</p>
+      <div class="wizard-shell" data-wizard>
+        <ol class="wizard-progress" aria-label="Installation progress"><li class="active" data-wizard-dot aria-current="step">Open Plugins</li><li data-wizard-dot aria-current="false">Add custom MCP</li><li data-wizard-dot aria-current="false">Configure</li><li data-wizard-dot aria-current="false">Authorize</li></ol>
+        <div class="wizard-panel">
+          <section data-wizard-step><span class="wizard-kicker">Step 1</span><h2>Open ChatGPT Plugins</h2><div class="chatgpt-preview"><header><strong>Plugins</strong><button type="button" disabled>Add</button></header><label><span aria-hidden="true">⌕</span><input aria-label="Search plugins example" placeholder="Search plugins" disabled></label><ul><li><span class="plugin-glyph">C</span><span><strong>Classroom Desk</strong><small>Google Classroom workspace</small></span></li><li><span class="plugin-glyph">N</span><span><strong>Notes</strong><small>Organize your ideas</small></span></li></ul><div class="preview-highlight">The real ChatGPT screen controls this action.</div></div><p>Availability depends on your ChatGPT plan and workspace. Use the button below to open the official interface in a new tab.</p></section>
+          <section data-wizard-step hidden><span class="wizard-kicker">Step 2</span><h2>Add a custom MCP connection</h2><div class="dropdown-preview"><span>Connection type</span><strong>Custom MCP server <b>⌄</b></strong><small>This is an illustrative preview. The actual dropdown appears inside ChatGPT.</small></div><p>Choose the custom connection option only if it is offered by your current ChatGPT workspace. Do not paste credentials into this guide.</p></section>
+          <section data-wizard-step hidden><span class="wizard-kicker">Step 3</span><h2>Configure Classroom Desk</h2><dl class="config-preview"><div><dt>Name</dt><dd>Classroom Desk</dd></div><div><dt>Description</dt><dd>Connect Google Classroom to ChatGPT to work with courses, assignments, deadlines, and authorized materials.</dd></div><div><dt>Connection</dt><dd><code>https://classroom.jarvis404.com/mcp</code></dd></div><div><dt>Authentication</dt><dd>OAuth</dd></div></dl><div class="mcp-url-row"><label for="mcp-url">Canonical MCP URL</label><input id="mcp-url" data-mcp-url readonly value="https://classroom.jarvis404.com/mcp"><button class="button" type="button" data-copy-mcp="https://classroom.jarvis404.com/mcp">Copy MCP URL</button></div></section>
+          <section data-wizard-step hidden><span class="wizard-kicker">Step 4</span><h2>Trust, then authorize</h2><div class="trust-preview"><span aria-hidden="true">✓</span><div><strong>Trust this custom MCP server?</strong><p>Review the server name and URL before continuing. Google will ask separately for Classroom permissions.</p></div></div><p class="wizard-path">ChatGPT <b>→</b> Classroom Desk <b>→</b> Google OAuth <b>→</b> Connected</p><p>Trusting a server does not grant paid access, and this page cannot report a successful connection. Finish the authorization in ChatGPT, then return here if you need the website dashboard.</p></section>
+        </div>
+        <div class="wizard-actions"><button class="button secondary" type="button" data-wizard-back hidden>Back</button><button class="button" type="button" data-wizard-next>Next step</button></div>
+      </div>
+      <div class="guide-actions"><a class="button secondary" href="/login">Sign in to Classroom Desk</a><a class="button secondary" href="/start">Get started</a><a class="text-link" href="/app">Open dashboard</a></div>
+      <details class="troubleshooting"><summary>Connection troubleshooting</summary><ul><li>If no Plugins, connector, or custom MCP option appears, your plan or workspace may not support manual connections.</li><li>If Google authorization fails, restart the connection from ChatGPT and use the same Google account that owns the Classroom access.</li><li>If tools return an authorization error, reconnect Google Classroom; website sign-in and Classroom authorization are separate.</li><li>For help, contact <a href="mailto:${mailto}">${support}</a> without sending passwords, OAuth codes, or private Classroom content.</li></ul></details>
+    </article>
+    <script src="/assets/connect.js" defer></script>
+  `)));
+  app.get("/privacy", (_req, res) => res.type("html").send(page("Privacy policy", "privacy", operator, support, config.origin, `
+    <article class="doc">
+      <h1>Privacy policy</h1>
+      <p class="updated">Last updated: 3 October 2026.</p>
+      <p>Classroom Desk is operated by ${operator}. Contact: <a href="${mailto}">${support}</a>.</p>
+      <h2>Data accessed and used</h2>
+      <p>With your permission, this service reads your Google Classroom courses, announcements, coursework, course materials metadata, topics, and your own submissions and grades to answer requests from your connected MCP client. It requests six Classroom read-only permissions and no Google Drive, Gmail, or Google write permission.</p>
+      <p>Teacher attachment content is not read by default. When a supported assignment file is needed, you explicitly authorize that exact file through Google’s file picker. Classroom Desk does not browse arbitrary Drive files.</p>
+      <h2>Authentication and token handling</h2>
+      <p>Google handles sign-in. This service never receives your Google password. In production, authorization records include an internal connection identifier, encrypted Google refresh grant, OAuth client and token records, and timestamps needed to maintain your connection.</p>
+      <h2>Storage, sharing, and infrastructure</h2>
+      <p>Authorization records are stored in encrypted PostgreSQL-backed production storage. We do not persist course content or attachment bodies as an application cache. Requested Classroom information is returned to your connected MCP client, which may process it under that client's own terms and privacy policy. Google processes sign-in and Classroom API requests. Cloudflare and the database provider process hosting and storage operations needed to run the service.</p>
+      <p>We do not sell Classroom data or use it for advertising. If you explicitly ask Classroom Desk to save a generated assignment PDF, it uploads only that confirmed file to your connected Drive. You then attach and submit it yourself in Google Classroom.</p>
+      <h2>Google API Services Limited Use</h2>
+      <p>Classroom Desk uses information received from Google APIs only to provide the user-requested Classroom features described here and will follow the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>, including its Limited Use requirements. When you ask ChatGPT to answer from your Classroom, the requested result is sent to your connected ChatGPT/MCP client so it can answer your request. Classroom Desk does not use Classroom data for advertising or to train generalized models.</p>
+      <h2>Retention, disconnect, and deletion</h2>
+      <p>Authorization records remain while the connection is active and are deleted when you disconnect. Short-lived OAuth attempts expire, MCP access tokens expire after one hour, and MCP refresh tokens after 30 days. Disconnect attempts Google revocation and removes this service's local grant and MCP tokens. You can also revoke access in your Google Account.</p>
+      <p>To request help or deletion, contact ${support}. Minimal operational logs contain route category, status, and duration, without tokens, request bodies, or Classroom content.</p>
+    </article>
+  `)));
+  app.get("/terms", (_req, res) => res.type("html").send(page("Terms of service", "terms", operator, support, config.origin, `
+    <article class="doc">
+      <h1>Terms of service</h1>
+      <p class="updated">Last updated: 3 October 2026.</p>
+      <p>This service is operated by ${operator}. You must use an account you are authorized to access and comply with your school and Google’s applicable rules.</p>
+      <h2>What the service does</h2>
+      <p>Classroom Desk helps a compatible MCP client answer questions about your Google Classroom courses, announcements, coursework, materials, topics, deadlines, and your own submissions. You may explicitly authorize a supported teacher attachment, save a generated PDF to Drive after confirmation, and ask Classroom Desk to verify the actual Classroom submission state.</p>
+      <h2>Limits</h2>
+      <p>The service may be unavailable when Google, a school administrator, the connected client, or the hosting provider limits access. Classroom information may be incomplete or delayed; check the original Classroom item before relying on a deadline or grade. Classroom Desk does not submit, edit, grade, or change Classroom content. Drive saves require explicit confirmation, and Classroom submission remains your action.</p>
+      <h2>Copyright and trademarks</h2>
+      <p>© 2026 ${operator}. Original website text, design, and service materials are reserved by the operator. Your Classroom content remains subject to the rights of its respective owners; using this service does not transfer ownership of that content.</p>
+      <p>Google Classroom is a trademark of Google LLC. ChatGPT and OpenAI are trademarks of OpenAI. These names describe the services this independent integration connects with. Google and OpenAI do not operate or endorse Classroom Desk.</p>
+      <h2>Support</h2>
+      <p>For support or account disconnection help, contact <a href="${mailto}">${support}</a>. Do not send OAuth tokens, passwords, or private Classroom content.</p>
+    </article>
+  `)));
+  app.get("/support", (_req, res) => res.type("html").send(page("Support", "support", operator, support, config.origin, `
+    <article class="doc support-card">
+      <h1>Support</h1>
+      <p class="updated">Last updated: 3 October 2026.</p>
+      <p>For connection problems, privacy questions, or deletion requests, contact <a href="${mailto}">${support}</a>.</p>
+      <div class="panel">
+        <h2>Include</h2>
+        <ul><li>What you were trying to do</li><li>The page or ChatGPT step where the problem appeared</li><li>Any visible error message, without private Classroom content</li></ul>
+      </div>
+      <p>Do not send OAuth tokens, passwords, authorization codes, screenshots containing private Classroom data, or Google account secrets.</p>
+    </article>
+  `)));
+  app.get("/refunds", (_req, res) => res.type("html").send(page("Refund and cancellation policy", "refunds", operator, support, config.origin, `
+    <article class="doc">
+      <h1>Existing payment support</h1>
+      <p class="updated">Last updated: 9 October 2026.</p>
+      <p>Classroom Desk is free and new payment enrollment is disabled. This page is for questions about historical transactions and any existing recurring subscription.</p>
+      <h2>Historical transactions</h2>
+      <p>Existing payment and trial records are preserved for accounting and support. They do not control access to the free Classroom Desk experience.</p>
+      <h2>Existing recurring subscriptions</h2>
+      <p>An existing recurring subscription may continue until its owner cancels it. Sign in and use the existing subscription page to request cancellation, or contact support if you cannot access that page.</p>
+      <h2>Refunds and disputes</h2>
+      <p>Refund requests are reviewed against the provider transaction, payment state, access period, and applicable merchant policy. Verified refund or chargeback events can change billing state and effective access. Do not send card details, passwords, OAuth tokens, or private Classroom content.</p>
+      <h2>Contact</h2>
+      <p>For billing questions or refund requests, contact <a href="${mailto}">${support}</a> with the provider payment reference and account email only.</p>
+    </article>
+  `)));
+  if (options.publicOnly) return { app, provider, sessions, closeSessions: () => sessions.clear() };
+  app.use((req, _res, next) => {
+    if (req.path === "/token" && req.method === "POST") {
+      const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
+      console.log(JSON.stringify({ event: "mcp_token_input", contentType: req.get("content-type")?.split(";")[0] ?? "", grantType: typeof body.grant_type === "string" ? body.grant_type : "missing", hasCode: typeof body.code === "string", hasRefreshToken: typeof body.refresh_token === "string", hasClientId: typeof body.client_id === "string", hasRedirectUri: typeof body.redirect_uri === "string", hasCodeVerifier: typeof body.code_verifier === "string", hasResource: typeof body.resource === "string" }));
+    }
+    next();
+  });
+  // Internal account/policy routes must precede the MCP router. The SDK router
+  // owns protocol endpoints and may emit a generic 400 for unknown requests.
+  // Keeping these trusted service-binding routes first preserves the public
+  // MCP surface while allowing canonical policy evaluation to run.
+  options.registerRoutes?.(app);
+  app.use(mcpAuthRouter({
+    provider, issuerUrl: config.origin, baseUrl: config.origin, resourceServerUrl: config.mcpResource,
+    scopesSupported: [MCP_SCOPE, MCP_OFFLINE_SCOPE], resourceName: options.resourceName ?? "Classroom Desk read-only access",
+    authorizationOptions: workerOAuthLimit,
+    clientRegistrationOptions: workerOAuthLimit,
+    tokenOptions: workerOAuthLimit,
+    revocationOptions: workerOAuthLimit,
+  }));
+
+  app.get("/connect/google", async (req, res) => {
+    const flow = typeof req.query.flow === "string" ? req.query.flow : "";
+    if (!flow || !(await store.getFlow(flow))) return res.status(400).type("text").send("This connection request expired. Return to your MCP client and try again.");
+    const hiddenFlow = escapeHtml(flow);
+    // Preserve the origin on form POSTs while omitting sensitive flow URLs.
+    // This must also apply to the unified authorization page below.
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    if (provider.accounts) {
+      const account = await provider.accounts.session(req.get("cookie"));
+      const drive = config.googleScopes?.includes("https://www.googleapis.com/auth/drive.file");
+      return res.type("html").send(page("Authorize Classroom Desk", "connect", operator, support, config.origin, `<section class="connect-card"><h1>Connect Classroom Desk</h1><p>${account ? `Continue as ${escapeHtml(account.displayName)}. A valid existing Classroom authorization will be reused.` : "Sign in with Google to connect your Classroom Desk account and authorize Classroom access in one flow."}</p><p>Classroom access is read-only.${drive ? " Google Drive permission applies only to specific files used with this app; it permits reading, editing, creating and deleting those files. File actions require your explicit instruction." : ""}</p><form method="post" action="/connect/google"><input type="hidden" name="flow" value="${hiddenFlow}"><button class="button" type="submit">${account ? "Authorize connection" : "Continue with Google"}</button>${account ? '<button type="submit" name="account" value="select">Use another Google account</button>' : ""}</form><p>Connecting does not activate a paid plan. Google and account permissions apply to every request.</p></section>`, true));
+    }
+    // A no-referrer policy can cause browser form POSTs to send Origin: null.
+    // Keep the same-origin CSRF check and send only the origin to Google on navigation.
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self' https://accounts.google.com; base-uri 'none'; frame-ancestors 'none'");
+    res.type("html").send(page("Connect Classroom Desk", "connect", operator, support, config.origin, `
+      <section class="connect-card">
+        ${logoMark()}
+        <h1>Connect Classroom Desk</h1>
+        <p>Read-only access to your Classroom courses, announcements, coursework, course materials, topics, and your submissions.</p>
+        <div class="badge-row"><span>Read-only</span><span>No arbitrary Drive access</span><span>No write access</span></div>
+        <div class="permission-note">
+          <h2>Before you continue</h2>
+          <ul>
+            <li>You will be redirected to Google to approve Classroom read-only access.</li>
+            <li>Classroom Desk is operated by ${operator}.</li>
+            <li>We never ask for your Google password.</li>
+            <li>Disconnect is available from the connected client and revokes/deletes the local authorization where possible.</li>
+          </ul>
+        </div>
+        <form method="post" action="/connect/google">
+          <input type="hidden" name="flow" value="${hiddenFlow}">
+          <button class="button" type="submit">Continue with Google</button>
+        </form>
+        <p class="fine-print"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/support">Support</a></p>
+        <p class="fine-print">Built by <a href="https://fawzankhan-404.github.io/" target="_blank" rel="noopener noreferrer">Jarvis404’s developer</a>. Questions? <a href="${mailto}">Get in touch</a>.</p>
+      </section>
+    `, true));
+  });
+
+  app.post("/connect/google", async (req, res) => {
+    if (req.get("origin") !== config.origin.origin) return res.status(403).type("text").send("Connection request could not be validated.");
+    const flow = typeof req.body?.flow === "string" ? req.body.flow : "";
+    try { return res.redirect(303, await provider.beginGoogle(flow, req.get("cookie"), req.body?.account === "select")); }
+    catch { return res.status(400).type("text").send("This connection request expired or has already started. Return to your MCP client and try again."); }
+  });
+
+  app.get("/oauth/google/callback", async (req, res) => {
+    try {
+      const state = typeof req.query.state === "string" ? req.query.state : undefined;
+      const code = typeof req.query.code === "string" ? req.query.code : undefined;
+      const error = typeof req.query.error === "string" ? req.query.error : undefined;
+      return res.redirect(303, await provider.completeGoogle(state, code, error, req.get("cookie"), token => res.append("Set-Cookie", sessionCookie(token, config.origin.protocol === "https:"))));
+    } catch {
+      return res.status(400).type("text").send("Google authorization could not be completed. Return to your MCP client and try again.");
+    }
+  });
+
+  const authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const match = /^Bearer ([A-Za-z0-9._~+/-]+=*)$/.exec(req.get("authorization") ?? "");
+    if (!match?.[1]) {
+      res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${metadataUrl}"`);
+      return res.status(401).json({ error: "authentication_required", message: "Authentication required." });
+    }
+    try {
+      const auth = await provider.verifyAccessToken(match[1]);
+      if (!auth.scopes.includes(MCP_SCOPE) || auth.resource?.href !== config.mcpResource.href) throw new Error("invalid");
+      req.auth = auth;
+      return next();
+    } catch {
+      res.setHeader("WWW-Authenticate", `Bearer error="invalid_token", resource_metadata="${metadataUrl}"`);
+      return res.status(401).json({ error: "invalid_token", message: "Authentication required." });
+    }
+  };
+
+  app.post("/disconnect/google", authenticate, async (req: AuthenticatedRequest, res) => {
+    const userId = req.auth?.extra?.userId;
+    if (typeof userId !== "string") return res.status(401).json({ error: "invalid_token", message: "Authentication required." });
+    try {
+      const result = await provider.disconnectGoogle(userId);
+      return res.status(200).json({ disconnected: true, googleRevocationConfirmed: result.revoked });
+    } catch { return res.status(503).json({ error: "disconnect_failed", message: "Disconnect could not be confirmed. Try again." }); }
+  });
+
+  app.options("/mcp", (_req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", config.origin.origin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID");
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
+    res.status(204).end();
+  });
+  app.all("/mcp", authenticate, async (req: AuthenticatedRequest, res) => {
+    res.setHeader("Access-Control-Allow-Origin", config.origin.origin);
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
+    if (!["GET", "POST", "DELETE"].includes(req.method)) {
+      res.setHeader("Allow", "GET, POST, DELETE, OPTIONS");
+      return res.status(405).json({ error: "method_not_allowed" });
+    }
+    const userId = req.auth?.extra?.userId;
+    if (typeof userId !== "string") return res.status(401).json({ error: "authentication_required" });
+    if (req.method === "POST" && !req.is("application/json")) return res.status(415).json({ error: "unsupported_media_type" });
+    // Check every invocation, including established sessions. Tool arguments and
+    // caller headers never supply identity, plan or enforcement state.
+    // The SDK supports JSON-RPC batches. Inspect the entire envelope before any
+    // member is dispatched; checking only body.method would bypass this gate.
+    const messages: unknown[] = Array.isArray(req.body) ? req.body : [req.body];
+    const protectedInvocation = req.method === "POST" && messages.some(message => {
+      if (!message || typeof message !== "object") return false;
+      const call = message as { method?: unknown; params?: { name?: unknown } };
+      return call.method === "tools/call" && (typeof call.params?.name !== "string" || !MCP_ONBOARDING_TOOLS.has(call.params.name));
+    });
+    const denyTool = (reason: string) => {
+      const result = accessGuidance({ allowed: false, reason }, config.origin.origin);
+      // Reject a denied envelope atomically, without executing even its safe
+      // members. Notifications have no response, including in mixed batches.
+      const responses = messages.filter(message => message && typeof message === "object" && Object.hasOwn(message, "id")).map(message => ({
+        jsonrpc: "2.0", id: (message as { id: unknown }).id,
+        result: { isError: true, content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result },
+      }));
+      if (!responses.length) return res.status(202).end();
+      return res.status(200).json(Array.isArray(req.body) ? responses : responses[0]);
+    };
+    if (protectedInvocation && config.saasFlags?.enforceEntitlements) {
+      try {
+        const entitlement = await options.entitlementCheck?.(userId);
+        if (!entitlement?.allowed) return denyTool(entitlement?.reason ?? "temporarily_unavailable");
+      } catch { return denyTool("temporarily_unavailable"); }
+    }
+    const makeServer = async () => {
+      let auth = await provider.googleAuthForUser(userId).catch(() => undefined);
+      if (!auth && protectedInvocation) return undefined;
+      auth ??= new OAuth2Client(); // Discovery/onboarding never calls Google.
+      const mcp = options.mcpFactory ? await options.mcpFactory(auth, userId) : await createServer(clientsFactory(auth), { publicV1: true });
+      registerMcpOnboarding(mcp, () => options.entitlementCheck?.(userId) ?? Promise.resolve({ allowed: false, reason: "account_setup_required" }), config.origin.origin, options.accountIdentity ? () => options.accountIdentity!(userId) : undefined);
+      return mcp;
+    };
+    if (config.production) {
+      const mcp = await makeServer();
+      if (!mcp) return denyTool("google_authorization_required");
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+      try {
+        await mcp.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      } catch {
+        if (!res.headersSent) res.status(500).json({ error: "mcp_request_failed", message: "MCP request failed." });
+        else res.destroy();
+      } finally { await mcp.close().catch(() => undefined); }
+      return;
+    }
+    const sessionId = req.get("mcp-session-id");
+    let session = sessionId ? sessions.get(sessionId) : undefined;
+    if (sessionId && (!session || session.userId !== userId)) return res.status(404).json({ error: "session_not_found" });
+    if (!session) {
+      if (req.method !== "POST") return res.status(400).json({ error: "initialization_required" });
+      const mcp = await makeServer();
+      if (!mcp) return denyTool("google_authorization_required");
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => crypto.randomUUID(),
+        enableJsonResponse: true,
+        onsessioninitialized: (newSessionId) => { sessions.set(newSessionId, { userId, transport, server: mcp }); },
+        onsessionclosed: async (closedId) => {
+          const existing = sessions.get(closedId);
+          sessions.delete(closedId);
+          if (existing) await existing.server.close().catch(() => undefined);
+        },
+      });
+      transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
+      session = { userId, transport, server: mcp };
+      await mcp.connect(transport);
+    }
+    try {
+      await session.transport.handleRequest(req as Request & { auth?: AuthInfo }, res, req.body);
+      if (session.transport.sessionId) sessions.set(session.transport.sessionId, session);
+    } catch {
+      if (!res.headersSent) res.status(500).json({ error: "mcp_request_failed", message: "MCP request failed." });
+      else res.destroy();
+    }
+  });
+
+  app.use((_req, res) => res.status(404).json({ error: "not_found" }));
+  app.use((_error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (!res.headersSent) {
+      const status = (_error as { status?: number })?.status;
+      res.status(status === 413 ? 413 : status === 400 ? 400 : 500).json({ error: status === 413 ? "request_too_large" : status === 400 ? "invalid_request" : "server_error", message: "Request failed." });
+    }
+  });
+  const closeSessions = async () => {
+    for (const session of sessions.values()) await session.server.close().catch(() => undefined);
+    sessions.clear();
+  };
+  return { app, provider, sessions, closeSessions };
+}
+
+function homeBody(media: { wideVideo?: string; widePoster?: string; narrowVideo?: string; narrowPoster?: string }) {
+  return `<section class="home-stage" data-home-stage aria-labelledby="home-title"><video class="stage-motion stage-motion--wide" autoplay muted loop playsinline preload="metadata" aria-hidden="true" poster="${media.widePoster ?? ""}" data-stage-src="${media.wideVideo ?? ""}"></video><video class="stage-motion stage-motion--narrow" muted loop playsinline preload="none" aria-hidden="true" poster="${media.narrowPoster ?? ""}" data-stage-src="${media.narrowVideo ?? ""}"></video><svg class="home-stage-noise" viewBox="0 0 160 160" preserveAspectRatio="none" aria-hidden="true"><filter id="homeNoise"><feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="2" seed="8" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .14"/></feComponentTransfer></filter><rect width="160" height="160" filter="url(#homeNoise)"/></svg><div class="home-stage-inner"><div class="home-masthead"><div class="home-copy"><p class="eyebrow home-eyebrow">Google Classroom for ChatGPT</p><h1 id="home-title">Built for <span>Classroom clarity</span>.</h1><p class="home-intro">Bring your authorized Google Classroom context into a conversation that helps you know what is due, what changed, and what to do next.</p><div class="actions"><a class="button" href="/start">Get Started — Free</a><a class="text-link" href="#features">See what you can ask <span aria-hidden="true">↗</span></a><a class="text-link" href="https://github.com/Fawzankhan-404/Classroom-Desk" target="_blank" rel="noopener noreferrer">View on GitHub <span aria-hidden="true">↗</span></a></div><p class="home-note">Illustrative product experience. Connect your account for live Classroom answers.</p></div><div class="home-console" aria-label="Interactive illustrative Classroom Desk conversation"><div class="console-top"><span class="console-title"><span class="console-mark" aria-hidden="true"></span>Classroom Desk example</span><span class="console-status">Illustrative only</span></div><div class="example-panel home-example-panel" aria-live="polite"><span class="example-badge">Example question</span><h2 class="example-question" data-example-question>What assignments do I have?</h2><p class="example-answer" data-example-answer>“You have three current items: a Physics lab report, History reading notes, and a returned Biology assignment. Check each Classroom item for its latest details.”</p><small>Illustrative response. It is not live account data.</small></div><div class="prompt-tabs home-prompt-tabs" role="tablist" aria-label="Choose an illustrative question"><p class="prompt-label">Try an example</p><button role="tab" aria-selected="true" data-prompt-tab="0" data-copy-prompt="What assignments do I have?">What assignments do I have?<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="1" data-copy-prompt="What deadlines are coming up?">What deadlines are coming up?<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="2" data-copy-prompt="Show my recent Classroom activity.">Recent activity<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="3" data-copy-prompt="Show announcements from my courses.">Announcements<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="4" data-copy-prompt="Find missing or returned work.">Missing work<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="5" data-copy-prompt="Explain the instructions for my assignment.">Instructions<span>Copy</span></button></div></div></div><section id="features" class="capability-section" aria-labelledby="capability-title"><div class="capability-heading"><p class="eyebrow">What you can ask</p><h2 id="capability-title">Useful context, without the noise.</h2><p>Classroom Desk keeps the answer close to the source you authorized and clear about what it can do.</p></div><div class="capability-cards"><article class="capability-card"><div class="capability-card-top"><span>01</span><span>Course context</span></div><h3>Ask about the work in front of you.</h3><p>Bring questions about courses, coursework, announcements, and your own submission status into one conversation.</p><svg class="capability-visual" viewBox="0 0 240 92" aria-hidden="true"><path d="M8 68h224M18 52h48M18 37h86M18 22h125" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="188" cy="22" r="6" fill="currentColor"/><circle cx="207" cy="37" r="6" fill="currentColor"/><circle cx="225" cy="52" r="6" fill="currentColor"/></svg></article><article class="capability-card"><div class="capability-card-top"><span>02</span><span>Due date clarity</span></div><h3>Know what needs your attention.</h3><p>Find upcoming, missing, and returned work with answers grounded in the Classroom data you approved.</p><svg class="capability-visual" viewBox="0 0 240 92" aria-hidden="true"><rect x="16" y="16" width="52" height="52" rx="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M30 43l9 9 18-22M94 25h116M94 46h86M94 67h58" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="214" cy="25" r="5" fill="currentColor"/></svg></article><article class="capability-card"><div class="capability-card-top"><span>03</span><span>Clear boundaries</span></div><h3>Understand the task, stay in control.</h3><p>Teacher files require explicit authorization, and Classroom Desk never submits or edits work automatically.</p><svg class="capability-visual" viewBox="0 0 240 92" aria-hidden="true"><path d="M42 18h58l24 24v32H42zM100 18v25h24M58 59h50M160 26h54M160 46h40M160 66h26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="144" cy="26" r="6" fill="currentColor"/></svg></article></div></section></div></section>
+  <section id="how-it-works" class="section how-section"><p class="eyebrow">How it works</p><h2>Three steps, a few minutes.</h2><div class="numbered-steps"><div><b>01</b><h3>Add Classroom Desk to ChatGPT</h3><p>Open ChatGPT's supported apps or developer settings and add a custom connection if your workspace offers it.</p></div><div><b>02</b><h3>Approve Google access</h3><p>Review the permissions Google shows you and approve only the account you intend to use.</p></div><div><b>03</b><h3>Ask your first question</h3><p>Try a plain question about your courses, assignments or deadlines.</p></div></div><div class="section-actions"><button class="button" type="button" data-connect-open>Connect to ChatGPT</button><a class="text-link" href="/connect">Read the full guide <span aria-hidden="true">↗</span></a></div></section>
+  <section class="section trust-section"><div><p class="eyebrow">Your control</p><h2>You stay in control.</h2><p>Classroom Desk works only with Google access you approve, and it never turns in work for you.</p><a class="text-link" href="/privacy">Read the privacy policy <span aria-hidden="true">↗</span></a></div><div class="trust-columns"><div><h3>What it can help with</h3><ul><li>Courses and coursework</li><li>Deadlines and activity</li><li>Announcements and topics</li><li>Your submission status</li><li>One teacher attachment you explicitly authorize</li><li>PDF saves to your Drive that you confirm</li></ul></div><div><h3>What it will not do automatically</h3><ul><li>Browse your Drive</li><li>Submit or edit Classroom work</li><li>Change grades or course content</li><li>Read Gmail</li><li>Claim a save is a submission</li></ul></div></div></section>
+  <section class="section free-access-note"><p class="eyebrow">Free and open source</p><h2>Classroom Desk is free for students and teachers.</h2><p>Connect your authorized Google Classroom account. Your Google permissions continue to control which data you can access.</p><a class="button" href="/start">Get started — free</a></section>
+  <section class="section faq-section"><p class="eyebrow">Questions</p><h2>Questions, answered.</h2><div class="faq-list"><details open><summary>Does copying the address connect my Classroom?</summary><p>No. You still need a compatible ChatGPT connection and Google authorization.</p></details><details><summary>Which ChatGPT plans can use it?</summary><p>Availability depends on your ChatGPT plan and workspace settings. ChatGPT may ask you to turn on Developer mode, and workspace admins may need to allow it.</p></details><details><summary>What does Classroom Desk read?</summary><p>With your permission, it reads supported courses, coursework, announcements, topics and your own submission status. Teacher files require explicit authorization when supported.</p></details><details><summary>Is Classroom Desk free?</summary><p>Yes. Sign in with Google, choose a Student or Teacher experience, and authorize only the Google access you need.</p></details><details><summary>Is this official Google or ChatGPT software?</summary><p>No. Classroom Desk is an independent integration.</p></details></div></section>
+  <section class="closing-cta"><h2>Ready to ask your Classroom a question?</h2><div><button class="button" type="button" data-connect-open>Connect to ChatGPT</button><a class="text-link" href="/start">Get started free <span aria-hidden="true">↗</span></a></div></section>`;
+}
+
+function connectBody(mcpUrl: string) {
+  return `<article class="guide-page"><p class="eyebrow">Connection guide</p><h1>Connect Classroom Desk to ChatGPT.</h1><p class="page-lead">Follow these three steps. ChatGPT controls its own connection settings, and Google will show you the permissions before you approve them.</p>${connectGuideMarkup(true, mcpUrl)}<details class="troubleshooting"><summary>Troubleshooting</summary><ul><li>If you do not see a custom connection option, your plan or workspace may not offer it.</li><li>If Google authorization fails, restart from ChatGPT and use the intended Google account.</li><li>If tools return an authorization error, reconnect Google Classroom. Google authorization establishes your Classroom Desk account automatically.</li><li>For help, contact support without sending passwords, OAuth codes or private Classroom content.</li></ul></details><p class="test-prompt">Test it: ask “What assignments do I have?”</p></article>`;
+}
+
+function connectGuideMarkup(inline = false, mcpUrl = "https://classroom.jarvis404.com/mcp") {
+  return `<div class="connect-guide ${inline ? "inline-guide" : ""}" data-connect-guide><div class="guide-steps"><p class="step-kicker">Step <span data-guide-number>1</span> of 3</p><section data-guide-step><h2>Open ChatGPT</h2><p>Go to ChatGPT's apps or developer settings.</p><a class="button" href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer">Open ChatGPT</a><p class="help-text">ChatGPT may ask you to turn on Developer mode first. If you do not see the option, your plan or workspace may not allow custom connections. Ask your workspace admin.</p></section><section data-guide-step hidden><h2>Add Classroom Desk</h2><p>Create a new connection, name it Classroom Desk, and paste this address. If ChatGPT asks how to sign in, choose OAuth.</p><div class="copy-chip"><code>${escapeHtml(mcpUrl)}</code><button type="button" data-copy-mcp="${escapeHtml(mcpUrl)}">Copy</button></div><p class="help-text">Button names vary between ChatGPT versions. ChatGPT may call this the server URL.</p></section><section data-guide-step hidden><h2>Approve Google and ask</h2><p>Classroom Desk will request Google authorization if needed and connect your account automatically. Return to ChatGPT, click Back to app, verify status and your account, then try:</p><div class="copy-chip"><code>What assignments do I have?</code><button type="button" data-copy-prompt="What assignments do I have?">Copy</button></div><p class="help-text">This guide cannot detect or complete the connection for you.</p></section></div><div class="guide-visual" aria-hidden="true"><span class="example-badge">Illustration</span><div class="guide-visual-board"><span></span><span></span><span></span><span></span></div></div><div class="guide-controls"><button class="button secondary" type="button" data-guide-back hidden>Back</button><button class="button" type="button" data-guide-next>Next</button><a class="text-link" href="/support">Need help?</a></div></div>`;
+}
+
+function connectGuideModal(mcpUrl: string) {
+  return `<dialog class="connect-modal" data-connect-modal aria-labelledby="connect-modal-title"><div class="modal-shell"><div class="modal-header"><div><p class="eyebrow">Connection guide</p><h2 id="connect-modal-title">Connect Classroom Desk to ChatGPT</h2></div><button class="close-button" type="button" data-connect-close aria-label="Close connection guide">×</button></div><p class="modal-progress">Step <span data-guide-number>1</span> of 3</p>${connectGuideMarkup(false, mcpUrl)}<div class="modal-footer"><button class="button secondary" type="button" data-guide-back hidden>Back</button><button class="button" type="button" data-guide-next>Next</button><a class="text-link" href="/support">Need help?</a></div></div></dialog>`;
+}
+
+function connectScript() {
+  return `(() => {
+    const bindCopy = (button, value) => {
+      const feedback = button.querySelector("span") || (button.hasAttribute("data-prompt-tab") ? null : button);
+      const label = feedback?.textContent ?? "Copy";
+      let timer;
+      let attempt = 0;
+      feedback?.setAttribute("aria-live", "polite");
+      feedback?.setAttribute("aria-atomic", "true");
+      button.addEventListener("click", async () => {
+        const currentAttempt = ++attempt;
+        clearTimeout(timer);
+        if (feedback) feedback.textContent = label;
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(value());
+          copied = true;
+        } catch {
+          if (currentAttempt !== attempt) return;
+          let area;
+          try {
+            area = document.createElement("textarea");
+            area.value = value();
+            area.setAttribute("readonly", "");
+            document.body.append(area);
+            area.select();
+            copied = document.execCommand("copy") === true;
+          } catch {
+            copied = false;
+          } finally {
+            area?.remove();
+          }
+        }
+        if (currentAttempt !== attempt || !feedback) return;
+        feedback.textContent = copied ? "Copied" : "Copy failed";
+        timer = setTimeout(() => { feedback.textContent = label; }, 2000);
+      });
+    };
+    document.querySelectorAll("[data-copy-mcp]").forEach(b => bindCopy(b, () => b.dataset.copyMcp || ""));
+    document.querySelectorAll("[data-copy-prompt]").forEach(b => bindCopy(b, () => b.dataset.copyPrompt || ""));
+    const guides = [...document.querySelectorAll("[data-connect-guide]")]; const setGuide = (root, index) => { const steps = [...root.querySelectorAll("[data-guide-step]")]; const number = root.querySelector("[data-guide-number]"); const back = root.querySelector("[data-guide-back]"); const next = root.querySelector("[data-guide-next]"); steps.forEach((s, i) => { s.hidden = i !== index; }); if (number) number.textContent = String(index + 1); if (back) back.hidden = index === 0; if (next) next.textContent = index === steps.length - 1 ? "Done" : "Next"; root.dataset.step = String(index); }; guides.forEach(root => { let index = 0; const next = root.querySelector("[data-guide-next]"); const back = root.querySelector("[data-guide-back]"); next?.addEventListener("click", () => { if (index < 2) { index += 1; setGuide(root, index); } }); back?.addEventListener("click", () => { index = Math.max(0, index - 1); setGuide(root, index); }); setGuide(root, 0); }); const modal = document.querySelector("[data-connect-modal]"); let lastTrigger = null; const open = trigger => { lastTrigger = trigger; modal?.showModal(); document.body.classList.add("modal-open"); modal?.querySelector("button")?.focus(); }; document.querySelectorAll("[data-connect-open]").forEach(b => b.addEventListener("click", () => open(b))); modal?.querySelector("[data-connect-close]")?.addEventListener("click", () => modal.close()); modal?.addEventListener("click", e => { if (e.target === modal) modal.close(); }); modal?.addEventListener("close", () => { document.body.classList.remove("modal-open"); lastTrigger?.focus(); }); const menu = document.querySelector(".menu-toggle"); const mobile = document.querySelector("#mobile-menu"); menu?.addEventListener("click", () => { const open = menu.getAttribute("aria-expanded") === "true"; menu.setAttribute("aria-expanded", String(!open)); mobile.hidden = open; }); const tabs = [...document.querySelectorAll("[data-prompt-tab]")]; const answers = ["What assignments do I have?", "What deadlines are coming up?", "Show my recent Classroom activity.", "Show announcements from my courses.", "Find missing or returned work.", "Explain the instructions for my assignment."]; const replies = ["You have three current items: a Physics lab report, History reading notes, and a returned Biology assignment. Check each Classroom item for its latest details.", "Your next example deadline is a Physics lab report tomorrow, followed by History reading notes on Friday.", "Your recent example activity includes one returned assignment and two course updates.", "Your courses have example announcements about a reading reminder and a lab session.", "Example results show one returned item and one missing item. Open Classroom for the source details.", "I can explain instructions returned from Classroom. For an attachment, authorize that exact file first."]; const q = document.querySelector("[data-example-question]"); const a = document.querySelector("[data-example-answer]"); tabs.forEach((tab, i) => { tab.addEventListener("click", () => { tabs.forEach(t => t.setAttribute("aria-selected", "false")); tab.setAttribute("aria-selected", "true"); if(q) q.textContent = answers[i]; if(a) a.textContent = replies[i]; }); tab.addEventListener("keydown", e => { if (!["ArrowDown","ArrowRight","ArrowUp","ArrowLeft","Home","End"].includes(e.key)) return; e.preventDefault(); let j = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key.includes("Down") || e.key.includes("Right") ? 1 : -1) + tabs.length) % tabs.length; tabs[j].focus(); tabs[j].click(); }); }); })();`;
+}
+
+function connectModalBridgeScript() {
+  return `document.querySelectorAll(".connect-modal").forEach(modal => { const root = modal.querySelector("[data-connect-guide]"); const next = modal.querySelector(".modal-footer [data-guide-next]"); const back = modal.querySelector(".modal-footer [data-guide-back]"); const progress = modal.querySelector(".modal-progress [data-guide-number]"); const sync = () => { const number = root?.querySelector(".step-kicker [data-guide-number]"); if (progress && number) progress.textContent = number.textContent || "1"; }; next?.addEventListener("click", () => { root?.querySelector("[data-guide-next]")?.click(); sync(); }); back?.addEventListener("click", () => { root?.querySelector("[data-guide-back]")?.click(); sync(); }); }); const menu = document.querySelector(".menu-toggle"); const mobile = document.querySelector("#mobile-menu"); menu?.addEventListener("keydown", event => { if (event.key === "Escape" && menu.getAttribute("aria-expanded") === "true") { menu.click(); menu.focus(); } }); mobile?.querySelectorAll("a").forEach(link => link.addEventListener("click", () => { if (menu?.getAttribute("aria-expanded") === "true") menu.click(); }));`;
+}
+
+function connectModalMarkupScript() {
+  return `document.querySelectorAll(".connect-modal .step-kicker").forEach(label => label.remove());`;
+}
+
+function connectModalCleanupScript() {
+  return `document.querySelectorAll(".connect-modal").forEach(modal => { const clear = () => document.body.classList.remove("modal-open"); modal.addEventListener("close", clear); modal.addEventListener("cancel", clear); modal.querySelector("[data-connect-close]")?.addEventListener("click", clear); });`;
+}
+
+function homeMotionScript() {
+  return `(() => { const stage = document.querySelector("[data-home-stage]"); if (!stage) return; const reduced = window.matchMedia("(prefers-reduced-motion: reduce)"); const wide = window.matchMedia("(min-width: 768px)"); const loadStageMotion = () => { if (reduced.matches || !wide.matches) return; const video = stage.querySelector(".stage-motion--wide"); if (!video || video.getAttribute("src")) return; const source = video.getAttribute("data-stage-src"); if (!source) return; video.setAttribute("src", source); video.load(); const playback = video.play(); if (playback && typeof playback.catch === "function") playback.catch(() => undefined); }; if (!reduced.matches) requestAnimationFrame(() => stage.classList.add("is-ready")); loadStageMotion(); wide.addEventListener?.("change", loadStageMotion); reduced.addEventListener?.("change", () => { if (reduced.matches) stage.classList.add("motion-reduced"); }); })();`;
+}
+
+function connectDemoScript() {
+  return `(() => { const panel = document.querySelector("[data-example-answer]")?.closest(".example-panel"); const answer = document.querySelector("[data-example-answer]"); if (!panel || !answer) return; const reduced = window.matchMedia("(prefers-reduced-motion: reduce)"); const replies = ["You have three current items: a Physics lab report, History reading notes, and a returned Biology assignment. Check each Classroom item for its latest details.", "Your next example deadline is a Physics lab report tomorrow, followed by History reading notes on Friday.", "Example results show one returned item and one missing item. Open Classroom for the source details.", "Your courses have example announcements about a reading reminder and a lab session.", "Your recent example activity includes one returned assignment and two course updates.", "I can explain instructions returned from Classroom. For an attachment, authorize that exact file first."]; const replay = document.createElement("button"); replay.type = "button"; replay.className = "button secondary demo-replay"; replay.textContent = "Replay example"; replay.setAttribute("data-demo-replay", ""); const status = document.createElement("small"); status.className = "demo-status"; status.setAttribute("aria-live", "polite"); status.textContent = "Illustrative response. It is not live account data."; const actions = document.createElement("div"); actions.className = "example-actions"; actions.append(replay, status); panel.append(actions); let timer; const play = index => { window.clearInterval(timer); const text = replies[index] || replies[0]; answer.textContent = ""; if (reduced.matches) { answer.textContent = "“" + text + "”"; status.textContent = "Illustrative response. It is not live account data."; return; } status.textContent = "Illustrative example loading…"; let i = 0; timer = window.setInterval(() => { answer.textContent = "“" + text.slice(0, ++i) + (i < text.length ? "▌" : "”"); if (i >= text.length) { window.clearInterval(timer); status.textContent = "Illustrative response. It is not live account data."; } }, 12); }; document.querySelectorAll("[data-prompt-tab]").forEach((tab, index) => tab.addEventListener("click", () => window.setTimeout(() => play(index), 0))); replay.addEventListener("click", () => { const active = [...document.querySelectorAll("[data-prompt-tab]")].findIndex(tab => tab.getAttribute("aria-selected") === "true"); play(active < 0 ? 0 : active); }); })();`;
+}
+
+function connectAccountGuidanceScript() {
+  return `if (location.pathname === "/connect") { const lead = document.querySelector(".guide-page .page-lead"); if (lead) lead.textContent = "Connect the Google account you actually use for Google Classroom. If you use more than one Google account, choose the one containing your courses when Google shows the account chooser. Google authorization establishes your Classroom Desk account and connects ChatGPT automatically. No separate website login is required."; }`;
+}
+
+function connectDemoStyleScript() {
+  return `document.querySelectorAll("[data-demo-replay]").forEach(button => { button.style.cssText = "min-height:44px;background:#0e7c5a!important;color:#fff!important;border:1px solid #55c49a;padding:.75rem 1rem;opacity:1"; });`;
+}
+
+function connectModalStateScript() {
+  return `document.querySelectorAll(".connect-modal").forEach(modal => { const root = modal.querySelector("[data-connect-guide]"); const footer = modal.querySelector(".modal-footer"); const sync = () => { const innerBack = root?.querySelector("[data-guide-back]"); const innerNext = root?.querySelector("[data-guide-next]"); const outerBack = footer?.querySelector("[data-guide-back]"); const outerNext = footer?.querySelector("[data-guide-next]"); if (outerBack && innerBack) outerBack.hidden = innerBack.hidden; if (outerNext && innerNext) outerNext.textContent = innerNext.textContent || "Next"; }; footer?.addEventListener("click", () => queueMicrotask(sync)); sync(); });`;
+}
+
+function connectGuideBackStateScript() {
+  return `document.querySelectorAll("[data-connect-guide]").forEach(root => { const back = root.querySelector("[data-guide-back]"); if (!back) return; const apply = () => { const first = root.dataset.step === "0"; back.hidden = false; back.disabled = first; back.setAttribute("aria-disabled", String(first)); }; apply(); new MutationObserver(apply).observe(root, { attributes: true, attributeFilter: ["data-step"] }); });`;
+}
+
+function connectModalBackDisabledScript() {
+  return `document.querySelectorAll(".connect-modal").forEach(modal => { const root = modal.querySelector("[data-connect-guide]"); const outer = modal.querySelector(".modal-footer [data-guide-back]"); const sync = () => { const inner = root?.querySelector("[data-guide-back]"); if (outer && inner) { outer.hidden = false; outer.disabled = inner.disabled; outer.setAttribute("aria-disabled", inner.getAttribute("aria-disabled") || "false"); } }; sync(); if (root) new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ["data-step"] }); });`;
+}
+
+function connectModalProgressScript() {
+  return `document.querySelectorAll(".connect-modal").forEach(modal => { const root = modal.querySelector("[data-connect-guide]"); const progress = modal.querySelector(".modal-progress [data-guide-number]"); const sync = () => { if (progress) progress.textContent = String(Number(root?.getAttribute("data-step") || "0") + 1); }; sync(); if (root) new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ["data-step"] }); });`;
+}
+
+function page(title: string, active: string, operator: string, support: string, origin: URL, body: string, compact = false) {
+  const nav = (href: string, key: string, label: string) => `<a ${active === key ? 'aria-current="page"' : ""} href="${href}">${label}</a>`;
+  const documentTitle = title === "Classroom Desk" ? "Classroom Desk | Google Classroom Meets ChatGPT" : `${title} | Classroom Desk`;
+  const descriptions: Record<string,string> = { home:"Connect Google Classroom with ChatGPT. Access coursework, manage assignments, and stay organized.", start:"Get started with free Classroom Desk. Sign in with Google, choose Student or Teacher, and authorize Classroom access.", connect:"Connect Classroom Desk to ChatGPT and choose the Google account you use for Google Classroom. Follow the secure Google authorization flow.", refunds:"Support for historical payments and existing subscriptions.", privacy:"How Classroom Desk protects your Google Classroom authorization and account information.", terms:"Classroom Desk terms of service and authorized-use requirements.", support:"Get help with Classroom Desk connections, Google authorization, and accounts." };
+  const description = descriptions[active] ?? descriptions.home!;
+  const canonicalUrl = new URL(active === "home" ? "/" : `/${active}`, origin).toString();
+  const imageUrl = new URL("/assets/classroom-desk-social-card.png?v=20261012-layout2", origin).toString();
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${documentTitle}</title>
+<meta name="description" content="${escapeHtml(description)}">
+<link rel="canonical" href="${escapeHtml(canonicalUrl)}">
+<meta property="og:title" content="${escapeHtml(documentTitle)}">
+<meta property="og:description" content="${escapeHtml(description)}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="${escapeHtml(canonicalUrl)}">
+<meta property="og:image" content="${escapeHtml(imageUrl)}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Classroom Desk — Google Classroom Meets ChatGPT">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${escapeHtml(documentTitle)}">
+<meta name="twitter:description" content="${escapeHtml(description)}">
+<meta name="twitter:image" content="${escapeHtml(imageUrl)}">
+${title === "Classroom Desk" ? '<link rel="preload" as="image" href="${media.widePoster ?? ""}" media="(min-width:768px)" fetchpriority="high"><link rel="preload" as="image" href="${media.narrowPoster ?? ""}" media="(max-width:767px)" fetchpriority="high">' : ""}
+<link rel="icon" type="image/svg+xml" href="/assets/classroom-desk-favicon.svg">
+<link rel="apple-touch-icon" href="/assets/classroom-desk-logo.svg">
+<style>${siteStyles()}${designStyles()}.numbered-steps b{color:#176b4b!important}.site-header .brand,.desktop-nav a,.header-actions a{min-height:44px;display:inline-flex;align-items:center}.header-cta{min-height:44px!important}.modal-header .eyebrow{color:#b8f3d5}.close-button{min-width:44px;min-height:44px;flex-shrink:0}.copy-chip button{min-width:44px;min-height:44px}@media(max-width:767px) and (max-height:900px){.modal-shell .guide-visual{display:none}}</style>
+</head>
+<body class="${compact ? "compact" : ""}${title === "Classroom Desk" ? " home-page" : ""}">
+<a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header">
+  <a class="brand" href="/" aria-label="Classroom Desk home">${logoMark()}<span>Classroom Desk</span></a>
+  <nav class="desktop-nav" aria-label="Primary">${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/start", "start", "Get started")}</nav>
+  <div class="header-actions"><a class="nav-signin" href="/login">Sign in</a><button class="button header-cta" type="button" data-connect-open>Connect to ChatGPT</button><button class="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu">Menu</button></div>
+</header>
+<nav id="mobile-menu" class="mobile-menu" aria-label="Mobile navigation" hidden>${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/start", "start", "Get started")}<a href="/login">Sign in</a><button class="button" type="button" data-connect-open>Connect to ChatGPT</button></nav>
+<main id="main-content">${body}</main>
+<footer class="site-footer">
+  <div class="footer-grid"><div><a class="brand footer-brand" href="/">${logoMark()}<span>Classroom Desk</span></a><p>Ask ChatGPT about your own authorized Google Classroom.</p></div><div><h2>Product</h2><a href="/#features">Features</a><a href="/#how-it-works">How it works</a><a href="/start">Get started</a><a href="/connect">Connect</a></div><div><h2>Legal</h2><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refunds">Refunds and cancellation</a><a href="/support">Support</a></div><div><h2>Contact</h2><a href="mailto:${support}">${support}</a><p class="developer-credit">Built by <a href="https://fawzankhan-404.github.io/" target="_blank" rel="noopener noreferrer">${operator}</a>, an independent developer</p></div></div>
+  <p class="disclaimer">Classroom Desk is an independent integration and is not affiliated with or endorsed by Google or OpenAI. Google Classroom, ChatGPT, and OpenAI are trademarks of their respective owners.</p>
+</footer>
+${connectGuideModal(new URL("/mcp", origin).href)}
+<script src="/assets/connect.js?v=20261016-unified1" defer></script>
+</body>
+</html>`;
+}
+
+function logoMark() {
+  return `<span class="logo" aria-hidden="true">${logoSvg.replace("<svg ", "<svg width=\"32\" height=\"32\" ")}</span>`;
+}
+
+function designStyles() {
+  return `
+:root{--paper:#f7f9f6;--ink:#17231d;--muted:#4d6055;--line:#cbd8cf;--soft:#e8f1eb;--deep:#15543b;--green:#166c48}
+body{font-family:"Segoe UI",Arial,sans-serif;letter-spacing:-.012em}
+.site-header{max-width:1200px;padding:1.15rem 1.6rem;border-bottom:1px solid var(--line)}
+.brand{font-size:1.02rem;letter-spacing:-.03em}.logo{width:44px;height:44px;object-fit:cover;border-radius:11px;border:1px solid var(--line);background:white}
+.site-header nav a{border-radius:5px}.site-header nav a[aria-current=page],.site-header nav a:hover{background:transparent;box-shadow:inset 0 -2px var(--green)}
+main{max-width:1200px;padding:0 1.6rem 4.5rem}.hero{grid-template-columns:minmax(0,1.2fr) minmax(290px,.8fr);gap:clamp(2rem,6vw,6rem);padding:clamp(3rem,8vw,7rem) 0 3rem;align-items:center}
+.hero h1{font-size:clamp(3.3rem,7.6vw,7.2rem);line-height:.92;letter-spacing:-.072em;max-width:750px;margin:1.6rem 0 1.4rem;font-weight:780}
+.hero-copy>p:not(.lede):not(.trust-line){font-size:1.1rem;line-height:1.65;max-width:580px}.lede{font-size:clamp(1.4rem,2.8vw,2.15rem);letter-spacing:-.035em;font-weight:580}
+.mark-row{gap:1rem;font-size:.84rem;font-weight:650;letter-spacing:0}.mark-rule{height:1px;width:28px;background:var(--green)}
+ .hero-visual{position:relative;align-self:stretch;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.25rem}.hero-logo{display:block;width:min(100%,430px);aspect-ratio:1}.hero-logo svg{display:block;width:100%;height:auto;border-radius:27%;box-shadow:0 24px 80px rgba(11,58,37,.12)}.hero-visual img{display:block;width:min(100%,430px);height:auto;border-radius:27%;box-shadow:0 24px 80px rgba(11,58,37,.12)}.hero-visual p{font-size:.9rem;color:var(--muted);text-align:center;margin:0}
+.button{border-radius:7px;font-weight:700;letter-spacing:-.01em;padding:.86rem 1.25rem}.button.secondary{background:transparent}.trust-line{font-size:.9rem!important;margin-top:1.4rem;color:var(--deep)}
+.ledger{display:grid;grid-template-columns:190px 1fr;gap:1.6rem;padding:1.6rem 0;border:0;border-top:2px solid var(--ink);border-bottom:1px solid var(--line);border-radius:0;box-shadow:none;background:transparent}.ledger h2{font-size:1rem;margin:0}.ledger dl{display:grid;grid-template-columns:repeat(3,1fr);gap:1.4rem}.ledger dl div{padding:0;border:0}.ledger dt{font-size:.95rem}.ledger dd{font-size:.9rem;line-height:1.5}
+.section{padding:4.5rem 0}.section h2{font-size:clamp(2rem,4.3vw,3.6rem);letter-spacing:-.055em}.section-heading{align-items:start}.section-heading p{max-width:200px;margin-top:.3rem}.steps{grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid var(--line)}.step{border:0;border-radius:0;background:transparent;border-right:1px solid var(--line);padding:1.5rem 1.2rem 1rem 0}.step:not(:first-child){padding-left:1.2rem}.step:last-child{border-right:0}.step-num{background:transparent;border:1px solid var(--green);color:var(--deep)}.setup-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin:1.5rem 0}.setup-grid article,.price-strip article{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:1.25rem}.setup-number{display:grid;place-items:center;width:2.25rem;height:2.25rem;border:1px solid var(--green);border-radius:50%;color:var(--deep);font-weight:800}.setup-grid h3{margin:1rem 0 .35rem}.setup-grid p,.price-strip p{color:var(--muted);margin:.2rem 0}.setup-grid code{font-size:.88em;color:var(--deep);overflow-wrap:anywhere}.price-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin:1.5rem 0}.price-strip article{display:flex;flex-direction:column;min-height:160px}.price-strip article.featured{border-color:var(--green);box-shadow:0 14px 35px rgba(23,66,54,.1)}.price-strip strong{font-size:clamp(2rem,4vw,3rem);line-height:1;margin:.8rem 0 .35rem;color:var(--deep)}.price-strip strong span{font-size:1rem;font-weight:650;color:var(--muted)}.faq-list{max-width:850px;border-top:1px solid var(--line)}.faq-list details{border-bottom:1px solid var(--line);padding:1rem 0}.faq-list summary{cursor:pointer;font-weight:760;color:var(--deep);padding-right:2rem}.faq-list p{max-width:720px;margin:.7rem 0 0}
+.prompt-grid{display:block;columns:2;column-gap:3rem}.prompt-grid li{display:list-item;break-inside:avoid;background:transparent;color:var(--ink);border-radius:0;min-height:auto;border-bottom:1px solid var(--line);padding:1rem 0;font-weight:650;font-size:1.08rem}.prompt-grid li::marker{color:var(--green)}
+.panel{box-shadow:none;border-radius:4px}.panel.ok{border-top:3px solid var(--green)}.panel.no{border-top:3px solid #a66730}.callout{background:var(--deep);color:white;border:0;border-radius:4px;padding:clamp(2rem,5vw,4rem)}.callout p{color:#e0f0e5}.callout .button{background:white;color:var(--deep)}
+.about{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:3rem;border-bottom:0}.about>div{max-width:730px}.about h2{max-width:650px}.about p{font-size:1.08rem;line-height:1.7}.about .disclaimer{align-self:end;font-size:.88rem;border-left:2px solid var(--line);padding-left:1rem}.text-link{font-weight:750;text-decoration-thickness:2px}
+.doc{border:0;border-top:3px solid var(--green);border-radius:0;box-shadow:none;margin:3rem auto}.connect-card{border-radius:6px;box-shadow:0 24px 70px rgba(18,55,34,.08);border-top:4px solid var(--green)}.connect-card .logo{width:70px;height:70px}.badge-row span{border-radius:5px}.site-footer{max-width:1200px}.wizard-shell{margin-top:1.5rem;border:1px solid var(--line);background:#fbfdfb}.wizard-progress{display:grid;grid-template-columns:repeat(4,1fr);gap:0;list-style:none;margin:0;padding:0;border-bottom:1px solid var(--line)}.wizard-progress li{padding:.8rem .65rem;font-size:.82rem;color:var(--muted);border-right:1px solid var(--line)}.wizard-progress li:last-child{border-right:0}.wizard-progress li.active{color:var(--deep);font-weight:800;background:var(--soft);box-shadow:inset 0 -3px 0 var(--green)}.wizard-panel{padding:1.25rem;min-height:360px}.wizard-panel h2{margin:.35rem 0 .6rem;font-size:clamp(1.5rem,3vw,2.2rem)}.wizard-kicker{color:var(--green);font-weight:800;font-size:.85rem}.chatgpt-preview,.dropdown-preview,.trust-preview,.config-preview{border:1px solid #c8d8cd;background:#fff;padding:1rem;margin:1rem 0}.chatgpt-preview header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:.75rem}.chatgpt-preview header button{border:1px solid var(--green);background:var(--yellow);border-radius:7px;padding:.35rem .65rem;font-weight:800}.chatgpt-preview label{display:flex;gap:.5rem;align-items:center;border:1px solid var(--line);margin:1rem 0;padding:.45rem .65rem;color:var(--muted)}.chatgpt-preview input{border:0;outline:0;background:transparent;width:100%;font:inherit}.chatgpt-preview ul{list-style:none;padding:0;margin:0;display:grid;gap:.5rem}.chatgpt-preview li{display:flex;align-items:center;gap:.65rem;padding:.55rem;border-bottom:1px solid #edf2ed}.plugin-glyph{display:grid;place-items:center;width:2rem;height:2rem;background:var(--soft);color:var(--deep);font-weight:800;border-radius:6px}.chatgpt-preview small{display:block;color:var(--muted)}.preview-highlight{border-left:3px solid #a96b00;background:#fff6d9;padding:.65rem;margin-top:.75rem;font-size:.9rem}.dropdown-preview{max-width:480px;display:grid;gap:.4rem}.dropdown-preview span{font-size:.82rem;color:var(--muted)}.dropdown-preview strong{display:flex;justify-content:space-between;border:1px solid var(--line);padding:.75rem}.dropdown-preview small{color:var(--muted)}.config-preview{margin-bottom:1rem}.config-preview div{display:grid;grid-template-columns:120px 1fr;gap:1rem;padding:.55rem 0;border-bottom:1px solid #edf2ed}.config-preview div:last-child{border-bottom:0}.config-preview dt{font-weight:800;color:var(--deep)}.config-preview dd{margin:0;overflow-wrap:anywhere}.config-preview code{font-size:.9em;color:var(--deep)}.trust-preview{display:flex;gap:.8rem;align-items:flex-start;background:#f3faf5}.trust-preview>span{display:grid;place-items:center;width:2rem;height:2rem;border-radius:50%;background:var(--green);color:#fff;font-weight:900}.trust-preview p{margin:.2rem 0 0;color:var(--muted)}.wizard-path{border-block:1px solid var(--line);padding:.85rem 0;color:var(--deep);font-weight:800}.wizard-path b{color:var(--green);padding:0 .35rem}.wizard-actions{display:flex;justify-content:space-between;gap:.75rem;padding:0 1.25rem 1.25rem}.wizard-actions [hidden]{display:none}
+@media(max-width:900px){.ledger{grid-template-columns:1fr}.ledger dl{grid-template-columns:repeat(3,1fr)}.hero{gap:2rem}}
+ @media(max-width:650px){.site-header,main{padding-left:1rem;padding-right:1rem}.hero{grid-template-columns:1fr;padding-top:2.2rem}.hero h1{font-size:clamp(3.1rem,14vw,5rem)}.hero-visual{align-items:flex-start}.hero-logo{width:min(68vw,260px)}.hero-visual img{width:min(68vw,260px)}.hero-visual p{text-align:left}.ledger dl,.steps,.access-grid,.about,.setup-grid,.price-strip{grid-template-columns:1fr}.steps{border-top:0}.step,.step:not(:first-child){border-right:0;border-top:1px solid var(--line);padding:1rem 0}.prompt-grid{columns:1}.section{padding:3rem 0}.section-heading p{max-width:none}.about{gap:1rem}.about .disclaimer{align-self:start}.connect-card{margin:1.5rem auto}.price-strip article{min-height:0}.wizard-progress{grid-template-columns:1fr 1fr}.wizard-progress li:nth-child(2){border-right:0}.wizard-progress li:nth-child(-n+2){border-bottom:1px solid var(--line)}.wizard-panel{min-height:0;padding:1rem}.wizard-actions{padding:0 1rem 1rem}.config-preview div{grid-template-columns:1fr;gap:.15rem}}
+:root{--ink:#102c21;--muted:#294c3a;--paper:#f7faf6;--soft:#e4f4e8;--line:#abc7b5;--green:#0f6b43;--deep:#124d35;--yellow:#ffc947}
+body{font-size:17px;line-height:1.7;color:var(--ink)}
+.hero{border-top:6px solid var(--yellow)}.hero h1{color:var(--ink)}
+.mark-row{color:var(--deep);font-size:.95rem}.mark-row span:first-child{background:var(--yellow);color:#26300d;padding:.3rem .55rem;border-radius:3px}.mark-rule{display:none}
+.developer-intro{font-size:1rem!important;color:var(--ink)!important;border-left:4px solid var(--yellow);padding:.3rem 0 .3rem 1rem;margin-top:1.3rem;line-height:1.55!important}
+.developer-intro a{font-weight:750;color:#075637;text-decoration-thickness:2px}
+.section-heading p,.section p,.doc p,.connect-card p,.ledger dd,.step>span:not(.step-num),.disclaimer,.fine-print,.updated,.hero-visual p,.site-footer{color:var(--muted)}
+.section h2,.doc h1,.connect-card h1{color:var(--ink)}.section-heading p{font-size:1rem}.ledger dd,.step>span:not(.step-num){font-size:1rem}.ledger dt{color:var(--deep);font-size:1rem}
+.site-header nav a{color:var(--deep);font-weight:600}.site-footer a,.fine-print a,.doc a{color:#075637;font-weight:650}
+.site-header nav .nav-github{background:var(--deep);color:#fff;padding:.45rem .9rem;border-radius:5px;margin-left:.35rem}.site-header nav .nav-github:hover{background:#0b3827;color:#fff;box-shadow:none}
+.roadmap-note{grid-column:1/-1;border-left:4px solid var(--yellow);background:#fff8dc;padding:.8rem 1rem;color:#523d00!important}
+.callout h2{color:#fff}.callout p,.section.callout p{color:#e8f8ee!important}.callout .button{background:#fff;color:var(--deep);border:2px solid #fff}.callout .button:hover{background:var(--yellow);border-color:var(--yellow);color:var(--ink)}
+.about{background:#e9f5eb;border-top:4px solid var(--yellow);padding:clamp(2rem,5vw,4rem);margin-top:1rem}.about p{color:var(--ink)}.about .disclaimer{color:#345644}
+.nav-signin{background:var(--deep)!important;color:#fff!important;padding-inline:1rem!important}.nav-signin:hover{background:#0b3827!important;box-shadow:none!important}.product-preview{width:min(100%,430px);background:#fff;border:1px solid var(--line);box-shadow:14px 14px 0 var(--yellow);border-radius:10px;overflow:hidden;text-align:left}.preview-bar{display:flex;align-items:center;gap:.35rem;border-bottom:1px solid var(--line);padding:.7rem .8rem}.preview-bar span{width:7px;height:7px;border-radius:50%;background:#b8d5c0}.preview-bar span:nth-child(2){background:#e5c66c}.preview-bar span:nth-child(3){background:#d99578}.preview-bar b{margin-left:auto;font-size:.7rem;color:var(--deep)}.preview-body{display:grid;grid-template-columns:48px 1fr;min-height:190px}.preview-sidebar{border-right:1px solid var(--line);padding:.9rem .75rem}.preview-sidebar i{display:block;height:8px;background:#dcece0;margin-bottom:.85rem;border-radius:2px}.preview-sidebar i:first-child{background:var(--green)}.preview-content{padding:1.2rem}.preview-content small{color:var(--green);font-size:.65rem;font-weight:800;letter-spacing:.08em}.preview-content strong{display:block;font-size:1.2rem;line-height:1.15;margin:.65rem 0 1.1rem}.preview-row{display:flex;align-items:center;gap:.45rem;border-top:1px solid var(--line);padding:.65rem 0;font-size:.72rem}.preview-row em{width:8px;height:8px;border-radius:50%;background:var(--green)}.preview-row mark{margin-left:auto;background:#fff3c5;color:#6f5100;padding:.1rem .3rem;border-radius:3px}.installation-guide{text-align:left}.installation-guide>.hero-logo{width:58px;height:58px;margin-bottom:1rem}.eyebrow{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--green);font-weight:800}.mcp-url-row{display:grid;grid-template-columns:1fr auto;gap:.6rem;align-items:end;margin:1.5rem 0}.mcp-url-row label{grid-column:1/-1;font-weight:750;color:var(--deep)}.mcp-url-row input{min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;padding:.8rem;font:inherit;color:var(--deep);background:var(--soft)}.installation-steps{display:grid;gap:.9rem;padding-left:1.5rem}.installation-steps li{padding-left:.35rem}.installation-steps strong,.installation-steps span{display:block}.installation-steps span{color:var(--muted);margin-top:.2rem}.guide-actions{display:flex;gap:.7rem;flex-wrap:wrap;margin:1.5rem 0}.troubleshooting{border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}.troubleshooting summary{cursor:pointer;color:var(--deep);font-weight:750}.troubleshooting li{margin:.5rem 0}
+.badge-row span{color:var(--deep);background:#e4f4e8}.permission-note li{margin:.5rem 0}
+.site-footer{line-height:1.55}.site-footer p{max-width:850px;margin:.45rem 0}.site-footer .copyright{color:var(--ink);font-weight:750}
+@media(max-width:650px){body{font-size:16.5px}.hero{border-top-width:4px}.mark-row{flex-wrap:wrap;gap:.6rem}.developer-intro{font-size:1rem!important}.about{padding:1.4rem}.hero h1{line-height:1}}
+.journey{background:#edf6ee;border-top:0;margin:3rem -1.6rem 0;padding:clamp(3rem,6vw,5.5rem) 1.6rem;position:relative;overflow:hidden}.journey:before{content:"";position:absolute;top:0;left:1.6rem;width:88px;height:7px;background:var(--yellow)}
+.journey .section-heading{margin-bottom:2.2rem;align-items:end}.journey .section-heading h2{font-size:clamp(2.5rem,5vw,4.7rem);max-width:750px;line-height:1.03}.journey .section-heading p{max-width:230px;font-size:1rem;color:var(--deep)}
+.journey-layout{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(310px,.88fr);gap:clamp(2rem,5vw,5rem);align-items:start}
+.journey-steps{border-top:2px solid var(--deep)}.journey-steps details{border-bottom:1px solid #a8c6af;background:transparent}.journey-steps details[open]{background:#fff;padding-bottom:.25rem;box-shadow:inset 4px 0 var(--yellow)}
+.journey-steps summary{list-style:none;display:grid;grid-template-columns:54px 1fr 32px;gap:1rem;align-items:center;cursor:pointer;padding:1.3rem 1.2rem;font-size:clamp(1.1rem,2vw,1.45rem);font-weight:750;line-height:1.25;color:var(--ink)}.journey-steps summary::-webkit-details-marker{display:none}.journey-steps summary:hover{background:#fff}.journey-steps summary:focus-visible{outline:3px solid var(--green);outline-offset:-3px}
+.journey-number{font-family:Georgia,serif;font-size:1.55rem;font-weight:400;color:var(--green)}.journey-toggle{font-size:1.5rem;font-weight:400;text-align:center;border:1px solid var(--line);border-radius:50%;width:30px;height:30px;line-height:25px}.journey-steps details[open] .journey-toggle{transform:rotate(45deg);border-color:var(--green)}.journey-steps details p{max-width:580px;padding:0 2rem 1.4rem 5.4rem;margin:0;color:var(--muted);font-size:1rem;line-height:1.7}
+.journey-example{background:var(--deep);color:white;min-height:420px;padding:clamp(1.4rem,3vw,2.5rem);display:flex;flex-direction:column;position:relative;box-shadow:14px 14px 0 var(--yellow)}.example-topline{display:flex;align-items:center;gap:.65rem;color:#e2f4e6;font-size:.85rem;font-weight:700}.example-topline span:last-child{margin-left:auto;border:1px solid #9cc8aa;padding:.2rem .5rem;border-radius:3px}.example-dot{width:9px;height:9px;background:var(--yellow);border-radius:50%}
+.example-question{font-size:clamp(1.7rem,3vw,2.5rem);line-height:1.16;letter-spacing:-.045em;font-weight:700;color:#fff!important;margin:3rem 0 2rem}.example-route{display:flex;gap:.75rem;align-items:center;border-top:1px solid #82b49a;border-bottom:1px solid #82b49a;padding:1rem 0;font-size:.91rem;line-height:1.35;color:#e2f4e6}.example-route span:nth-child(2){color:var(--yellow);font-size:1.5rem}.example-explain{font-size:1rem;line-height:1.6;color:#e2f4e6!important;margin:1.2rem 0 2rem}.example-foot{margin-top:auto;color:#fff;font-size:.9rem;font-weight:700}.example-lock{display:inline-grid;place-items:center;width:1.4rem;height:1.4rem;border-radius:50%;background:var(--yellow);color:var(--deep);margin-right:.4rem}
+.examples{background:#fff;margin:0 -1.6rem;padding:clamp(3rem,6vw,5rem) 1.6rem}.examples .section-heading h2{max-width:650px}.prompt-grid{columns:initial;display:grid;grid-template-columns:repeat(6,1fr);gap:.75rem}.prompt-grid li{display:flex;align-items:flex-end;grid-column:span 2;min-height:160px;padding:1.2rem;background:#e8f4eb;border:0;border-top:4px solid var(--green);font-size:clamp(1.05rem,2vw,1.4rem);line-height:1.25}.prompt-grid li:nth-child(2),.prompt-grid li:nth-child(5){background:#fff2c9;border-color:#a96b00}.prompt-grid li:nth-child(4){grid-column:span 3}.prompt-grid li:nth-child(5){grid-column:span 3}.prompt-grid li::marker{content:""}
+@media(max-width:900px){.journey-layout{grid-template-columns:1fr}.journey-example{min-height:340px}.journey .section-heading{display:block}}
+@media(max-width:650px){.journey,.examples{margin-left:-1rem;margin-right:-1rem;padding:3rem 1rem}.journey:before{left:1rem}.journey .section-heading h2 br{display:none}.journey-steps summary{grid-template-columns:38px 1fr 30px;gap:.5rem;padding:1rem .6rem}.journey-number{font-size:1.25rem}.journey-steps details p{padding:0 1rem 1.2rem 3.4rem}.journey-example{box-shadow:8px 8px 0 var(--yellow);min-height:390px}.prompt-grid{grid-template-columns:1fr 1fr}.prompt-grid li,.prompt-grid li:nth-child(4),.prompt-grid li:nth-child(5){grid-column:span 1;min-height:135px}.prompt-grid li:last-child{grid-column:span 2}}
+
+/* Classroom Desk public redesign: calm desk, clear answer. */
+:root{--emerald-50:#ecf7f2;--emerald-100:#d3efe3;--emerald-500:#12906a;--emerald-600:#0e7c5a;--emerald-700:#0b6247;--emerald-900:#073f2e;--mint:#bfe8d6;--paper:#faf8f3;--surface:#fff;--line:#e6e2d8;--ink:#14201b;--ink-2:#3c4a43;--muted:#4f5f56;--graphite-900:#0f1714;--graphite-800:#17211d;--graphite-line:#2a3832}
+html{scroll-behavior:smooth}body{background:var(--paper);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.6;letter-spacing:0}a{color:var(--emerald-700)}a:focus-visible,button:focus-visible{outline:2px solid var(--emerald-600);outline-offset:3px}.skip-link{position:absolute;left:1rem;top:-4rem;background:var(--graphite-900);color:#fff;padding:.6rem 1rem;border-radius:10px;z-index:20}.skip-link:focus{top:1rem}.site-header{position:sticky;top:0;z-index:10;height:64px;max-width:none;padding:0 max(24px,calc((100% - 1200px)/2));background:rgb(250 248 243 / .96);border-bottom:1px solid var(--line);backdrop-filter:blur(12px)}.brand{font-size:18px;font-weight:650;color:var(--ink);gap:10px}.logo{width:32px;height:32px;flex:0 0 32px;display:block}.logo svg{display:block;width:32px;height:32px}.desktop-nav{display:flex!important;gap:28px;margin-left:auto;margin-right:28px}.desktop-nav a,.header-actions a{font-size:14px;padding:4px 0;color:var(--ink-2);border-radius:0}.desktop-nav a:hover,.desktop-nav a[aria-current=page]{color:var(--emerald-700);background:none;box-shadow:inset 0 -2px var(--emerald-600)}.header-actions{display:flex;align-items:center;gap:18px}.header-cta{min-height:40px;padding:0 14px!important;font-size:14px!important}.menu-toggle{display:none;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 10px;color:var(--ink);font:inherit}.mobile-menu{display:none}.site-header nav a.nav-signin{background:none!important;color:var(--ink-2)!important;padding:4px 0!important}.site-header nav a.nav-signin:hover{box-shadow:inset 0 -2px var(--emerald-600)!important}.button{min-height:44px;border-radius:10px;background:var(--emerald-600);color:#fff!important;padding:0 16px;border:1px solid var(--emerald-600);font-size:15px;font-weight:650;cursor:pointer;transition:background-color 150ms ease,color 150ms ease,transform 150ms ease}.button:hover{background:var(--emerald-700);transform:translateY(-1px)}.button.secondary{background:transparent;color:var(--ink)!important;border-color:var(--line)}.button.secondary:hover{background:var(--surface);color:var(--emerald-700)!important}.text-link{font-weight:650;text-decoration-thickness:1px;text-underline-offset:4px}.text-link span{font-size:1.1em}.site-header+.mobile-menu+main,main{max-width:1200px;padding:0 24px 64px;margin:0 auto}.hero{min-height:calc(100dvh - 64px);display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,.9fr);gap:64px;align-items:center;padding:64px 0 72px;border:0}.eyebrow{font-size:12px;line-height:1.2;letter-spacing:.08em;text-transform:uppercase;color:var(--emerald-700);font-weight:700}.hero h1,.section h2,.closing-cta h2,.pricing-page h1,.guide-page h1{font-family:ui-sans-serif,system-ui,sans-serif;font-weight:650;letter-spacing:-.04em}.hero h1{font-size:clamp(36px,4.6vw,60px);line-height:1.06;max-width:650px;margin:18px 0}.hero-lead{font-size:18px;line-height:1.55;max-width:570px;color:var(--ink-2)}.actions{display:flex;align-items:center;gap:24px;margin-top:28px}.hero-note{font-size:14px;color:var(--muted);max-width:520px;margin-top:20px}.demo-frame,.example-panel{background:var(--graphite-800);color:#f4fbf7;border-radius:24px;box-shadow:0 8px 24px -8px rgb(20 32 27 / .14);padding:28px}.demo-frame{min-height:410px;display:flex;flex-direction:column;justify-content:center}.demo-top{display:flex;justify-content:space-between;align-items:center;color:#b7c9c0;font-size:13px}.example-badge{display:inline-flex;border:1px solid #587267;border-radius:6px;padding:4px 8px;font-size:12px;color:#e6f4ec}.demo-user{align-self:flex-end;background:#2a3933;border-radius:16px 16px 4px 16px;padding:12px 16px;margin:56px 0 20px;max-width:80%}.demo-reply{border-top:1px solid var(--graphite-line);padding-top:20px}.demo-reply strong{font-size:15px}.demo-reply ul{padding-left:20px;color:#d6e8df}.demo-reply small,.example-panel small{display:block;color:#a9c2b6;margin-top:22px}.value-strip{display:grid;grid-template-columns:repeat(3,1fr);border-block:1px solid var(--line);padding:28px 0;margin-bottom:24px}.value-strip>div{padding:0 28px;border-left:1px solid var(--line)}.value-strip>div:first-child{padding-left:0;border-left:0}.outline-icon{color:var(--emerald-600);font-size:24px}.value-strip h2{font-size:18px;margin:10px 0 4px}.value-strip p{margin:0;color:var(--muted);font-size:14px}.section{padding:88px 0;border-top:1px solid var(--line)}.section-heading{display:block;margin-bottom:32px}.section h2,.closing-cta h2{font-size:clamp(28px,3vw,40px);line-height:1.12;margin:8px 0 0}.prompt-layout{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:stretch}.prompt-tabs{display:grid;gap:0}.prompt-tabs p{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:16px 0 4px}.prompt-tabs button{display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);padding:15px 0;font:inherit;cursor:pointer}.prompt-tabs button[aria-selected=true]{color:var(--emerald-700);font-weight:650}.prompt-tabs button span{font-size:12px;color:var(--muted);white-space:nowrap}.example-panel{min-height:320px;display:flex;flex-direction:column;justify-content:center}.example-question{font-size:28px;line-height:1.2;margin:24px 0}.example-panel p:not(.example-question){color:#d6e8df}.numbered-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;border-top:1px solid var(--line);padding-top:28px}.numbered-steps b{color:var(--emerald-600);font-size:14px}.numbered-steps h3{font-size:18px;margin:18px 0 8px}.numbered-steps p,.trust-section p{color:var(--muted);margin:0}.section-actions{display:flex;gap:24px;align-items:center;margin-top:32px}.trust-section{display:grid;grid-template-columns:.8fr 1.2fr;gap:72px}.trust-columns{display:grid;grid-template-columns:1fr 1fr;gap:32px}.trust-columns h3{font-size:18px;margin-top:0}.trust-columns ul{list-style:none;padding:0;margin:0;color:var(--ink-2)}.trust-columns li{padding:8px 0 8px 24px;border-bottom:1px solid var(--line);position:relative}.trust-columns li:before{content:"✓";position:absolute;left:0;color:var(--emerald-600)}.pricing-teaser{padding-bottom:72px}.price-list{border-top:1px solid var(--line);margin:24px 0 18px}.price-list div{display:grid;grid-template-columns:1fr 1fr auto;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid var(--line)}.price-list strong{font-size:18px}.price-list span{color:var(--muted)}.price-list em,.status-strip,.disabled-control{font-style:normal;font-size:12px;background:#f1eee7;border:1px solid var(--line);border-radius:6px;padding:5px 8px;color:var(--ink-2);justify-self:end}.faq-list{max-width:760px;border-top:1px solid var(--line)}.faq-list details{border-bottom:1px solid var(--line);padding:17px 0}.faq-list summary{cursor:pointer;font-weight:650;list-style:none}.faq-list summary::-webkit-details-marker{display:none}.faq-list summary:after{content:"+";float:right;color:var(--emerald-600);font-size:20px}.faq-list details[open] summary:after{content:"−"}.faq-list p{max-width:650px;color:var(--muted);margin:10px 0 0}.closing-cta{background:var(--graphite-900);color:#f4fbf7;border-radius:24px;padding:64px;margin:24px 0 0}.closing-cta h2{max-width:620px}.closing-cta>div{display:flex;align-items:center;gap:24px;margin-top:28px}.closing-cta .text-link{color:#d6e8df}.site-footer{max-width:1200px;margin:0 auto;padding:56px 24px 36px;border-top:1px solid var(--line);color:var(--muted)}.footer-grid{display:grid;grid-template-columns:1.5fr repeat(3,1fr);gap:40px}.footer-grid h2{font-size:13px;color:var(--ink);margin:0 0 14px}.footer-grid>a,.footer-grid div>a{display:block;margin:8px 0}.footer-brand{display:inline-flex!important;margin:0!important}.developer-credit{font-size:13px;margin-top:28px}.disclaimer{border-top:1px solid var(--line);padding-top:20px;margin-top:40px;font-size:13px;max-width:900px}.pricing-page,.guide-page{padding:80px 0 0;max-width:1000px}.pricing-page h1,.guide-page h1{font-size:clamp(36px,4.6vw,60px);max-width:720px;margin:16px 0}.page-lead{max-width:650px;font-size:18px;color:var(--ink-2)}.status-strip{display:inline-block;margin:28px 0}.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:32px 0 72px}.plan-card{border:1px solid var(--line);border-radius:16px;padding:24px;background:var(--surface);display:flex;flex-direction:column;gap:10px}.plan-card.featured{border-top:2px solid var(--emerald-600)}.plan-card h2{font-size:30px;margin:0}.plan-card h2 small{font-size:14px;color:var(--muted);font-weight:500}.plan-card p{color:var(--muted)}.plan-card ul{padding-left:20px;color:var(--ink-2);min-height:145px}.plan-card .button,.plan-card .disabled-control{align-self:flex-start;margin-top:auto}.plan-card .text-link{margin-top:8px}.compare,.plain-billing{border-top:1px solid var(--line);padding-top:40px;margin-bottom:64px}.table-scroll{overflow-x:auto}.compare table{border-collapse:collapse;width:100%;min-width:650px}.compare th,.compare td{text-align:left;padding:14px 12px;border-bottom:1px solid var(--line)}.compare th{color:var(--ink)}.compare td{color:var(--muted)}.plain-billing>div{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}.plain-billing p{color:var(--muted)}.guide-page{max-width:1040px}.connect-guide{display:grid;grid-template-columns:5fr 7fr;gap:28px;background:var(--graphite-900);color:#f4fbf7;border-radius:24px;padding:28px;margin-top:36px;position:relative}.connect-guide h2{font-size:28px;line-height:1.2;margin:8px 0}.connect-guide p{color:#c8d9d0}.guide-steps{min-height:300px}.step-kicker{font-size:13px!important;color:var(--mint)!important}.connect-guide section[hidden]{display:none}.help-text{font-size:13px!important;color:#a9c2b6!important;margin-top:22px}.copy-chip{display:flex;align-items:center;gap:10px;background:var(--graphite-800);border:1px solid var(--graphite-line);border-radius:10px;padding:10px}.copy-chip code{overflow-wrap:anywhere;color:var(--mint);font-family:ui-monospace,monospace;font-size:13px;flex:1}.copy-chip button{background:none;border:1px solid #587267;color:#f4fbf7;border-radius:6px;padding:7px 9px;cursor:pointer}.guide-visual{border:1px solid var(--graphite-line);border-radius:16px;min-height:300px;padding:20px;display:flex;flex-direction:column;justify-content:center;align-items:center;background:var(--graphite-800)}.guide-visual-board{width:min(80%,320px);aspect-ratio:1.4;border:2px solid var(--mint);border-radius:12px;padding:32px;display:grid;gap:12px;align-content:center}.guide-visual-board span{display:block;height:12px;border-radius:6px;background:#6c9482}.guide-visual-board span:first-child{width:75%;background:var(--mint)}.guide-controls,.modal-footer{grid-column:1/-1;display:flex;align-items:center;gap:16px;border-top:1px solid var(--graphite-line);padding-top:20px}.guide-controls .text-link,.modal-footer .text-link{color:#d6e8df;margin-left:auto}.troubleshooting{margin-top:30px;border-top:1px solid var(--line);padding-top:20px}.troubleshooting summary{cursor:pointer;font-weight:650}.test-prompt{margin-top:28px;color:var(--emerald-700);font-weight:650}.connect-modal{border:0;padding:0;background:transparent;max-width:960px;width:calc(100% - 32px);color:#f4fbf7}.connect-modal::backdrop{background:rgb(15 23 20 / .6)}.modal-shell{background:var(--graphite-900);border-radius:24px;padding:28px;box-shadow:0 24px 64px -16px rgb(0 0 0 / .45)}.modal-header{display:flex;justify-content:space-between;gap:20px}.modal-header h2{font-size:24px;margin:5px 0 0}.close-button{background:none;border:1px solid var(--graphite-line);color:#f4fbf7;border-radius:8px;font-size:24px;width:40px;height:40px;cursor:pointer}.modal-progress{color:var(--mint);font-size:13px}.modal-shell .connect-guide{margin-top:0;padding:0;background:none}.modal-shell .guide-controls{display:none}.modal-footer{margin-top:24px}.modal-open{overflow:hidden}.compact main{min-height:0}
+@media(max-width:1023px){.hero{grid-template-columns:1fr;min-height:0;padding-top:56px}.demo-frame{max-width:620px}.trust-section{grid-template-columns:1fr;gap:32px}.pricing-grid{grid-template-columns:1fr 1fr}.plan-card:last-child{grid-column:1/-1}.footer-grid{grid-template-columns:repeat(2,1fr)}.connect-guide{grid-template-columns:1fr}.guide-visual{min-height:160px}}
+@media(max-width:767px){.site-header{height:56px;padding:0 16px}.desktop-nav,.header-actions .nav-signin{display:none!important}.header-actions{margin-left:auto;gap:8px}.header-cta{min-height:40px;padding:0 12px!important}.menu-toggle{display:block}.mobile-menu{display:grid;gap:0;padding:12px 16px;background:var(--paper);border-bottom:1px solid var(--line)}.mobile-menu[hidden]{display:none}.mobile-menu a{padding:12px 0;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none}.mobile-menu .button{margin-top:12px}.site-header+.mobile-menu+main,main{padding:0 16px 48px}.hero{padding:48px 0 56px;gap:36px}.hero h1{font-size:clamp(36px,12vw,52px)}.hero-lead{font-size:17px}.actions,.section-actions,.closing-cta>div{align-items:stretch;flex-direction:column;gap:12px}.actions .button,.closing-cta .button{width:100%}.value-strip{grid-template-columns:1fr;gap:18px}.value-strip>div{padding:18px 0;border-left:0;border-top:1px solid var(--line)}.value-strip>div:first-child{padding-top:0;border-top:0}.prompt-layout{grid-template-columns:1fr;gap:28px}.prompt-tabs{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:8px}.prompt-tabs p{display:none}.prompt-tabs button{min-width:220px;scroll-snap-align:start;border:1px solid var(--line);border-radius:10px;padding:12px;display:block}.prompt-tabs button span{display:block;margin-top:8px}.numbered-steps,.trust-columns,.plain-billing>div{grid-template-columns:1fr;gap:24px}.price-list div{grid-template-columns:1fr auto}.price-list em{grid-column:2;grid-row:1 / span 2}.closing-cta{padding:40px 24px}.footer-grid{grid-template-columns:1fr 1fr;gap:28px}.pricing-page,.guide-page{padding-top:48px}.pricing-grid{grid-template-columns:1fr;margin-bottom:48px}.plan-card:last-child{grid-column:auto}.plan-card ul{min-height:0}.connect-guide,.modal-shell{padding:20px;border-radius:16px}.guide-visual{min-height:110px}.guide-visual-board{width:180px}.connect-modal{width:100%;height:100%;max-width:none}.connect-modal[open]{display:flex;align-items:stretch}.modal-shell{border-radius:0;width:100%;overflow:auto}.modal-shell .guide-visual{min-height:90px}.modal-footer{flex-wrap:wrap}.modal-footer .text-link{width:100%;margin-left:0}.site-footer{padding-inline:16px}}
+ .modal-shell .step-kicker{display:none}.modal-footer button{min-height:44px;min-width:88px}.modal-footer .button.secondary{background:#f4fbf7;color:#10251c;border:1px solid #f4fbf7}.modal-footer .button.secondary:disabled{background:#355a4a!important;color:#d7e6de!important;border-color:#8bc7a7!important;opacity:1}.modal-footer .button:not(.secondary){background:#0e7c5a;color:#fff;border:1px solid #55c49a}.modal-footer button:focus-visible{outline:3px solid #b8f3d5;outline-offset:3px}
+ /* Intelligent Performance adaptation: a paper stage, focused product proof, and restrained glass surfaces. */
+ .home-page{background:#ececeb;color:#202020}.home-page main{max-width:none;padding:0 24px 72px}.home-stage{position:relative;isolation:isolate;min-height:clamp(760px,calc(100svh - 64px),980px);margin:0 -24px;padding:clamp(36px,7vh,80px) max(24px,calc((100% - 1200px)/2)) 64px;overflow:hidden;background:linear-gradient(135deg,rgba(236,236,234,.92),rgba(236,236,234,.72)),#ececeb}.home-stage:after{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(circle at 12% 10%,rgba(18,144,106,.16),transparent 34%),radial-gradient(circle at 88% 23%,rgba(208,143,106,.14),transparent 31%),linear-gradient(180deg,rgba(255,255,255,.14),transparent 48%,rgba(20,32,27,.08));pointer-events:none}.stage-motion{position:absolute;inset:0;z-index:-3;width:100%;height:100%;object-fit:cover;opacity:.24;mix-blend-mode:multiply;pointer-events:none}.stage-motion--narrow{display:none}.home-stage-noise{position:absolute;inset:0;z-index:-1;width:100%;height:100%;opacity:.24;mix-blend-mode:multiply;pointer-events:none}.home-stage-inner{position:relative;z-index:1;max-width:1200px;margin:0 auto}.home-masthead{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,510px);gap:clamp(36px,6vw,88px);align-items:center}.home-copy{max-width:660px}.home-eyebrow{color:#0b6247}.home-copy h1{max-width:680px;margin:18px 0 20px;color:#202020;font-size:clamp(42px,min(5.2vw,8vh),72px);font-weight:520;letter-spacing:-.062em;line-height:1.01}.home-copy h1 span{color:#0e7c5a}.home-intro{max-width:610px;margin:0;color:#394a42;font-size:clamp(17px,1.65vw,22px);line-height:1.48;letter-spacing:-.02em}.home-copy .actions{margin-top:28px}.home-note{max-width:520px;margin:20px 0 0;color:#52645a;font-size:14px}.home-console{position:relative;overflow:hidden;border:1px solid rgba(255,255,255,.56);border-radius:22px;background:linear-gradient(145deg,rgba(255,255,255,.58),rgba(255,255,255,.18)),rgba(240,246,242,.38);box-shadow:0 26px 70px rgba(34,56,45,.18),inset 0 1px 0 rgba(255,255,255,.72);backdrop-filter:blur(18px) saturate(1.12);-webkit-backdrop-filter:blur(18px) saturate(1.12)}.home-console:before{content:"";position:absolute;inset:0;background:linear-gradient(120deg,rgba(255,255,255,.35),transparent 32%,rgba(255,255,255,.12) 68%,transparent);pointer-events:none}.console-top{position:relative;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 20px;border-bottom:1px solid rgba(20,32,27,.12);color:#33483d;font-size:12px;letter-spacing:.02em}.console-title{display:inline-flex;align-items:center;gap:8px;font-weight:700}.console-mark{width:8px;height:8px;border-radius:50%;background:#0e7c5a;box-shadow:0 0 0 4px rgba(14,124,90,.12)}.console-status{color:#587064}.home-example-panel{position:relative;z-index:1;min-height:315px;padding:30px 28px 18px;background:transparent!important;border-radius:0;box-shadow:none;color:#17211d}.home-example-panel .example-badge{border-color:rgba(14,124,90,.36);color:#0b6247;background:rgba(255,255,255,.35)}.home-example-panel .example-question{max-width:390px;margin:24px 0 16px;color:#14201b!important;font-size:clamp(27px,3vw,39px);font-weight:620;letter-spacing:-.045em;line-height:1.08}.home-example-panel .example-answer{max-width:430px;margin:0;color:#3f5549!important;font-size:16px;line-height:1.58}.home-example-panel small{max-width:400px;margin-top:22px;color:#60756a}.home-example-panel .example-actions{display:flex;align-items:center;gap:12px;margin-top:22px}.home-example-panel .demo-status{margin:0}.home-prompt-tabs{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:16px 20px 20px;border-top:1px solid rgba(20,32,27,.12)}.home-prompt-tabs .prompt-label{grid-column:1/-1;margin:0 0 2px;color:#587064;font-size:11px;letter-spacing:.1em;text-transform:uppercase}.home-prompt-tabs button{min-height:54px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 11px;border:1px solid rgba(20,32,27,.14);border-radius:11px;background:rgba(255,255,255,.38);color:#20352a;font-size:13px;line-height:1.25}.home-prompt-tabs button:hover,.home-prompt-tabs button[aria-selected=true]{border-color:rgba(14,124,90,.55);background:rgba(255,255,255,.68);color:#0b6247}.home-prompt-tabs button span{color:#6a7b71;font-size:10px;white-space:nowrap}.capability-section{margin-top:clamp(54px,9vh,96px)}.capability-heading{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,390px);gap:24px;align-items:end;margin-bottom:25px}.capability-heading .eyebrow{grid-column:1/-1;margin:0}.capability-heading h2{margin:0;max-width:680px;color:#202020;font-size:clamp(30px,3.3vw,48px);letter-spacing:-.052em;line-height:1.05}.capability-heading>p:last-child{margin:0;color:#52645a;line-height:1.55}.capability-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(12px,1.5vw,22px)}.capability-card{position:relative;min-height:310px;display:flex;flex-direction:column;overflow:hidden;padding:23px;border:1px solid rgba(255,255,255,.58);border-radius:17px;background:linear-gradient(145deg,rgba(255,255,255,.68),rgba(255,255,255,.24)),rgba(220,238,228,.34);box-shadow:0 12px 30px rgba(34,56,45,.12),inset 0 1px 0 rgba(255,255,255,.78);backdrop-filter:blur(13px);-webkit-backdrop-filter:blur(13px)}.capability-card:after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 86% 12%,rgba(14,124,90,.12),transparent 34%);pointer-events:none}.capability-card-top{position:relative;z-index:1;display:flex;justify-content:space-between;color:#4e6759;font-size:11px;letter-spacing:.09em;text-transform:uppercase}.capability-card h3{position:relative;z-index:1;max-width:300px;margin:42px 0 10px;color:#17251e;font-size:clamp(21px,2vw,28px);letter-spacing:-.04em;line-height:1.1}.capability-card p{position:relative;z-index:1;max-width:330px;margin:0;color:#52645a;line-height:1.52}.capability-visual{position:relative;z-index:1;width:100%;height:92px;margin-top:auto;color:#0e7c5a;opacity:.72}.home-page .how-section,.home-page .trust-section,.home-page .pricing-teaser,.home-page .faq-section,.home-page .closing-cta{max-width:1200px;margin-left:auto;margin-right:auto}.home-page .how-section{margin-top:34px}.home-page .closing-cta{box-shadow:0 18px 44px rgba(34,56,45,.12)}
+ @media(max-width:1023px){.home-masthead{grid-template-columns:1fr;gap:34px}.home-copy{max-width:760px}.home-console{max-width:680px;width:100%;margin-inline:auto}.capability-heading{grid-template-columns:1fr}.capability-heading>p:last-child{max-width:560px}.capability-cards{grid-template-columns:1fr 1fr}.capability-card:last-child{grid-column:1/-1}}
+ @media(max-width:767px){.home-page main{padding-inline:16px}.home-stage{min-height:0;margin-inline:-16px;padding:38px 16px 50px;background:linear-gradient(180deg,rgba(236,236,234,.84),rgba(236,236,234,.94)),#ececeb}.stage-motion--wide{display:none}.stage-motion--narrow{display:block;opacity:.14}.home-masthead{gap:30px}.home-copy h1{font-size:clamp(40px,12vw,60px)}.home-intro{font-size:18px}.home-copy .actions{align-items:stretch;flex-direction:column;gap:12px}.home-copy .actions .button{width:100%}.home-note{margin-top:17px}.home-console{border-radius:17px}.console-top{padding:14px 15px}.home-example-panel{min-height:310px;padding:24px 20px 14px}.home-example-panel .example-question{font-size:31px}.home-prompt-tabs{grid-template-columns:1fr 1fr;padding:14px 15px 15px}.home-prompt-tabs button{min-height:58px;display:block;text-align:left}.home-prompt-tabs button span{display:block;margin-top:6px}.capability-section{margin-top:56px}.capability-heading h2{font-size:34px}.capability-cards{grid-template-columns:1fr}.capability-card:last-child{grid-column:auto}.capability-card{min-height:270px}.home-page .how-section{margin-top:0}}
+ @keyframes homeRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+ @media(prefers-reduced-motion:no-preference){.home-page .home-masthead{animation:homeRise .72s cubic-bezier(.16,1,.3,1) both}.home-page .capability-section{animation:homeRise .72s cubic-bezier(.22,1,.36,1) .12s both}}
+ @media(max-height:720px) and (min-width:768px){.home-stage{min-height:900px}.home-masthead{align-items:start}.home-copy h1{font-size:clamp(40px,5vw,62px)}}
+ @media(prefers-reduced-motion:reduce){.stage-motion{display:none!important}.home-page .home-masthead,.home-page .capability-section{animation:none!important}.home-console,.capability-card{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(255,255,255,.9)}}
+ /* Keep the shared header on one intentional row before the compact mobile menu takes over. */
+ .site-header{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0}.brand{min-width:0;flex:0 1 auto}.brand span{white-space:nowrap}.desktop-nav{flex-wrap:nowrap}
+ @media(max-width:900px){.site-header{height:64px;padding:0 20px}.desktop-nav,.header-actions .nav-signin{display:none!important}.header-actions{display:flex;align-items:center;margin-left:auto;gap:8px;flex:0 0 auto}.menu-toggle{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:7px 11px}.mobile-menu{display:grid;gap:0;padding:12px 20px;background:var(--paper);border-bottom:1px solid var(--line)}.mobile-menu[hidden]{display:none}.mobile-menu a{padding:12px 0;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none}.mobile-menu .button{margin-top:12px}}
+ @media(max-width:420px){.site-header{padding:0 16px}.header-cta{display:none!important}.mobile-menu{padding-inline:16px}.footer-grid{grid-template-columns:1fr}}
+ @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.button{transition:none}.example-panel{animation:none}}
+`;
+}
+
+function siteStyles() {
+  return `
+:root{color-scheme:light;--ink:#13231d;--muted:#58675f;--paper:#fbfdfb;--soft:#eef6f0;--line:#d8e6dc;--green:#207a55;--deep:#174236;--warn:#8a4b14;--white:#fff}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--deep);text-underline-offset:.18em}a:focus-visible,button:focus-visible{outline:3px solid #8bc7a7;outline-offset:3px}.site-header{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;max-width:1120px;margin:0 auto;padding:1.1rem 1.25rem}.brand{display:inline-flex;align-items:center;gap:.65rem;text-decoration:none;font-weight:750;color:var(--ink)}.logo{width:38px;height:38px;flex:0 0 auto}.site-header nav{display:flex;gap:.35rem;flex-wrap:wrap}.site-header nav a{padding:.45rem .7rem;border-radius:999px;text-decoration:none;color:var(--muted);font-size:.95rem}.site-header nav a[aria-current=page],.site-header nav a:hover{background:var(--soft);color:var(--deep)}main{max-width:1120px;margin:0 auto;padding:1rem 1.25rem 4rem}.hero{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr);gap:2rem;align-items:center;padding:3.5rem 0 2.5rem}.mark-row{display:flex;align-items:center;gap:.7rem;color:var(--muted);font-size:.95rem}.hero .logo{width:46px;height:46px}.hero h1{font-size:clamp(2.65rem,8vw,5.9rem);line-height:.94;letter-spacing:0;margin:1.25rem 0}.lede{font-size:clamp(1.35rem,2.6vw,2rem);line-height:1.2;color:var(--deep);font-weight:680;margin:.4rem 0}.hero p{max-width:690px}.actions,.badge-row{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;margin-top:1.4rem}.button{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;background:var(--deep);color:#fff;text-decoration:none;font-weight:720;padding:.82rem 1rem;min-height:44px;cursor:pointer;font:inherit}.button:hover{background:#0f3027}.button.secondary{background:var(--soft);color:var(--deep);border:1px solid var(--line)}.trust-line{font-weight:700;color:var(--green)}.ledger,.panel,.connect-card{background:var(--white);border:1px solid var(--line);border-radius:18px;box-shadow:0 18px 60px rgba(23,66,54,.08)}.ledger{padding:1.35rem}.ledger h2{margin:.1rem 0 1rem;font-size:1.2rem}.ledger dl{display:grid;gap:.85rem;margin:0}.ledger div{border-left:4px solid var(--green);padding-left:.8rem}.ledger dt{font-weight:800}.ledger dd{margin:.15rem 0 0;color:var(--muted)}.section{padding:3rem 0;border-top:1px solid var(--line)}.section-heading{display:flex;justify-content:space-between;gap:2rem;align-items:end;margin-bottom:1.25rem}.section h2,.doc h1,.connect-card h1{font-size:clamp(1.8rem,4vw,3rem);line-height:1.04;margin:0 0 .75rem}.section-heading p,.section p,.doc p,.connect-card p{color:var(--muted)}.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:.85rem}.step{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:1rem}.step-num{display:grid;place-items:center;width:2rem;height:2rem;border-radius:50%;background:var(--soft);color:var(--deep);font-weight:800;margin-bottom:.85rem}.steps strong,.steps span{display:block}.steps .step>span:not(.step-num){color:var(--muted);margin-top:.35rem}.prompt-grid{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(5,1fr);gap:.75rem}.prompt-grid li{background:var(--deep);color:#fff;border-radius:16px;padding:1rem;min-height:106px;display:flex;align-items:flex-end;font-weight:680}.split{display:grid;grid-template-columns:.75fr 1.25fr;gap:1.5rem}.access-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.panel{padding:1.15rem}.panel h3{margin:.1rem 0 .7rem}.panel ul{margin:.5rem 0 0;padding-left:1.2rem}.panel li{margin:.22rem 0}.panel.ok{border-color:#b8dfc4}.panel.no{border-color:#efd4b8}.callout{background:linear-gradient(135deg,#eaf6ef,#f8fcf9);border:1px solid var(--line);border-radius:20px;padding:2rem;margin:2rem 0}.about{border-bottom:1px solid var(--line)}.disclaimer,.fine-print,.updated{font-size:.95rem;color:var(--muted)}.doc{max-width:820px;background:var(--white);border:1px solid var(--line);border-radius:20px;padding:clamp(1.25rem,4vw,2.5rem);margin:2rem auto}.doc h2{margin-top:1.8rem;color:var(--deep)}.support-card .panel{background:var(--soft);box-shadow:none}.connect-card{max-width:720px;margin:3rem auto;padding:clamp(1.25rem,4vw,2.4rem);text-align:left}.connect-card .logo{width:58px;height:58px}.badge-row span{background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:.35rem .6rem;font-weight:720;color:var(--deep)}.permission-note{border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:1.4rem 0;padding:1rem 0}.permission-note h2{font-size:1.1rem;margin:.2rem 0}.permission-note ul{margin:.5rem 0;padding-left:1.2rem}.site-footer{border-top:1px solid var(--line);max-width:1120px;margin:0 auto;padding:1.5rem 1.25rem 2rem;color:var(--muted);font-size:.92rem}.site-footer a{margin-right:.8rem}.compact main{min-height:68vh}@media (max-width:860px){.site-header{align-items:flex-start;flex-direction:column}.hero,.split,.access-grid{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}.prompt-grid{grid-template-columns:1fr 1fr}.section-heading{display:block}}@media (max-width:560px){main{padding-inline:1rem}.site-header{padding-inline:1rem}.hero{padding-top:1.8rem}.steps,.prompt-grid{grid-template-columns:1fr}.actions .button{width:100%}.site-header nav a{padding:.35rem .5rem}.doc,.connect-card{border-radius:14px}}@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}`;
+}
+
+function escapeHtml(value: string) { return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!); }
