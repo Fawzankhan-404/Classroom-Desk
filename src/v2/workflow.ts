@@ -8,6 +8,8 @@ export type V2AuditEvent = { subject: string; action: "save_assignment_pdf"; cou
 export type V2Clients = {
   classroom: classroom_v1.Classroom;
   drive: drive_v3.Drive;
+  /** Maximum number of Classroom API pages read per collection. */
+  publicPageLimit?: number;
   /** Drive client backed by the explicit Picker grant, when one has been established. */
   driveForUpload?: (context: AssignmentContext) => Promise<drive_v3.Drive | undefined>;
   uploadPdf?: (context: AssignmentContext, name: string, bytes: Uint8Array) => Promise<{ id?: string | null; name?: string | null; mimeType?: string | null; webViewLink?: string | null }>;

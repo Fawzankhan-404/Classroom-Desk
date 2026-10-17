@@ -80,18 +80,20 @@ function queryMatches(item: { title?: unknown; description?: unknown }, courseNa
   return contains(item.title, query) || contains(item.description, query) || contains(courseName, query);
 }
 
-export async function getStudentOverview(clients: V2Clients, input: { courseQuery?: string; searchQuery?: string; view?: StudentView; days?: number; limit?: number }, options: { now?: Date } = {}) {
+export async function getStudentOverview(clients: V2Clients, input: { courseQuery?: string; searchQuery?: string; view?: StudentView; days?: number; limit?: number; courseLimit?: number }, options: { now?: Date } = {}) {
   const now = options.now ?? new Date();
   const view = input.view ?? "all";
   const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), 100);
+  const courseLimit = Math.min(Math.max(input.courseLimit ?? 25, 1), 25);
   const days = Math.min(Math.max(input.days ?? 7, 1), 31);
   const allCourses = await listCourses(clients);
   const selectedCourses = input.courseQuery?.trim()
     ? allCourses.filter((course) => course.id === input.courseQuery || contains(course.name, input.courseQuery!))
     : allCourses;
   if (input.courseQuery && selectedCourses.length === 0) throw new V2WorkflowError("course_not_found", "No accessible course matched that name.");
+  const shownCourses = selectedCourses.slice(0, courseLimit);
 
-  const bundles = await Promise.all(selectedCourses.slice(0, 25).map(async (course) => {
+  const bundles = await Promise.all(shownCourses.map(async (course) => {
     if (!course.id) return { course, coursework: [], submissions: [], announcements: [], materials: [], topics: [], partial: true, submissionStatusAvailable: false };
     // A Classroom account can be both a teacher and a student. Google may
     // reject one student-only collection (for example submissions on a
@@ -139,13 +141,15 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
     partialData: bundles.some((bundle) => bundle.partial),
     summary: {
       courses: selectedCourses.length,
+      coursesShown: shownCourses.length,
+      coursesTruncated: selectedCourses.length > shownCourses.length,
       submissionStatusAvailable: bundles.every((bundle) => bundle.submissionStatusAvailable),
       assignments: assignments.length,
       missing: assignments.filter((item) => item.missing).length,
       turnedIn: assignments.filter((item) => item.submissionState === "TURNED_IN").length,
       returned: assignments.filter((item) => item.submissionState === "RETURNED").length,
     },
-    courses: selectedCourses.slice(0, limit).map((course) => ({ id: course.id, name: cleanText(course.name, 300), section: cleanText(course.section, 300), state: course.courseState })),
+    courses: shownCourses.slice(0, limit).map((course) => ({ id: course.id, name: cleanText(course.name, 300), section: cleanText(course.section, 300), state: course.courseState })),
     assignments,
     announcements,
     courseMaterials,

@@ -236,11 +236,13 @@ export default {
               if (!mcpUserId) return unavailable("not_connected");
               try {
                 const auth = await publicProvider.googleAuthForUser(mcpUserId);
-                const overview = await getStudentOverview({ ...createClients(auth), subject: mcpUserId }, { view: "all", limit: 50 });
+                const overview = await getStudentOverview({ ...createClients(auth), publicPageLimit: 1, subject: mcpUserId }, { view: "all", limit: 50, courseLimit: 8 });
                 const now = Date.now();
                 const assignments = overview.assignments;
                 return {
-                  courses: overview.summary.courses,
+                  courses: overview.summary.coursesShown,
+                  coursesAvailable: overview.summary.courses,
+                  coursesTruncated: overview.summary.coursesTruncated,
                   assignmentsShown: assignments.length,
                   upcomingAssignments: overview.summary.submissionStatusAvailable ? assignments.filter((item) => item.dueAt && Date.parse(item.dueAt) >= now && !["TURNED_IN", "RETURNED"].includes(item.submissionState)).length : null,
                   missingAssignments: overview.summary.submissionStatusAvailable ? assignments.filter((item) => item.missing).length : null,
