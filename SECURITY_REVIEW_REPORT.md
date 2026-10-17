@@ -2,7 +2,7 @@
 
 ## Scope
 
-This review covers the sanitized publication candidate, not the original development checkout or the live Classroom Desk service. The candidate started from commit `8be8e744bf97e528e4e8983d847e83cef1a900fd`; its current root history contains one commit. No Cloudflare deployment, routing change, database operation, or Razorpay operation was performed.
+This review covers the sanitized publication candidate, not the original development checkout or the live Classroom Desk service. The candidate started from commit `8be8e744bf97e528e4e8983d847e83cef1a900fd`; published `main` contains that sanitized snapshot plus the Worker compatibility fix. No Cloudflare deployment, routing change, database operation, or Razorpay operation was performed.
 
 The managed-filesystem Deep Scan could not run because this session has no managed filesystem permission profile. It was not retried. A prompt-only scan aimed at the original revision was stopped after confirming it did not include the final changes. The review below uses local scanners, source inspection, regression tests, and a local Wrangler Workerd runtime.
 
@@ -46,7 +46,7 @@ No material exploitable finding was confirmed in those areas. In particular, the
 ## Scanner results
 
 - Gitleaks `dir` scan: no leaks found in the candidate working tree (about 3.47 MB scanned).
-- Gitleaks `git` scan: no leaks found in the candidate's one-commit history (one commit scanned).
+- Gitleaks `git` scan: no leaks found in the candidate's two-commit history (two commits scanned).
 - `node tools/source-secret-check.mjs`: 107 files scanned, no findings. This is a pattern check, not proof that a secret cannot exist.
 - Semgrep `p/security-audit`: 22 rules over 104 TypeScript/JavaScript files; about 100% of parsed lines.
   - Seven HTTP findings are confined to `src/local-e2e.ts`, whose fixed origin is `http://127.0.0.1:8787` for loopback-only local integration tests.
@@ -68,4 +68,4 @@ The candidate has no configured Git remote, no additional branches or tags, and 
 
 ## Assessment
 
-The identified Worker incompatibility is resolved with a Worker-supported, exact-host allowlist and validated manual redirects. No material security finding remains in the reviewed candidate. Publication still depends on repeating hygiene scans on the final commit and on available GitHub capabilities for repository creation, invitations, and branch protection.
+The identified Worker incompatibility is resolved with a Worker-supported, exact-host allowlist and validated manual redirects. No material security finding remains in the reviewed candidate. The sanitized `main` branch is public. GitHub requires sudo-mode reauthentication before collaborator invitations and branch protection can be saved; those settings remain pending.
