@@ -13,6 +13,8 @@ const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.doc
 const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const ATTACHMENT_TOO_LARGE_MESSAGE = "The attachment exceeds the supported size limit.";
+const UNSUPPORTED_ATTACHMENT_MESSAGE = "This attachment type is not supported.";
 
 export type ReadableAttachmentContent =
   | { kind: "text"; fileName: string; sourceMimeType: string; extractedMimeType: string; text: string; truncated: boolean }
@@ -37,16 +39,16 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 
 async function boundedStream(stream: unknown, maxBytes: number): Promise<Buffer> {
   if (stream instanceof Uint8Array) {
-    if (stream.byteLength > maxBytes) throw new AttachmentContentError("attachment_too_large", "The attachment is larger than the private beta safety limit.");
+    if (stream.byteLength > maxBytes) throw new AttachmentContentError("attachment_too_large", ATTACHMENT_TOO_LARGE_MESSAGE);
     return Buffer.from(stream);
   }
   if (stream instanceof ArrayBuffer) {
-    if (stream.byteLength > maxBytes) throw new AttachmentContentError("attachment_too_large", "The attachment is larger than the private beta safety limit.");
+    if (stream.byteLength > maxBytes) throw new AttachmentContentError("attachment_too_large", ATTACHMENT_TOO_LARGE_MESSAGE);
     return Buffer.from(new Uint8Array(stream));
   }
   if (stream && typeof (stream as { getReader?: unknown }).getReader === "function") {
     const reader = (stream as ReadableStream<Uint8Array>).getReader(); const chunks: Buffer[] = []; let size = 0;
-    try { for (;;) { const part = await reader.read(); if (part.done) break; const bytes = Buffer.from(part.value); size += bytes.length; if (size > maxBytes) throw new AttachmentContentError("attachment_too_large", "The attachment is larger than the private beta safety limit."); chunks.push(bytes); } }
+    try { for (;;) { const part = await reader.read(); if (part.done) break; const bytes = Buffer.from(part.value); size += bytes.length; if (size > maxBytes) throw new AttachmentContentError("attachment_too_large", ATTACHMENT_TOO_LARGE_MESSAGE); chunks.push(bytes); } }
     finally { reader.releaseLock(); }
     return Buffer.concat(chunks);
   }
@@ -56,7 +58,7 @@ async function boundedStream(stream: unknown, maxBytes: number): Promise<Buffer>
   for await (const chunk of stream as AsyncIterable<unknown>) {
     const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as unknown as Uint8Array);
     size += part.length;
-    if (size > maxBytes) throw new AttachmentContentError("attachment_too_large", "The attachment is larger than the private beta safety limit.");
+    if (size > maxBytes) throw new AttachmentContentError("attachment_too_large", ATTACHMENT_TOO_LARGE_MESSAGE);
     chunks.push(part);
   }
   return Buffer.concat(chunks);
@@ -185,7 +187,7 @@ export class GoogleDriveAttachmentReader {
       const mimeType = metadata.mimeType ?? "application/octet-stream";
       const fileName = safeName(metadata.name ?? attachment.title);
       const declaredSize = Number(metadata.size ?? 0);
-      if (declaredSize > maxBytes) throw new AttachmentContentError("attachment_too_large", "The attachment is larger than the private beta safety limit.");
+      if (declaredSize > maxBytes) throw new AttachmentContentError("attachment_too_large", ATTACHMENT_TOO_LARGE_MESSAGE);
 
       let extractedMimeType = mimeType;
       stage = "download";
@@ -199,7 +201,7 @@ export class GoogleDriveAttachmentReader {
       } else if (mimeType === PDF || mimeType.startsWith("text/") || IMAGE_MIMES.has(mimeType) || [DOCX, PPTX, XLSX].includes(mimeType)) {
         response = await withTimeout(this.drive.files.get({ fileId: attachment.driveFileId, alt: "media" }, { responseType: "stream" }), timeoutMs);
       } else {
-        throw new AttachmentContentError("unsupported_mime", "This attachment type is not supported by the private beta.");
+        throw new AttachmentContentError("unsupported_mime", UNSUPPORTED_ATTACHMENT_MESSAGE);
       }
 
       stage = "buffer";

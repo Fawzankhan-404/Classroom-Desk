@@ -90,7 +90,7 @@ export class AttachmentAuthorizationError extends Error {
 }
 
 /**
- * Short-lived, in-memory Picker state for the private beta. The model only
+ * Short-lived, in-memory Picker state. The model only
  * receives the opaque id; the Drive id remains bound to Classroom metadata.
  */
 export class AttachmentAuthorizationStore {

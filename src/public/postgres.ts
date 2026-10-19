@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { Pool, type QueryResultRow } from "pg";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
-import type { PublicAuthStore, GoogleFlow, GoogleGrant, InternalCode, AccessRecord, RefreshRecord } from "./store.js";
+import type { PublicAuthStore, GoogleAccountBinding, GoogleFlow, GoogleGrant, InternalCode, AccessRecord, RefreshRecord } from "./store.js";
 
 type SqlResult<T> = { rows: T[] };
 export type SqlConnection = { query<T extends QueryResultRow = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<SqlResult<T>> };
@@ -11,6 +11,24 @@ export type SqlDatabase = SqlConnection & {
 };
 type StoredRow = { payload: string; expires_at: string | number | null; started: boolean };
 type RecordKind = "client" | "flow" | "grant" | "code" | "access" | "refresh";
+type AccountMappingTable = "classroom_desk_connections" | "classroom_desk_oauth_accounts";
+
+function isMissingOAuthAccountTable(error: unknown): boolean {
+  let current: unknown = error;
+  const parts: string[] = [];
+  let code = "";
+  for (let depth = 0; depth < 3 && current; depth += 1) {
+    if (typeof current === "string") { parts.push(current); break; }
+    if (typeof current !== "object") break;
+    const value = current as { code?: unknown; message?: unknown; cause?: unknown };
+    if (typeof value.code === "string") code = value.code;
+    if (typeof value.message === "string") parts.push(value.message);
+    current = value.cause;
+  }
+  const message = parts.join(" ").toLowerCase();
+  return message.includes("classroom_desk_oauth_accounts")
+    && (code === "42P01" || message.includes("no such table") || (message.includes("relation") && message.includes("does not exist")));
+}
 
 const schema = [
   `CREATE TABLE IF NOT EXISTS public_auth_records (
@@ -68,15 +86,29 @@ export class PostgresPublicAuthStore implements PublicAuthStore {
       return JSON.parse(plain.toString("utf8")) as T;
     } catch { throw new Error("Stored authorization is unavailable."); }
   }
-  private putStatement(kind: RecordKind, key: string, value: unknown, options: { owner?: string; state?: string; expiresAt?: number } = {}) {
+  private putStatement(kind: RecordKind, key: string, value: unknown, options: {
+    owner?: string; state?: string; expiresAt?: number; binding?: GoogleAccountBinding;
+    bindingTables?: readonly AccountMappingTable[]; conflictTables?: readonly AccountMappingTable[];
+  } = {}) {
     const hash = this.hash(key);
+    const binding = options.binding;
+    const bindingTables = options.bindingTables ?? ["classroom_desk_connections"];
+    const conflictTables = options.conflictTables ?? bindingTables;
+    const bindingGuard = binding ? [
+      `EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$8 AND status='active')`,
+      ...bindingTables.map(table => `EXISTS (SELECT 1 FROM ${table} WHERE website_user_id=$8 AND mcp_user_id=$9)`),
+      ...conflictTables.map(table => `NOT EXISTS (SELECT 1 FROM ${table} WHERE mcp_user_id=$9 AND website_user_id<>$8)`),
+    ].join(" AND ") : "";
     return { sql: `INSERT INTO ${this.table()} (kind, key_hash, state_hash, owner_id, payload, expires_at, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ${binding ? `SELECT $1,$2,$3,$4,$5,$6,$7 WHERE ${bindingGuard}` : "VALUES ($1,$2,$3,$4,$5,$6,$7)"}
       ON CONFLICT (kind, key_hash) DO UPDATE SET state_hash=EXCLUDED.state_hash, owner_id=EXCLUDED.owner_id,
         payload=EXCLUDED.payload, expires_at=EXCLUDED.expires_at, updated_at=EXCLUDED.updated_at`,
-      values: [kind, hash, options.state ? this.hash(options.state) : null, options.owner ?? null, this.seal(kind, hash, value), options.expiresAt ?? null, Date.now()] };
+      values: [kind, hash, options.state ? this.hash(options.state) : null, options.owner ?? null, this.seal(kind, hash, value), options.expiresAt ?? null, Date.now(), ...(binding ? [binding.accountId, binding.mcpUserId] : [])] };
   }
-  private async put(kind: RecordKind, key: string, value: unknown, options: { owner?: string; state?: string; expiresAt?: number } = {}, db: SqlConnection = this.db) {
+  private async put(kind: RecordKind, key: string, value: unknown, options: {
+    owner?: string; state?: string; expiresAt?: number; binding?: GoogleAccountBinding;
+    bindingTables?: readonly AccountMappingTable[]; conflictTables?: readonly AccountMappingTable[];
+  } = {}, db: SqlConnection = this.db) {
     const statement = this.putStatement(kind, key, value, options);
     await db.query(statement.sql, statement.values);
   }
@@ -110,63 +142,74 @@ export class PostgresPublicAuthStore implements PublicAuthStore {
     const result = await this.db.query<{ key_hash: string }>(`UPDATE ${this.table()} SET started=true, updated_at=$3 WHERE kind='flow' AND key_hash=$1 AND started=false AND expires_at>$2 RETURNING key_hash`, [this.hash(id), Date.now(), Date.now()]);
     return result.rows.length === 1;
   }
-  async startAccountFlow(id: string, userId: string, account: NonNullable<GoogleFlow["account"]>) {
-    const flow = await this.getFlow(id);
-    if (!flow || flow.started) return undefined;
-    const bound = { ...flow, userId, account, started: true };
-    const key = this.hash(id);
-    const result = await this.db.query(`UPDATE ${this.table()} SET payload=$2,owner_id=$3,started=true,updated_at=$4 WHERE kind='flow' AND key_hash=$1 AND started=false AND expires_at>$4 RETURNING key_hash`, [key, this.seal("flow", key, bound), userId, Date.now()]);
-    return result.rows.length === 1 ? bound : undefined;
-  }
-
-  /** One transaction binds the proven account and persists its grant and MCP code.
-   * Conditional writes fail closed if a session expires or a link changes mid-flow.
-   * Existing bindings are immutable; reconnect reuses the subject resolved earlier.
-   */
-  async completeAccountAuthorization(flow: GoogleFlow, code: InternalCode, grant?: GoogleGrant) {
-    if (!flow.account || code.userId !== flow.userId || (grant && grant.userId !== flow.userId)) throw new Error("account_binding_invalid");
-    const account = flow.account;
-    if (flow.userId !== `cd-account:${account.userId}`) throw new Error("account_binding_invalid");
-    const now = new Date();
-    const link = {
-      sql: `INSERT INTO classroom_desk_oauth_accounts (website_user_id,mcp_user_id,connected_at)
-        SELECT $1,$2,$3 WHERE EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$1 AND status='active')
-        AND EXISTS (SELECT 1 FROM classroom_desk_sessions WHERE id=$4 AND user_id=$1 AND expires_at>$3)
-        AND NOT EXISTS (SELECT 1 FROM classroom_desk_connections WHERE mcp_user_id=$2 AND website_user_id<>$1)
-        AND NOT EXISTS (SELECT 1 FROM classroom_desk_oauth_accounts WHERE mcp_user_id=$2 AND website_user_id<>$1)
-        AND NOT EXISTS (SELECT 1 FROM classroom_desk_oauth_accounts WHERE website_user_id=$1 AND mcp_user_id<>$2)
-        ON CONFLICT (website_user_id) DO NOTHING`,
-      values: [account.userId, flow.userId, now, account.sessionId],
-    };
-    const guard = `EXISTS (SELECT 1 FROM classroom_desk_oauth_accounts WHERE website_user_id=$8 AND mcp_user_id=$9)
-      AND EXISTS (SELECT 1 FROM classroom_desk_sessions WHERE id=$10 AND user_id=$8 AND expires_at>$11)
-      AND EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$8 AND status='active')`;
-    const guarded = (statement: ReturnType<PostgresPublicAuthStore["putStatement"]>) => ({
-      sql: statement.sql.replace("VALUES ($1,$2,$3,$4,$5,$6,$7)", `SELECT $1,$2,$3,$4,$5,$6,$7 WHERE ${guard}`) + " RETURNING key_hash",
-      values: [...statement.values, account.userId, flow.userId, account.sessionId, now],
-    });
-    const statements = [link,
-      ...(grant ? [guarded(this.putStatement("grant", grant.userId, grant, { owner: grant.userId }))] : []),
-      guarded(this.putStatement("code", code.code, code, { owner: code.userId, expiresAt: code.expiresAt })),
-    ];
-    if (this.db.batch) {
-      const results = await this.db.batch(statements);
-      if (results.slice(1).some(result => result.rows.length !== 1)) throw new Error("account_binding_conflict_or_session_expired");
-    } else await this.db.transaction(async tx => {
-      // Serialize competing account bindings on PostgreSQL as D1 does in a batch.
-      await tx.query(`SELECT id FROM classroom_desk_users WHERE id=$1 FOR UPDATE`, [account.userId]);
-      for (const statement of statements) {
-        const result = await tx.query(statement.sql, statement.values);
-        if (statement !== link && result.rows.length !== 1) throw new Error("account_binding_conflict_or_session_expired");
-      }
-    });
-  }
   async takeFlowByGoogleState(state: string) {
     const result = await this.db.query<StoredRow & { key_hash: string }>(`DELETE FROM ${this.table()} WHERE kind='flow' AND state_hash=$1 AND started=true AND expires_at>$2 RETURNING key_hash, payload, expires_at, started`, [this.hash(state), Date.now()]);
     const row = result.rows[0];
     return row ? reviveFlow({ ...this.open<GoogleFlow>("flow", row.key_hash, row.payload), started: row.started }) : undefined;
   }
   async putGrant(grant: GoogleGrant) { await this.put("grant", grant.userId, grant, { owner: grant.userId }); }
+  async putGrantAndCode(grant: GoogleGrant, code: InternalCode, binding?: GoogleAccountBinding) {
+    if (grant.userId !== code.userId) throw new Error("authorization_owner_mismatch");
+    if (binding && binding.mcpUserId !== grant.userId) throw new Error("authorization_owner_mismatch");
+    const mappingTables: AccountMappingTable[] = ["classroom_desk_connections"];
+    try {
+      await this.db.query(`SELECT website_user_id,mcp_user_id FROM classroom_desk_oauth_accounts LIMIT 0`);
+      mappingTables.push("classroom_desk_oauth_accounts");
+    } catch (error) {
+      if (!isMissingOAuthAccountTable(error)) throw error;
+    }
+    let bindingTables: readonly AccountMappingTable[] = mappingTables;
+    if (binding) {
+      const legacy = (await this.db.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_connections WHERE website_user_id=$1`, [binding.accountId])).rows[0]?.mcp_user_id;
+      const unified = mappingTables.includes("classroom_desk_oauth_accounts")
+        ? (await this.db.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_oauth_accounts WHERE website_user_id=$1`, [binding.accountId])).rows[0]?.mcp_user_id
+        : undefined;
+      if (unified && unified !== binding.mcpUserId) throw new Error("oauth_account_binding_conflict");
+      if (!unified && legacy && legacy !== binding.mcpUserId) throw new Error("oauth_account_binding_conflict");
+      if (unified) bindingTables = ["classroom_desk_oauth_accounts"];
+      for (const table of mappingTables) {
+        const owners = await this.db.query<{ website_user_id: string }>(`SELECT website_user_id FROM ${table} WHERE mcp_user_id=$1`, [binding.mcpUserId]);
+        if (owners.rows.some(row => String(row.website_user_id) !== binding.accountId)) throw new Error("oauth_account_binding_conflict");
+      }
+    }
+    const bindingOptions = binding ? { binding, bindingTables, conflictTables: mappingTables } : {};
+    const grantOptions = { owner: grant.userId, ...bindingOptions };
+    const codeOptions = { owner: code.userId, expiresAt: code.expiresAt, ...bindingOptions };
+    const linkStatements = binding ? bindingTables.map(table => {
+      const sameAccountGuard = bindingTables.map(candidate => `NOT EXISTS (SELECT 1 FROM ${candidate} WHERE website_user_id=$1 AND mcp_user_id<>$2)`).join(" AND ");
+      const otherOwnerGuard = mappingTables.map(candidate => `NOT EXISTS (SELECT 1 FROM ${candidate} WHERE mcp_user_id=$2 AND website_user_id<>$1)`).join(" AND ");
+      return {
+        sql: `INSERT INTO ${table} (website_user_id,mcp_user_id,connected_at)
+          SELECT $1,$2,$3 WHERE EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$1 AND status='active')
+          AND ${sameAccountGuard} AND ${otherOwnerGuard}
+          ON CONFLICT (website_user_id) DO NOTHING RETURNING website_user_id`,
+        values: [binding.accountId, binding.mcpUserId, new Date()],
+      };
+    }) : [];
+    if (this.db.batch) {
+      await this.db.batch([...linkStatements, this.putStatement("grant", grant.userId, grant, grantOptions), this.putStatement("code", code.code, code, codeOptions)]);
+      if (binding) await this.assertBindingPersisted(binding, bindingTables, mappingTables);
+      if (!(await this.getCode(code.code)) || !(await this.getGrant(grant.userId))) throw new Error("oauth_grant_or_code_persistence_failed");
+      return;
+    }
+    await this.db.transaction(async (tx) => {
+      for (const statement of linkStatements) await tx.query(statement.sql, statement.values);
+      if (binding) await this.assertBindingPersisted(binding, bindingTables, mappingTables, tx);
+      await this.put("grant", grant.userId, grant, grantOptions, tx);
+      await this.put("code", code.code, code, codeOptions, tx);
+    });
+  }
+
+  private async assertBindingPersisted(binding: GoogleAccountBinding, bindingTables: readonly AccountMappingTable[], conflictTables: readonly AccountMappingTable[], db: SqlConnection = this.db): Promise<void> {
+    for (const table of bindingTables) {
+      const result = await db.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM ${table} WHERE website_user_id=$1`, [binding.accountId]);
+      if (result.rows[0]?.mcp_user_id !== binding.mcpUserId) throw new Error("oauth_account_binding_conflict");
+    }
+    for (const table of conflictTables) {
+      const result = await db.query<{ website_user_id: string }>(`SELECT website_user_id FROM ${table} WHERE mcp_user_id=$1`, [binding.mcpUserId]);
+      if (result.rows.some(row => String(row.website_user_id) !== binding.accountId)) throw new Error("oauth_account_binding_conflict");
+    }
+  }
   async getGrant(userId: string) { return this.get<GoogleGrant>("grant", userId); }
   async updateGrantRefreshToken(userId: string, refreshToken: string) {
     if (this.db.batch) {

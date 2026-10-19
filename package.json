@@ -3,8 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "description": "A free, open-source Google Classroom assistant powered by ChatGPT.",
   "bin": {
     "gpt-google-classroom": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:worker": "wrangler deploy --config wrangler.example.jsonc --dry-run",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "auth": "tsx src/auth.ts",
+    "start": "node dist/index.js",
+    "start:http": "node dist/http.js",
+    "start:local-web-test": "node dist/local-http.js",
+    "verify:public-local": "node dist/local-e2e.js",
+    "test": "vitest run src --maxWorkers=1"
   },
   "dependencies": {
     "@googleapis/classroom": "^15.0.0",
@@ -34,15 +46,5 @@
   },
   "engines": {
     "node": ">=20"
-  },
-  "description": "A free, open-source Google Classroom assistant powered by ChatGPT.",
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "build:worker": "wrangler deploy --config wrangler.example.jsonc --dry-run",
-    "check": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --config vitest.config.ts --maxWorkers=1",
-    "auth": "tsx src/auth.ts",
-    "start": "node dist/index.js",
-    "start:http": "node dist/http.js"
   }
 }

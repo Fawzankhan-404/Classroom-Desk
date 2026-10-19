@@ -1,6 +1,6 @@
 import type { drive_v3 } from "@googleapis/drive";
 import type { classroom_v1 } from "@googleapis/classroom";
-import { downloadPdf, type V2File } from "./files.js";
+import { downloadPdf, type V2File, V2FileError } from "./files.js";
 import type { AttachmentAuthorizationStore, DurableAttachmentAuthorizationStore } from "./attachments.js";
 import type { GoogleDriveAttachmentReader } from "./attachment-content.js";
 
@@ -8,11 +8,15 @@ export type V2AuditEvent = { subject: string; action: "save_assignment_pdf"; cou
 export type V2Clients = {
   classroom: classroom_v1.Classroom;
   drive: drive_v3.Drive;
-  /** Drive client backed by the explicit Picker grant, when one has been established. */
+  /** Legacy injection retained for compatibility; the active generated-file tool is disabled. */
   driveForUpload?: (context: AssignmentContext) => Promise<drive_v3.Drive | undefined>;
+  /** Legacy injection retained for compatibility; no current tool invokes it. */
   uploadPdf?: (context: AssignmentContext, name: string, bytes: Uint8Array) => Promise<{ id?: string | null; name?: string | null; mimeType?: string | null; webViewLink?: string | null }>;
   subject: string;
-  downloadOptions?: Parameters<typeof downloadPdf>[1];
+  /** Exact scopes on the currently stored Google grant; used to gate teacher reads. */
+  grantedScopes?: readonly string[];
+  /** Teacher tools require both the teacher plan entitlement and Google roles. */
+  teacherEntitled?: boolean;
   audit?: (event: V2AuditEvent) => void | Promise<void>;
   diagnostic?: (event: { operation: string; status?: number; reason?: string }) => void;
   attachmentAccess?: {
@@ -24,6 +28,19 @@ export type V2Clients = {
 export type AssignmentContext = { courseId: string; courseWorkId: string; courseName: string; assignmentTitle: string; associatedWithDeveloper: boolean; submission: classroom_v1.Schema$StudentSubmission };
 
 export class V2WorkflowError extends Error { constructor(public readonly code: string, message: string) { super(message); } }
+
+export function isGoogleReauthorizationFailure(error: unknown): boolean {
+  const value = error as { response?: { status?: unknown; data?: { error?: unknown } }; code?: unknown; message?: unknown } | null;
+  if (value?.response?.status === 401 || value?.code === "authorization" || value?.code === "invalid_grant" || value?.response?.data?.error === "invalid_grant") return true;
+  return typeof value?.message === "string" && /\binvalid_grant\b/.test(value.message);
+}
+
+export function classifyGoogleReadFailure(error: unknown): "reauthorization_required" | "permission_denied" | "unavailable" {
+  const value = error as { response?: { status?: unknown }; code?: unknown } | null;
+  if (isGoogleReauthorizationFailure(error)) return "reauthorization_required";
+  if (value?.response?.status === 403 || value?.code === "teacher_course_forbidden") return "permission_denied";
+  return "unavailable";
+}
 
 export async function getAssignmentContext(clients: V2Clients, courseId: string, courseWorkId: string): Promise<AssignmentContext> {
   if (!courseId || !courseWorkId) throw new V2WorkflowError("invalid_context", "A course ID and coursework ID are required.");
@@ -43,40 +60,23 @@ export async function getAssignmentContext(clients: V2Clients, courseId: string,
 function errorMessage(error: unknown): { code: string; message: string } {
   if (error instanceof V2WorkflowError) return { code: error.code, message: error.message };
   const status = (error as { response?: { status?: number } })?.response?.status;
-  if (status === 401 || status === 403) return { code: "authorization", message: "Google authorization is missing, expired, or does not include the required beta permission." };
+  if (isGoogleReauthorizationFailure(error) || status === 403) return { code: "authorization", message: "Google authorization is missing, expired, or does not include the required beta permission." };
   if (status && status >= 500) return { code: "google_unavailable", message: "Google Classroom or Drive is temporarily unavailable." };
   return { code: "google_error", message: "The requested Classroom operation could not be completed." };
 }
 
 export async function saveAssignmentPdf(clients: V2Clients, input: { courseId: string; courseWorkId: string; confirmUpload: boolean; file: V2File }): Promise<Record<string, unknown>> {
   if (input.confirmUpload !== true) throw new V2WorkflowError("confirmation_required", "The PDF was not uploaded because the student did not explicitly ask to save it to Drive.");
-  const context = await getAssignmentContext(clients, input.courseId, input.courseWorkId);
-  const downloaded = await downloadPdf(input.file, clients.downloadOptions);
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  const name = downloaded.filename.replace(/\.pdf$/i, "") + `-Classroom-Desk-${stamp}.pdf`;
   try {
-    let file: { id?: string | null; name?: string | null; mimeType?: string | null; webViewLink?: string | null };
-    if (clients.uploadPdf) file = await clients.uploadPdf(context, name, new Uint8Array(downloaded.buffer));
-    else {
-      const uploadDrive = clients.driveForUpload ? await clients.driveForUpload(context) : clients.drive;
-      if (!uploadDrive) throw new V2WorkflowError("authorization", "The beta Drive authorization is missing. Select the teacher attachment through Google Picker first.");
-      const result = await uploadDrive.files.create({ requestBody: { name, mimeType: "application/pdf" }, media: { mimeType: "application/pdf", body: new Uint8Array(downloaded.buffer) }, fields: "id,name,mimeType,size,webViewLink,createdTime" });
-      file = result.data;
-    }
-    await clients.audit?.({ subject: clients.subject, action: "save_assignment_pdf", courseId: context.courseId, courseWorkId: context.courseWorkId, driveFileId: file.id ?? undefined, outcome: "success", timestamp: new Date().toISOString() });
-    const safeName = file.name ?? name;
-    const assignmentUrl = `https://classroom.google.com/c/${encodeURIComponent(context.courseId)}/a/${encodeURIComponent(context.courseWorkId)}/details`;
-    return {
-      status: "uploaded",
-      fileState: "FILE_SAVED_TO_DRIVE",
-      workflowState: "WAITING_FOR_STUDENT_SUBMISSION",
-      assignment: { courseId: context.courseId, courseWorkId: context.courseWorkId, courseName: context.courseName, title: context.assignmentTitle, url: assignmentUrl },
-      file: { id: file.id, name: safeName, mimeType: file.mimeType, webViewLink: file.webViewLink ?? null },
-      message: `Your assignment is ready ✅\n\nI've saved the completed PDF to your Google Drive as ${safeName}.\n\nTo submit it:\n1. Open ${context.assignmentTitle}.\n2. Choose Add or create → Google Drive.\n3. Select ${safeName}.\n4. Click Turn in.\n\nOnce you've submitted it, I can check that Google Classroom shows it as turned in.`,
-      manualInstructions: [`Open ${context.assignmentTitle} in Google Classroom.`, `Choose Add or create, select Google Drive, and choose ${safeName}.`, "Click Turn in, then ask Classroom Desk to verify the submission."],
-      limitation: "Classroom Desk cannot attach a Drive file automatically to an ordinary assignment created by an unrelated teacher.",
-    };
-  } catch (error) { const safe = errorMessage(error); await clients.audit?.({ subject: clients.subject, action: "save_assignment_pdf", courseId: input.courseId, courseWorkId: input.courseWorkId, outcome: "failure", code: safe.code, timestamp: new Date().toISOString() }); throw new V2WorkflowError(safe.code, safe.message); }
+    await downloadPdf(input.file);
+  } catch (error) {
+    const safe = error instanceof V2FileError
+      ? { code: error.code, message: error.message }
+      : errorMessage(error);
+    await clients.audit?.({ subject: clients.subject, action: "save_assignment_pdf", courseId: input.courseId, courseWorkId: input.courseWorkId, outcome: "failure", code: safe.code, timestamp: new Date().toISOString() });
+    throw new V2WorkflowError(safe.code, safe.message);
+  }
+  throw new V2WorkflowError("external_file_transfer_unavailable", "Generated PDF transfer is disabled because this Worker cannot safely pin arbitrary external download URLs.");
 }
 
 export async function verifySubmission(clients: V2Clients, courseId: string, courseWorkId: string): Promise<Record<string, unknown>> {

@@ -15,6 +15,41 @@ describe("billing terminal-state and referral security with isolated SQL",()=>{
   },30000);
   afterAll(()=>pg.close());
   const user=(name:string)=>store.upsertGoogleIdentity({googleSubject:`isolated-${name}`,email:`${name}@example.invalid`,displayName:"Synthetic fixture",now:new Date()});
+  it("rechecks the locked PostgreSQL admin identity inside privileged transactions",async()=>{
+    const actor=await user("admin-race-actor"),target=await user("admin-race-target");
+    await store.db.query(`UPDATE classroom_desk_users SET role='SUPER_ADMIN' WHERE id=$1`,[actor.id]);
+    const interleaved=(before:()=>Promise<void>)=>new SaaSStore({
+      query:store.db.query.bind(store.db),
+      transaction:async run=>{await before();return store.db.transaction(run);},
+    });
+    const suspendedActor=interleaved(async()=>{await store.db.query(`UPDATE classroom_desk_users SET status='suspended' WHERE id=$1`,[actor.id]);});
+    await expect(suspendedActor.adminGrantAccess(actor.id,target.id,"student",60_000,"synthetic race")).rejects.toThrow("admin_permission_required");
+    expect((await store.db.query(`SELECT count(*) AS count FROM classroom_desk_entitlement_grants WHERE user_id=$1`,[target.id])).rows).toEqual([{count:0}]);
+    expect((await store.db.query(`SELECT count(*) AS count FROM classroom_desk_admin_audit WHERE actor_user_id=$1`,[actor.id])).rows).toEqual([{count:0}]);
+
+    await store.db.query(`UPDATE classroom_desk_users SET role='SUPER_ADMIN',status='active' WHERE id=$1`,[actor.id]);
+    const demotedActor=interleaved(async()=>{await store.db.query(`UPDATE classroom_desk_users SET role='SUPPORT_ADMIN' WHERE id=$1`,[actor.id]);});
+    await expect(demotedActor.adminChangeRole(actor.id,target.id,"TEACHER","synthetic race")).rejects.toThrow("admin_permission_required");
+    expect((await store.getUser(target.id))?.role).toBe("STUDENT");
+    expect((await store.db.query(`SELECT count(*) AS count FROM classroom_desk_admin_audit WHERE actor_user_id=$1`,[actor.id])).rows).toEqual([{count:0}]);
+  });
+  it("records the locked PostgreSQL target status as the audit preimage",async()=>{
+    const actor=await user("admin-status-race-actor"),target=await user("admin-status-race-target");
+    await store.db.query(`UPDATE classroom_desk_users SET role='SUPER_ADMIN' WHERE id=$1`,[actor.id]);
+    const interleaved=new SaaSStore({
+      query:store.db.query.bind(store.db),
+      transaction:async run=>{
+        await store.db.query(`UPDATE classroom_desk_users SET status='suspended' WHERE id=$1`,[target.id]);
+        return store.db.transaction(run);
+      },
+    });
+
+    await interleaved.adminSetStatus(actor.id,target.id,"active","synthetic status race",new Date("2026-10-18T00:00:00Z"));
+
+    expect((await store.getUser(target.id))?.status).toBe("active");
+    const audit=await store.db.query<{previous_state:{status:string};new_state:{status:string}}>(`SELECT previous_state,new_state FROM classroom_desk_admin_audit WHERE actor_user_id=$1 AND target_user_id=$2 AND action='restore_user'`,[actor.id,target.id]);
+    expect(audit.rows).toEqual([{previous_state:{status:"suspended"},new_state:{status:"active"}}]);
+  });
   it("fills a pending server-owned order atomically and never resurrects a refunded trial",async()=>{
     const a=await user("trial"),b=await user("trial-other");const paidAt=new Date("2026-10-10T12:00:00Z");
     await store.recordPendingTrialOrder(a.id,"order_owned",900,"INR");
@@ -177,17 +212,20 @@ describe("billing terminal-state and referral security with isolated SQL",()=>{
 
 describe("website login browser binding",()=>{
   it("requires the initiating browser nonce before consuming Google OAuth state",async()=>{
-    const pending=new Map<string,unknown>();const take=vi.fn(async(_kind:string,key:string)=>{const value=pending.get(key);pending.delete(key);return value;});
-    const app=express();registerWebsiteRoutes(app,{store:{} as SaaSStore,secureCookies:false,oauth:{clientId:"fixture",clientSecret:"fixture",origin:"http://127.0.0.1",callbackUrl:"http://127.0.0.1/auth/google/callback"},oauthStateStore:{putEphemeral:async(_kind,key,value)=>{pending.set(key,value);},takeEphemeral:take as never}});
+    const pending=new Map<string,unknown>();const stateKey=(_kind:string,key:string)=>`${_kind}:${key}`;const take=vi.fn(async(kind:string,key:string)=>{const lookup=stateKey(kind,key);const value=pending.get(lookup);pending.delete(lookup);return value;});
+    const app=express();registerWebsiteRoutes(app,{store:{} as SaaSStore,secureCookies:false,oauth:{clientId:"fixture",clientSecret:"fixture",origin:"http://127.0.0.1",callbackUrl:"http://127.0.0.1/auth/google/callback"},oauthStateStore:{putEphemeral:async(kind,key,value)=>{pending.set(stateKey(kind,key),value);},takeEphemeral:take as never}});
     const server=app.listen(0,"127.0.0.1");await new Promise<void>(r=>server.once("listening",r));const origin=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
     try {
       const login=await fetch(origin+"/login",{redirect:"manual"});const state=new URL(login.headers.get("location")!).searchParams.get("state")!;
       expect(login.headers.get("set-cookie")).toContain("HttpOnly; SameSite=Lax");
+      const storedLogin=pending.get(`website_login:${state}`) as {nonce?:string}|undefined;
+      expect(new URL(login.headers.get("location")!).searchParams.get("nonce")).toBe(storedLogin?.nonce);
+      expect(storedLogin?.nonce).toMatch(/^[A-Za-z0-9_-]{32}$/);
       for(const cookie of ["","cd_login_state=wrong"]){expect((await fetch(origin+`/auth/google/callback?state=${state}&code=fixture`,{headers:{cookie},redirect:"manual"})).status).toBe(400);}
-      expect(take).not.toHaveBeenCalled();expect(pending.has(state)).toBe(true);
+      expect(take).not.toHaveBeenCalled();expect(pending.has(`website_login:${state}`)).toBe(true);
       // A missing code verifies browser binding and consumes state without contacting Google.
       const response=await fetch(origin+`/auth/google/callback?state=${state}`,{headers:{cookie:`cd_login_state=${state}`},redirect:"manual"});
-      expect(response.status).toBe(400);expect(take).toHaveBeenCalledOnce();expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+      expect(response.status).toBe(400);expect(take).toHaveBeenCalledTimes(2);expect(take).toHaveBeenNthCalledWith(1,"teacher_authorization",state);expect(take).toHaveBeenNthCalledWith(2,"website_login",state);expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
     } finally {await new Promise<void>(r=>server.close(()=>r()));}
   });
 });

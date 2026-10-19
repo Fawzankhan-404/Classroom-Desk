@@ -28,12 +28,12 @@ export class ReferralService {
         SELECT owner.user_id,customer.id,$3 FROM classroom_desk_referral_codes owner
         JOIN classroom_desk_users customer ON customer.id=$2
         WHERE owner.code=$1 AND owner.user_id<>customer.id
-          AND NOT EXISTS (SELECT 1 FROM classroom_desk_payments p WHERE p.user_id=customer.id AND p.kind='subscription' AND p.status IN ('paid','captured','refunded'))
+          AND NOT EXISTS (SELECT 1 FROM classroom_desk_payments p WHERE p.user_id=customer.id AND p.kind='subscription' AND p.status IN ('paid','captured','partially_refunded','refunded'))
         ON CONFLICT (referred_user_id) DO NOTHING RETURNING id`, [normalizedCode, referredUserId, normalizedCode]);
       if (result.rows[0]) return String(result.rows[0].id);
       const owner = await this.db.query<{ user_id: string }>(`SELECT user_id FROM classroom_desk_referral_codes WHERE code=$1`, [normalizedCode]);
       if (!owner.rows[0] || owner.rows[0].user_id === referredUserId) throw new Error("invalid_referral");
-      const paid = await this.db.query(`SELECT 1 FROM classroom_desk_payments WHERE user_id=$1 AND kind='subscription' AND status IN ('paid','captured','refunded') LIMIT 1`, [referredUserId]);
+      const paid = await this.db.query(`SELECT 1 FROM classroom_desk_payments WHERE user_id=$1 AND kind='subscription' AND status IN ('paid','captured','partially_refunded','refunded') LIMIT 1`, [referredUserId]);
       if (paid.rows.length) throw new Error("referral_requires_new_customer");
       throw new Error("referral_already_attributed");
     }
@@ -42,7 +42,7 @@ export class ReferralService {
       const owner = await tx.query<{ user_id: string }>(`SELECT user_id FROM classroom_desk_referral_codes WHERE code=$1`, [code.trim().toUpperCase()]);
       const referrer = owner.rows[0]?.user_id;
       if (!referrer || referrer === referredUserId) throw new Error("invalid_referral");
-      const paid = await tx.query(`SELECT 1 FROM classroom_desk_payments WHERE user_id=$1 AND kind='subscription' AND status IN ('paid','captured','refunded') LIMIT 1`,[referredUserId]);
+      const paid = await tx.query(`SELECT 1 FROM classroom_desk_payments WHERE user_id=$1 AND kind='subscription' AND status IN ('paid','captured','partially_refunded','refunded') LIMIT 1`,[referredUserId]);
       if (paid.rows.length) throw new Error("referral_requires_new_customer");
       const result = await tx.query<{ id: string }>(`INSERT INTO classroom_desk_referrals (referrer_user_id,referred_user_id,code) VALUES ($1,$2,$3) ON CONFLICT (referred_user_id) DO NOTHING RETURNING id`, [referrer, referredUserId, code.trim().toUpperCase()]);
       if (!result.rows[0]) throw new Error("referral_already_attributed");

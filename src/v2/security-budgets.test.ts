@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { deflateSync } from "node:zlib";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GoogleDriveAttachmentReader, MAX_ATTACHMENT_BYTES } from "./attachment-content.js";
 import { downloadPdf } from "./files.js";
 
@@ -71,88 +71,20 @@ describe("PDF fallback decompression budgets", () => {
   });
 });
 
-const file = { file_id: "test-file", download_url: "https://files.example.test/notes.pdf", file_name: "notes.pdf" };
-const lookup = vi.fn(async () => [{ address: "8.8.8.8", family: 4 as const }]);
-
-describe("PDF download lifetime budget", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  it.each([false, true])("times out and cancels a stalled body (partial=%s)", async (partial) => {
-    const cancel = vi.fn();
-    const body = new ReadableStream<Uint8Array>({ start(controller) { if (partial) controller.enqueue(Buffer.from("%PDF-1.7\n")); }, cancel });
-    let signal: AbortSignal | null | undefined;
-    const fetch = vi.fn(async (_url: unknown, _address: unknown, requestSignal?: AbortSignal) => { signal = requestSignal; return new Response(body, { headers: { "content-type": "application/pdf" } }); });
-    const result = downloadPdf(file, { lookup, fetchPinned: fetch, timeoutMs: 50 });
-    const rejected = expect(result).rejects.toMatchObject({ code: "timeout" });
-    await vi.advanceTimersByTimeAsync(50);
-    await rejected;
-    expect(signal?.aborted).toBe(true);
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(body.locked).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("shares the same deadline across redirects and cancels both bodies", async () => {
-    const cancelRedirect = vi.fn(); const cancelFinal = vi.fn();
-    const redirectBody = new ReadableStream<Uint8Array>({ cancel: cancelRedirect });
-    const finalBody = new ReadableStream<Uint8Array>({ cancel: cancelFinal });
-    const fetch = vi.fn()
-      .mockImplementationOnce(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); return new Response(redirectBody, { status: 302, headers: { location: "https://cdn.example.test/notes.pdf" } }); })
-      .mockResolvedValueOnce(new Response(finalBody, { headers: { "content-type": "application/pdf" } }));
-    const rejected = expect(downloadPdf(file, { lookup, fetchPinned: fetch, timeoutMs: 50 })).rejects.toMatchObject({ code: "timeout" });
-    await vi.advanceTimersByTimeAsync(50);
-    await rejected;
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(cancelRedirect).toHaveBeenCalledTimes(1);
-    expect(cancelFinal).toHaveBeenCalledTimes(1);
-    expect(finalBody.locked).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("does not wait forever for cancellation after the deadline", async () => {
-    const cancel = vi.fn(() => new Promise<void>(() => {}));
-    const body = new ReadableStream<Uint8Array>({ cancel });
-    const fetch = vi.fn(async () => new Response(body, { headers: { "content-type": "application/pdf" } }));
-    const rejected = expect(downloadPdf(file, { lookup, fetchPinned: fetch, timeoutMs: 50 })).rejects.toMatchObject({ code: "timeout" });
-    await vi.advanceTimersByTimeAsync(50);
-    await rejected;
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(body.locked).toBe(false);
-  });
-
-  it("bounds DNS validation and a fetch that ignores abort", async () => {
-    const stalledLookup = vi.fn(() => new Promise(() => {})) as any;
-    const fetch = vi.fn(() => new Promise<Response>(() => {}));
-    const dnsFailure = expect(downloadPdf(file, { lookup: stalledLookup, fetchPinned: fetch, timeoutMs: 50 })).rejects.toMatchObject({ code: "timeout" });
-    await vi.advanceTimersByTimeAsync(50); await dnsFailure;
-    expect(fetch).not.toHaveBeenCalled();
-    const fetchFailure = expect(downloadPdf(file, { lookup, fetchPinned: fetch, timeoutMs: 50 })).rejects.toMatchObject({ code: "timeout" });
-    await vi.advanceTimersByTimeAsync(50); await fetchFailure;
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("preserves valid streaming downloads and clears their deadline", async () => {
-    let signal: AbortSignal | null | undefined;
-    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(Buffer.from("%PDF-1.7\n")); setTimeout(() => { controller.enqueue(Buffer.from("valid body")); controller.close(); }, 30); } });
-    const fetch = vi.fn(async (_url: unknown, _address: unknown, requestSignal?: AbortSignal) => { signal = requestSignal; return new Response(body, { headers: { "content-type": "application/pdf" } }); });
-    const result = downloadPdf(file, { lookup, fetchPinned: fetch, timeoutMs: 50 });
-    await vi.advanceTimersByTimeAsync(30);
-    await expect(result).resolves.toMatchObject({ buffer: Buffer.from("%PDF-1.7\nvalid body"), filename: "notes.pdf", sourceFileId: "test-file" });
-    expect(body.locked).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
-    await vi.advanceTimersByTimeAsync(100);
-    expect(signal?.aborted).toBe(false);
-  });
-
-  it.each(["mime", "size"])("cancels a rejected %s response and clears its deadline", async (reason) => {
-    const cancel = vi.fn();
-    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(Buffer.from("%PDF-1.7\n")); }, cancel });
-    const fetch = vi.fn(async () => new Response(body, { headers: { "content-type": reason === "mime" ? "text/plain" : "application/pdf" } }));
-    await expect(downloadPdf(file, { lookup, fetchPinned: fetch, maxBytes: reason === "size" ? 4 : undefined, timeoutMs: 50 })).rejects.toMatchObject({ code: reason === "mime" ? "invalid_mime" : "too_large" });
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(body.locked).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
+describe("external PDF transfer guard", () => {
+  it.each([
+    "https://files.example.test/notes.pdf",
+    "https://[::ffff:10.0.0.1]/notes.pdf",
+    "https://127.0.0.1/notes.pdf",
+    "https://metadata.google.internal/notes.pdf",
+    "https://[fe80::1]/notes.pdf",
+  ])("rejects external PDF handoffs before network access (%s)", async (download_url) => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network access must not occur"));
+    try {
+      await expect(downloadPdf({ file_id: "test-file", download_url, file_name: "notes.pdf" })).rejects.toMatchObject({ code: "external_file_transfer_unavailable" });
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
   });
 });

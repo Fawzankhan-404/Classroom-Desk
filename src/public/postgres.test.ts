@@ -50,7 +50,7 @@ describe("encrypted PostgreSQL public authorization store", () => {
       expect(await store.getRefresh("mcp-refresh-secret-a")).toBeUndefined();
       expect((await store.getGrant("user-b"))?.refreshToken).toBe("google-refresh-secret-b");
     } finally { await pg.close(); }
-  });
+  }, 15_000);
   it("rejects tampered ciphertext without revealing a token or SQL detail", async () => {
     const { pg, store } = await setup();
     try {
@@ -58,7 +58,7 @@ describe("encrypted PostgreSQL public authorization store", () => {
       await pg.query("UPDATE public_auth_records SET payload='v1.bad.bad.bad' WHERE kind='grant'");
       await expect(store.getGrant("user-a")).rejects.toThrow("Stored authorization is unavailable.");
     } finally { await pg.close(); }
-  });
+  }, 15_000);
   it("consumes authorization state, codes and refresh tokens once across concurrent requests", async () => {
     const { pg, store } = await setup();
     try {

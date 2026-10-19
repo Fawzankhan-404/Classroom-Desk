@@ -74,7 +74,7 @@ export default {
         GOOGLE_OAUTH_CLIENT_ID: bindings.GOOGLE_OAUTH_CLIENT_ID,
         GOOGLE_OAUTH_CLIENT_SECRET: bindings.GOOGLE_OAUTH_CLIENT_SECRET,
       });
-      config.saasFlags = { billingUi: false, teacherFeatures: false, referralRewards: false, enforceEntitlements: bindings.SAAS_ENFORCE_ENTITLEMENTS === "true" };
+      config.saasFlags = { billingUi: false, teacherFeatures: false, teacherDraftWrites: false, referralRewards: false, enforceEntitlements: bindings.SAAS_ENFORCE_ENTITLEMENTS === "true" };
       const database = new HyperdriveDatabase(config.databaseUrl!);
       const store = new PostgresPublicAuthStore(database, config.encryptionKeyBase64);
       const provider=new PublicOAuthProvider(store,config);
@@ -102,7 +102,13 @@ export default {
           return { allowed: result.allowed === true, reason: typeof result.reason === 'string' ? result.reason : 'temporarily_unavailable' };
         },
         registerRoutes:app=>registerInternalConnectionStatus(app,provider,bindings.INTERNAL_DELEGATION_SECRET??''),
-        mcpFactory:async(auth)=>createServer(createClients(auth),{publicV1:true}),
+        mcpFactory:async(auth,subject)=>createServer(createClients(auth),{publicV1:true,linkWebsiteAccount:bindings.ACCOUNT_PORTAL&&bindings.INTERNAL_DELEGATION_SECRET?async code=>{
+          try{
+            const response=await bindings.ACCOUNT_PORTAL!.fetch(new Request(new URL('/internal/account/link',bindings.PUBLIC_APP_ORIGIN),{method:'POST',headers:{'content-type':'application/json','x-classroom-internal-token':bindings.INTERNAL_DELEGATION_SECRET!},body:JSON.stringify({code,subject})}));
+            if(!response.ok)return false;
+            return (await response.json() as {linked?:boolean}).linked===true;
+          }catch{return false;}
+        }:undefined}),
       });
       app.listen(3000);
       handler = httpServerHandler({ port: 3000 });

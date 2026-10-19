@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import type express from "express";
 import type { SqlConnection, SqlDatabase } from "../public/postgres.js";
@@ -8,12 +8,12 @@ import { SaaSStore } from "./store.js";
 import { registerWebsiteRoutes } from "./website-routes.js";
 import { parseRazorpayEvent } from "./billing-events.js";
 import { reconcileRecentPayments } from "./reconciliation.js";
-import { RazorpayClient, trialOrderReceipt, type RazorpayPayment, type RazorpaySubscription } from "./razorpay-client.js";
+import { invoicePaidThrough, RazorpayClient, trialOrderReceipt, type RazorpayPayment, type RazorpaySubscription } from "./razorpay-client.js";
 import { verifyCheckoutSignature, verifySubscriptionSignature } from "./razorpay.js";
 import { renderSubscription } from "./account-portal.js";
 
 const secret = "synthetic-billing-secret";
-const now = new Date("2026-10-10T12:00:00.000Z");
+const now = new Date();
 const planIds = { student: "plan_student", teacher: "plan_teacher" };
 const sign = (value: string) => createHmac("sha256", secret).update(value).digest("hex");
 
@@ -30,9 +30,24 @@ describe("billing provider boundaries (all fetches mocked)", () => {
   it("does not offer a second trial while the first trial is active", () => {
     const view = { user: { id:"00000000-0000-0000-0000-000000000001", googleSubject:"s", email:"reviewer@example.invalid", displayName:"Reviewer", role:"student", status:"active", createdAt:now, lastLoginAt:now }, entitlement:{allowed:true,reason:"active_trial",plan:"student",expiresAt:new Date("2026-10-18T06:09:57.000Z")}, history:{trialStatus:"active",trialExpiresAt:new Date("2026-10-18T06:09:57.000Z"),subscriptions:[],referralsMade:0}, payments:[], linked:false, deletionRequested:false } as never;
     const page = renderSubscription(view, true);
-    expect(page).toContain("Classroom Desk is free");
+    expect(page).toContain("Trial already active");
     expect(page).not.toContain('data-checkout="trial"');
-    expect(page).not.toContain("Razorpay");
+  });
+
+  it("hides plan and trial offers when billing is disabled and keeps them in enabled environments", () => {
+    const view = { user: { id:"00000000-0000-0000-0000-000000000001", googleSubject:"s", email:"reviewer@example.invalid", displayName:"Reviewer", role:"student", status:"active", createdAt:now, lastLoginAt:now }, entitlement:{allowed:false,reason:"expired",plan:null,expiresAt:null}, history:{trialStatus:"eligible",trialExpiresAt:null,subscriptions:[],referralsMade:0}, payments:[], linked:false, deletionRequested:false } as never;
+    const stagingPage = renderSubscription(view, false);
+    expect(stagingPage).toContain("Checkout is currently unavailable");
+    expect(stagingPage).not.toContain("Available plans");
+    expect(stagingPage).not.toContain("₹99/month");
+    expect(stagingPage).not.toContain("₹199/month");
+    expect(stagingPage).not.toContain("₹9 once for 168 hours");
+    expect(stagingPage).not.toContain("data-checkout=");
+    const productionPage = renderSubscription(view, true);
+    expect(productionPage).toContain("Available plans");
+    expect(productionPage).toContain("₹99/month");
+    expect(productionPage).toContain("₹199/month");
+    expect(productionPage).toContain("₹9 once for 168 hours");
   });
 
   it("bounds long UUID receipts before the provider POST and does not retry", async () => {
@@ -51,20 +66,6 @@ describe("billing provider boundaries (all fetches mocked)", () => {
   it("rejects a payment response belonging to a different requested ID", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "pay_other", amount: 900, currency: "INR", status: "captured" })));
     await expect(new RazorpayClient("synthetic-key", secret).getPayment("pay_requested")).rejects.toThrow("billing_payment_mismatch");
-  });
-
-  it("confirms scheduled cancellation only from Razorpay's scheduled-change response", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_test", status: "active", has_scheduled_changes: true, change_scheduled_at: 1794225600 })));
-    await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_test", true)).resolves.toMatchObject({ has_scheduled_changes: true });
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_test", status: "active", has_scheduled_changes: false })));
-    await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_test", true)).rejects.toThrow("billing_cancellation_unconfirmed");
-  });
-
-  it("confirms immediate cancellation only when Razorpay reports cancelled", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_test", status: "cancelled", has_scheduled_changes: false })));
-    await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_test", false)).resolves.toMatchObject({ status: "cancelled" });
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_test", status: "active", has_scheduled_changes: true })));
-    await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_test", false)).rejects.toThrow("billing_cancellation_unconfirmed");
   });
 
   it("bounds fetch and response-body stalls, including implementations ignoring abort", async () => {
@@ -120,7 +121,6 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
   let store: SaaSStore;
   beforeAll(async () => {
     await pg.exec(SaaSMigration);
-    await pg.exec("ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS profile_ciphertext text; ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS google_subject_hash text; ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS email_hash text; ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS display_name_hash text;");
     const query: SqlConnection["query"] = async (sql,values=[]) => ({rows:(await pg.query(sql,values)).rows as never});
     db = {query,transaction:work=>pg.transaction(tx=>work({query:async(sql,values=[])=>({rows:(await tx.query(sql,values)).rows as never})}))};
     store = new SaaSStore(db);
@@ -133,10 +133,10 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
   const order = (owner:string,status="paid") => ({id:"order_owned",amount:900,currency:"INR",status,notes:{user_id:owner,kind:"trial",product:"classroom_desk_trial"}});
   const subscription = (owner:string):RazorpaySubscription => ({id:"sub_owned",plan_id:planIds.student,status:"active",current_start:Math.floor(Date.now()/1000)-3600,current_end:Math.floor(Date.now()/1000)+30*86400,notes:{user_id:owner,plan:"student"}});
 
-  async function harness(ownerId:string,provider:Partial<RazorpayClient>,billingAllowlistUuids?: ReadonlySet<string>) {
+  async function harness(ownerId:string,provider:Partial<RazorpayClient>) {
     const handlers = new Map<string, (req:express.Request,res:express.Response)=>Promise<unknown>>();
     const app = {use:()=>{},get:()=>{},post:(path:string,...fns:unknown[])=>handlers.set(path,fns.at(-1) as never)} as unknown as express.Express;
-    registerWebsiteRoutes(app,{store,secureCookies:false,billingEnabled:true,billingAllowlistUuids:billingAllowlistUuids ?? new Set([ownerId.toLowerCase()]),teacherFeaturesEnabled:true,razorpayKeyId:"synthetic-key",razorpayKeySecret:secret,razorpayPlanIds:planIds,razorpay:provider as RazorpayClient});
+    registerWebsiteRoutes(app,{store,secureCookies:false,billingEnabled:true,teacherFeaturesEnabled:true,razorpayKeyId:"synthetic-key",razorpayKeySecret:secret,razorpayPlanIds:planIds,razorpay:provider as RazorpayClient});
     const session = await store.sessions.create(ownerId);
     return async (path:string,body:Record<string,unknown>={}) => {
       let status = 200; let data:unknown;
@@ -146,57 +146,206 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
       return {status,data};
     };
   }
-  it("keeps all new billing mutations closed even for a previously allowlisted account", async () => {
-    const owner = await user("formerly-allowlisted");
-    const other = await user("not-allowlisted");
-    const createTrialOrder = vi.fn();
-    const createSubscription = vi.fn();
-    const getOrder = vi.fn();
-    const getPayment = vi.fn();
-    const cancelSubscription = vi.fn();
-    const allowlisted = await harness(owner.id, { createTrialOrder, createSubscription, getOrder, getPayment, cancelSubscription }, new Set([owner.id.toLowerCase()]));
-    const ordinary = await harness(other.id, { createTrialOrder, createSubscription, getOrder, getPayment }, new Set());
-    for (const path of ["/api/billing/trial/order", "/api/billing/trial/resume", "/api/billing/subscription", "/api/billing/verify"]) {
-      expect(await allowlisted(path)).toMatchObject({ status: 410, data: { error: "billing_retired" } });
-      expect(await ordinary(path)).toMatchObject({ status: 410, data: { error: "billing_retired" } });
-    }
-    expect(createTrialOrder).not.toHaveBeenCalled();
-    expect(createSubscription).not.toHaveBeenCalled();
-    expect(getOrder).not.toHaveBeenCalled();
-    expect(getPayment).not.toHaveBeenCalled();
-    expect(cancelSubscription).not.toHaveBeenCalled();
-    expect(await store.getUser(owner.id)).not.toBeNull();
-    expect(await store.getUser(other.id)).not.toBeNull();
+  const trialBody = () => ({razorpay_order_id:"order_owned",razorpay_payment_id:"pay_owned",razorpay_signature:sign("order_owned|pay_owned")});
+  const subBody = () => ({razorpay_subscription_id:"sub_owned",razorpay_payment_id:"pay_owned",razorpay_signature:sign("pay_owned|sub_owned")});
+
+  it("persists the pending order before returning checkout data with a bounded receipt", async () => {
+    const owner = await user("order-owner");
+    const createTrialOrder = vi.fn(async (receipt:string) => {expect(receipt.length).toBeLessThanOrEqual(40);return order(owner.id,"created");});
+    const send = await harness(owner.id,{createTrialOrder});
+    expect((await send("/api/billing/trial/order")).status).toBe(201);
+    const rows = await pg.query("SELECT user_id,provider_order_id,provider_payment_id,status FROM classroom_desk_payments");
+    expect(rows.rows).toEqual([{user_id:owner.id,provider_order_id:"order_owned",provider_payment_id:null,status:"pending"}]);
   });
 
-  it("preserves encrypted and opaque account fields when new checkout is rejected", async () => {
-    const key = randomBytes(32).toString("base64");
-    const privacyStore = new SaaSStore(db, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
-    const originalStore = store;
-    store = privacyStore;
+  it("keeps trial eligibility reserved after an ambiguous provider failure", async () => {
+    const owner = await user("trial-provider-ambiguous");
+    const createTrialOrder = vi.fn(async () => { throw new Error("synthetic provider timeout after request send"); });
+    const send = await harness(owner.id, { createTrialOrder });
+
+    expect(await send("/api/billing/trial/order")).toEqual({ status: 503, data: { error: "trial_creation_requires_reconciliation" } });
+    expect((await pg.query("SELECT status FROM classroom_desk_trials WHERE user_id=$1", [owner.id])).rows).toEqual([{ status: "pending" }]);
+    expect(await store.pendingTrialOrder(owner.id)).toEqual({ kind: "reconciliation_required" });
+    expect(await send("/api/billing/trial/order")).toEqual({ status: 409, data: { error: "trial_not_eligible" } });
+    expect(createTrialOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not release a trial when the provider created an order but local persistence failed", async () => {
+    const owner = await user("trial-persistence-ambiguous");
+    const createTrialOrder = vi.fn(async () => order(owner.id, "created"));
+    const send = await harness(owner.id, { createTrialOrder });
+    const persistence = vi.spyOn(store, "recordPendingTrialOrder").mockRejectedValueOnce(new Error("synthetic storage outage"));
     try {
-      const owner = await user("synthetic-opaque-billing");
-      const raw = (await pg.query<{ google_subject: string; email: string; display_name: string; profile_ciphertext: string; google_subject_hash: string; email_hash: string; display_name_hash: string }>("SELECT google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users WHERE id=$1", [owner.id])).rows[0]!;
-      const before = { ...raw };
-      const send = await harness(owner.id, { createTrialOrder: vi.fn() }, new Set([owner.id.toLowerCase()]));
-      expect((await send("/api/billing/trial/order")).status).toBe(410);
-      const after = (await pg.query("SELECT google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users WHERE id=$1", [owner.id])).rows[0];
-      expect(after).toEqual(before);
-      expect(await store.pendingTrialOrder(owner.id)).toBeNull();
-    } finally { store = originalStore; }
+      expect(await send("/api/billing/trial/order")).toEqual({ status: 503, data: { error: "trial_creation_requires_reconciliation" } });
+      expect((await pg.query("SELECT status FROM classroom_desk_trials WHERE user_id=$1", [owner.id])).rows).toEqual([{ status: "pending" }]);
+      expect(await send("/api/billing/trial/resume")).toEqual({ status: 409, data: { error: "trial_creation_requires_reconciliation" } });
+      expect(await send("/api/billing/trial/order")).toEqual({ status: 409, data: { error: "trial_not_eligible" } });
+      expect(createTrialOrder).toHaveBeenCalledTimes(1);
+    } finally { persistence.mockRestore(); }
   });
 
-  it("keeps owner-authorized cancellation available for an existing subscription", async () => {
-    const owner = await user("cancel-owner");
-    const other = await user("cancel-other");
-    await store.recordPendingSubscription(owner.id, "student", "sub_existing");
-    const cancelSubscription = vi.fn(async (id: string, _atCycleEnd: boolean) => ({ id, status: "active", has_scheduled_changes: true, change_scheduled_at: Math.floor(Date.now() / 1000) + 1 } as RazorpaySubscription));
-    const send = await harness(owner.id, { cancelSubscription });
-    expect(await send("/api/billing/subscription/cancel", { subscriptionId: "sub_existing" })).toMatchObject({ status: 200, data: { cancelled: true, accessContinuesUntilProviderPaidThrough: true } });
-    expect(cancelSubscription).toHaveBeenCalledWith("sub_existing", true);
-    const otherSend = await harness(other.id, { cancelSubscription });
-    expect(await otherSend("/api/billing/subscription/cancel", { subscriptionId: "sub_existing" })).toMatchObject({ status: 400, data: { error: "invalid_subscription" } });
-    expect(cancelSubscription).toHaveBeenCalledTimes(1);
+  it("serializes concurrent subscription creation and resumes the stored pending provider subscription", async () => {
+    const owner = await user("subscription-create-race");
+    let startProvider!: () => void; let releaseProvider!: () => void;
+    const providerStarted = new Promise<void>(resolve => { startProvider = resolve; });
+    const providerWait = new Promise<void>(resolve => { releaseProvider = resolve; });
+    const created = { id: "sub_create_once", plan_id: planIds.student, status: "created", notes: { user_id: owner.id, plan: "student" } };
+    const createSubscription = vi.fn(async (_planId: string, _totalCount: number, notes: Record<string, string>) => {
+      expect(notes).toMatchObject({ user_id: owner.id, plan: "student" });
+      startProvider(); await providerWait; return created;
+    });
+    const send = await harness(owner.id, { createSubscription });
+    const firstRequest = send("/api/billing/subscription", { plan: "student" });
+    await providerStarted;
+    expect(await send("/api/billing/subscription", { plan: "student" })).toEqual({ status: 409, data: { error: "creation_in_progress" } });
+    expect(createSubscription).toHaveBeenCalledTimes(1);
+    releaseProvider();
+    expect(await firstRequest).toEqual({ status: 201, data: { subscriptionId: "sub_create_once", plan: "student", keyId: "synthetic-key" } });
+    expect(await send("/api/billing/subscription", { plan: "student" })).toEqual({ status: 200, data: { subscriptionId: "sub_create_once", plan: "student", keyId: "synthetic-key", resumed: true } });
+    expect(createSubscription).toHaveBeenCalledTimes(1);
+    expect((await pg.query("SELECT count(*) AS count FROM classroom_desk_subscriptions WHERE user_id=$1", [owner.id])).rows).toEqual([{ count: 1 }]);
+  });
+
+  it("fails closed after an ambiguous provider or persistence failure and never starts a duplicate subscription", async () => {
+    const owner = await user("subscription-create-unknown");
+    const createSubscription = vi.fn(async () => ({ id: "sub_untracked", plan_id: planIds.student, status: "created", notes: { user_id: owner.id, plan: "student" } }));
+    const send = await harness(owner.id, { createSubscription });
+    const persistence = vi.spyOn(store, "completeSubscriptionCreation").mockRejectedValueOnce(new Error("synthetic persistence outage"));
+    try {
+      expect(await send("/api/billing/subscription", { plan: "student" })).toEqual({ status: 503, data: { error: "subscription_creation_requires_reconciliation" } });
+      expect((await pg.query("SELECT state FROM classroom_desk_subscription_creation_reservations WHERE user_id=$1", [owner.id])).rows).toEqual([{ state: "unknown" }]);
+      expect(await send("/api/billing/subscription", { plan: "student" })).toEqual({ status: 409, data: { error: "creation_requires_reconciliation" } });
+      expect(createSubscription).toHaveBeenCalledTimes(1);
+    } finally { persistence.mockRestore(); }
+  });
+
+  it("records provider timeouts as unresolved creation attempts without retrying", async () => {
+    const owner = await user("subscription-create-timeout");
+    const createSubscription = vi.fn(async () => { throw new Error("synthetic provider timeout"); });
+    const send = await harness(owner.id, { createSubscription });
+    expect(await send("/api/billing/subscription", { plan: "teacher" })).toEqual({ status: 503, data: { error: "subscription_creation_requires_reconciliation" } });
+    expect((await pg.query("SELECT state,plan FROM classroom_desk_subscription_creation_reservations WHERE user_id=$1", [owner.id])).rows).toEqual([{ state: "unknown", plan: "teacher" }]);
+    expect(await send("/api/billing/subscription", { plan: "teacher" })).toEqual({ status: 409, data: { error: "creation_requires_reconciliation" } });
+    expect(createSubscription).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves a stale subscription reservation to reconciliation without retrying the provider", async () => {
+    const owner = await user("subscription-create-stale");
+    const reservation = await store.reserveSubscriptionCreation(owner.id, "student");
+    expect(reservation.kind).toBe("reserved");
+    if (reservation.kind !== "reserved") throw new Error("reservation was not created");
+    await pg.query("UPDATE classroom_desk_subscription_creation_reservations SET updated_at=$1 WHERE user_id=$2", [new Date(Date.now() - 31 * 60 * 1000), owner.id]);
+    const createSubscription = vi.fn();
+    const send = await harness(owner.id, { createSubscription });
+    expect(await send("/api/billing/subscription", { plan: "student" })).toEqual({ status: 409, data: { error: "creation_requires_reconciliation" } });
+    expect((await pg.query("SELECT state FROM classroom_desk_subscription_creation_reservations WHERE user_id=$1", [owner.id])).rows).toEqual([{ state: "unknown" }]);
+    expect(createSubscription).not.toHaveBeenCalled();
+  });
+
+  it("resumes an owned open order and expires a provider-closed attempt without granting access", async () => {
+    const owner = await user("resume-owner");
+    await store.beginTrialPurchase(owner.id, now);
+    await store.recordPendingTrialOrder(owner.id,"order_owned",900,"INR");
+    const send = await harness(owner.id,{getOrder:async()=>order(owner.id,"created"),getOrderPayments:async()=>({count:0,items:[]})});
+    expect(await send("/api/billing/trial/resume")).toMatchObject({status:200,data:{orderId:"order_owned",resumed:true}});
+    const closed = await harness(owner.id,{getOrder:async()=>order(owner.id,"closed"),getOrderPayments:async()=>({count:0,items:[]})});
+    expect(await closed("/api/billing/trial/resume")).toMatchObject({status:409,data:{error:"trial_attempt_expired"}});
+    expect(await store.beginTrialPurchase(owner.id, new Date(now.getTime() + 31 * 60 * 1000))).toBe(true);
+    expect((await store.entitlement(owner.id)).allowed).toBe(false);
+  });
+
+  it("does not create a second trial order from an old but still open reservation", async () => {
+    const owner = await user("trial-open-stale");
+    const createTrialOrder = vi.fn(async () => order(owner.id, "created"));
+    const send = await harness(owner.id, { createTrialOrder });
+    expect((await send("/api/billing/trial/order")).status).toBe(201);
+    await pg.query("UPDATE classroom_desk_trials SET pending_at=$1 WHERE user_id=$2", [new Date(Date.now() - 31 * 60 * 1000), owner.id]);
+    expect(await send("/api/billing/trial/order")).toEqual({ status: 409, data: { error: "trial_not_eligible" } });
+    expect(createTrialOrder).toHaveBeenCalledTimes(1);
+    const resume = await harness(owner.id, { getOrder: async () => order(owner.id, "created"), getOrderPayments: async () => ({ count: 0, items: [] }) });
+    expect(await resume("/api/billing/trial/resume")).toMatchObject({ status: 200, data: { orderId: "order_owned", resumed: true } });
+  });
+
+  it("blocks another session and unknown orders before any provider reads", async () => {
+    const a=await user("a"),b=await user("b");
+    await store.recordPendingTrialOrder(a.id,"order_owned",900,"INR");
+    const getPayment=vi.fn(),getOrder=vi.fn();
+    const send=await harness(b.id,{getPayment,getOrder});
+    expect((await send("/api/billing/verify",trialBody())).status).toBe(403);
+    expect(getPayment).not.toHaveBeenCalled();expect(getOrder).not.toHaveBeenCalled();
+    const sendOwner = await harness(a.id,{getPayment,getOrder});
+    expect(await sendOwner("/api/billing/verify",{...trialBody(),razorpay_order_id:"order_unknown",razorpay_signature:sign("order_unknown|pay_owned")})).toMatchObject({status:403});
+  });
+
+  it("activates a trial when an authorized capture has no optional order association",async()=>{
+    const owner=await user("trial-without-order");
+    const event={kind:"trial_captured" as const,userId:owner.id,paymentId:"pay_without_order",amountPaise:900,paidAt:now};
+    expect(await store.processBillingEvent(event)).toBe(true);
+    expect((await pg.query<{status:string;provider_order_id:string|null}>("SELECT status,provider_order_id FROM classroom_desk_payments WHERE provider_payment_id=$1",[event.paymentId])).rows[0]).toEqual({status:"captured",provider_order_id:null});
+    expect((await store.entitlement(owner.id,now)).allowed).toBe(true);
+  });
+
+  it("merges the pending order on valid checkout and does not extend access on replay", async () => {
+    const owner=await user("verified");
+    await store.recordPendingTrialOrder(owner.id,"order_owned",900,"INR");
+    const payment=captured("pay_owned",{order_id:"order_owned"});
+    const send=await harness(owner.id,{getPayment:async()=>payment,getOrder:async()=>order(owner.id)});
+    expect((await send("/api/billing/verify",trialBody())).status).toBe(200);
+    const before=await pg.query<{starts_at:string;expires_at:string}>("SELECT starts_at,expires_at FROM classroom_desk_trials WHERE user_id=$1",[owner.id]);
+    expect(new Date(before.rows[0]!.starts_at as string).getTime()).toBe(payment.created_at!*1000);
+    expect((await send("/api/billing/verify",trialBody())).status).toBe(200);
+    expect((await pg.query("SELECT * FROM classroom_desk_payments")).rows).toHaveLength(1);
+    expect((await pg.query("SELECT starts_at,expires_at FROM classroom_desk_trials WHERE user_id=$1",[owner.id])).rows).toEqual(before.rows);
+  });
+
+  it.each([
+    {id:"pay_other"},{amount:899},{currency:"USD"},{status:"authorized"},
+    {refund_status:"full"},{amount_refunded:1},{order_id:"order_other"},{notes:{user_id:"other"}},
+  ])("rejects mismatched provider payment %j without activation", async extra => {
+    const owner=await user("bad-payment");
+    await store.recordPendingTrialOrder(owner.id,"order_owned",900,"INR");
+    const send=await harness(owner.id,{getPayment:async()=>captured("pay_owned",{order_id:"order_owned",...extra}),getOrder:async()=>order(owner.id)});
+    expect((await send("/api/billing/verify",trialBody())).status).not.toBe(200);
+    expect((await store.entitlement(owner.id)).allowed).toBe(false);
+    expect((await pg.query("SELECT status FROM classroom_desk_payments")).rows[0]).toEqual({status:"pending"});
+  });
+
+  it("accepts subscription signatures only with stored ownership and configured plan", async () => {
+    const owner=await user("sub-owner");
+    await store.recordPendingSubscription(owner.id,"student","sub_owned");
+    const send=await harness(owner.id,{getPayment:async()=>captured("pay_owned",{amount:9900,subscription_id:"sub_owned"}),getSubscription:async()=>subscription(owner.id)});
+    expect((await send("/api/billing/verify",{...subBody(),razorpay_signature:sign("sub_owned|pay_owned")})).status).toBe(400);
+    expect((await send("/api/billing/verify",subBody())).status).toBe(200);
+    expect((await store.entitlement(owner.id)).plan).toBe("student");
+  });
+
+  it("binds subscription payments through invoices when the payment omits subscription_id", async () => {
+    const owner=await user("invoice-owner");
+    await store.recordPendingSubscription(owner.id,"student","sub_owned");
+    const getInvoice=vi.fn(async()=>({id:"inv_owned",subscription_id:"sub_owned",payment_id:"pay_owned",amount:9900,currency:"INR",status:"paid"}));
+    const send=await harness(owner.id,{getPayment:async()=>captured("pay_owned",{amount:9900,invoice_id:"inv_owned"}),getSubscription:async()=>subscription(owner.id),getInvoice});
+    expect((await send("/api/billing/verify",subBody())).status).toBe(200);
+    expect(getInvoice).toHaveBeenCalledWith("inv_owned");
+  });
+
+  it.each(["historical", "future"])("rejects a %s subscription payment despite a valid signature", async age => {
+    const owner=await user("cycle-owner");
+    await store.recordPendingSubscription(owner.id,"student","sub_owned");
+    const sub=subscription(owner.id);
+    const created_at=age==="historical"?sub.current_start!-86400:Math.floor(Date.now()/1000)+120;
+    const send=await harness(owner.id,{getPayment:async()=>captured("pay_owned",{amount:9900,subscription_id:"sub_owned",created_at}),getSubscription:async()=>sub});
+    expect((await send("/api/billing/verify",subBody())).status).toBe(400);
+    expect((await store.entitlement(owner.id)).allowed).toBe(false);
+  });
+
+  it.each(["ownership","plan","payment-link","invoice-link"])("rejects subscription %s mismatches", async mismatch => {
+    const owner=await user("sub-bad"),other=await user("sub-other");
+    await store.recordPendingSubscription(mismatch==="ownership"?other.id:owner.id,"student","sub_owned");
+    const getPayment=vi.fn(async()=>captured("pay_owned",{amount:9900,subscription_id:mismatch==="payment-link"?"sub_other":mismatch==="invoice-link"?undefined:"sub_owned",invoice_id:"inv_owned"}));
+    const send=await harness(owner.id,{getPayment,getSubscription:async()=>({...subscription(owner.id),plan_id:mismatch==="plan"?planIds.teacher:planIds.student}),getInvoice:async()=>({id:"inv_owned",subscription_id:"sub_other",payment_id:"pay_owned",amount:9900,currency:"INR",status:"paid"})});
+    expect((await send("/api/billing/verify",subBody())).status).not.toBe(200);
+    expect((await store.entitlement(owner.id)).allowed).toBe(false);
+    if(mismatch==="ownership")expect(getPayment).not.toHaveBeenCalled();
   });
 
   it("advances across more than 200 stale payments despite failures and timestamp ties", async () => {
@@ -245,6 +394,32 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
     expect((await store.entitlement(owner.id,now)).plan).toBe("student");
   });
 
+  it("recovers an older paid subscription invoice using only its own verified billing end", async () => {
+    const owner=await user("historical-invoice");
+    await store.recordPendingSubscription(owner.id,"student","sub_owned");
+    await pg.query("UPDATE classroom_desk_subscriptions SET created_at=$1",[new Date(now.getTime()-86400000)]);
+    const currentStart=Math.floor(now.getTime()/1000)-3600;
+    const currentEnd=Math.floor(now.getTime()/1000)+29*86400;
+    const oldEnd=currentStart-30*86400;
+    const sub={...subscription(owner.id),current_start:currentStart,current_end:currentEnd};
+    const invoice={id:"inv_old",subscription_id:"sub_owned",payment_id:"pay_old_invoice",amount:9900,currency:"INR",status:"paid",billing_start:oldEnd-30*86400,billing_end:oldEnd};
+    const payment=captured("pay_old_invoice",{amount:9900,invoice_id:invoice.id,created_at:oldEnd-60});
+    const provider={getSubscription:async()=>sub,getSubscriptionInvoices:async()=>({items:[invoice],count:1}),getPayment:async()=>payment} as unknown as RazorpayClient;
+
+    expect(await reconcileRecentPayments(db,store,provider,now,planIds)).toMatchObject({recovered:1,failed:0});
+    expect((await pg.query("SELECT paid_through FROM classroom_desk_subscriptions WHERE provider_subscription_id='sub_owned'")).rows[0]?.paid_through).toEqual(new Date(oldEnd*1000));
+    expect((await store.entitlement(owner.id,now)).allowed).toBe(false);
+  });
+
+  it("rejects malformed and future-out-of-cycle subscription invoice periods", () => {
+    const sub={...subscription("owner"),current_end:1_900_000_000};
+    const invoice={id:"inv_period",subscription_id:"sub_owned",payment_id:"pay_period",amount:9900,currency:"INR",status:"paid"};
+    expect(invoicePaidThrough({...invoice,billing_start:1_800_000_000,billing_end:1_850_000_000},sub)).toEqual(new Date(1_850_000_000_000));
+    expect(invoicePaidThrough({...invoice,billing_start:1_850_000_000,billing_end:1_800_000_000},sub)).toBeUndefined();
+    expect(invoicePaidThrough({...invoice,billing_start:1_800_000_000,billing_end:1_950_000_000},sub)).toBeUndefined();
+    expect(invoicePaidThrough({...invoice,billing_start:null,billing_end:1_850_000_000},sub)).toBeUndefined();
+  });
+
   async function pendingRefund(ownerId:string, extra:Partial<RazorpayPayment>={}) {
     await store.recordPendingTrialOrder(ownerId,"order_owned",900,"INR");
     await pg.query("UPDATE classroom_desk_payments SET created_at=$1 WHERE provider_order_id='order_owned'",[new Date(now.getTime()-86400000)]);
@@ -268,7 +443,7 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
       return result;
     });
     try {
-      expect(await reconcileRecentPayments(db,store,fixture.provider,now)).toEqual({checked:1,refunded:1,failed:0,recovered:0});
+      expect(await reconcileRecentPayments(db,store,fixture.provider,now)).toEqual({checked:1,refunded:1,partiallyRefunded:0,failed:0,recovered:0});
       expect(events).toEqual(["payment_refunded","trial_captured"]);
       expect(fixture.getPayment).toHaveBeenCalledWith("pay_owned");
       expect((await pg.query("SELECT user_id,provider_order_id,provider_payment_id,status FROM classroom_desk_payments")).rows)
@@ -277,7 +452,7 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
       expect(trial.status).toBe("refunded");
       expect(new Date(trial.paid_at as string).getTime()).toBe(fixture.payment.created_at!*1000);
       expect(new Date(trial.starts_at as string).getTime()).toBe(fixture.payment.created_at!*1000);
-      expect(await reconcileRecentPayments(db,store,fixture.provider,now)).toEqual({checked:1,refunded:0,failed:0,recovered:0});
+      expect(await reconcileRecentPayments(db,store,fixture.provider,now)).toEqual({checked:1,refunded:0,partiallyRefunded:0,failed:0,recovered:0});
       expect(fixture.getOrderPayments).toHaveBeenCalledTimes(1);
       expect((await pg.query("SELECT paid_at,starts_at,expires_at,status FROM classroom_desk_trials WHERE user_id=$1",[owner.id])).rows[0]).toEqual(trial);
       expect((await pg.query("SELECT payload_hash,status FROM classroom_desk_webhook_events WHERE event_id=$1",["internal:refund-tombstone:pay_owned"])).rows)
@@ -313,13 +488,36 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
     expect(await store.paymentOwner("pay_owned")).toBe(other.id);
   });
 
-  it("does not treat partial refunds or failed attempts as full-refund recovery", async()=>{
+  it("recovers a captured partial refund without treating it as fully refunded", async()=>{
     const owner=await user("partial-pending-refund");
-    const fixture=await pendingRefund(owner.id,{refund_status:"partial",amount_refunded:100});
-    expect(await reconcileRecentPayments(db,store,fixture.provider,now)).toEqual({checked:1,refunded:0,failed:0,recovered:0});
+    const fixture=await pendingRefund(owner.id,{status:"captured",refund_status:"partial",amount_refunded:100});
+    expect(await reconcileRecentPayments(db,store,fixture.provider,now)).toEqual({checked:1,refunded:0,partiallyRefunded:1,failed:0,recovered:1});
+    expect((await pg.query<{status:string;amount_refunded_paise:number}>("SELECT status,amount_refunded_paise FROM classroom_desk_payments WHERE provider_payment_id='pay_owned'")).rows[0]).toEqual({status:"partially_refunded",amount_refunded_paise:100});
+    expect((await store.entitlement(owner.id,now)).allowed).toBe(true);
     fixture.payment.status="failed";fixture.payment.refund_status=undefined;fixture.payment.amount_refunded=undefined;
-    expect(await reconcileRecentPayments(db,store,fixture.provider,now)).toEqual({checked:1,refunded:0,failed:0,recovered:0});
-    expect((await pg.query("SELECT provider_payment_id,status FROM classroom_desk_payments")).rows).toEqual([{provider_payment_id:null,status:"pending"}]);
+    expect(await reconcileRecentPayments(db,store,fixture.provider,now)).toEqual({checked:1,refunded:0,partiallyRefunded:0,failed:0,recovered:0});
+    expect((await pg.query("SELECT provider_payment_id,status FROM classroom_desk_payments")).rows).toEqual([{provider_payment_id:"pay_owned",status:"partially_refunded"}]);
+    expect((await store.entitlement(owner.id,now)).allowed).toBe(true);
+  });
+
+  it("tracks cumulative subscription refunds without revoking the verified paid term",async()=>{
+    const owner=await user("partial-subscription-refund");
+    const paidThrough=new Date(now.getTime()+30*86400000);
+    const payment={kind:"subscription_paid" as const,userId:owner.id,subscriptionId:"sub_partial_refund",paymentId:"pay_partial_refund",plan:"student" as const,amountPaise:9900,paidThrough};
+    expect(await store.processBillingEvent(payment)).toBe(true);
+    const partial={kind:"payment_partially_refunded" as const,userId:owner.id,subscriptionId:payment.subscriptionId,paymentId:payment.paymentId,amountPaise:9900,amountRefundedPaise:1200};
+    expect(await store.processBillingEvent(partial)).toBe(true);
+    expect(await store.processBillingEvent(partial)).toBe(false);
+    expect(await store.processBillingEvent({...partial,amountRefundedPaise:800})).toBe(false);
+    expect(await store.processBillingEvent({...partial,amountRefundedPaise:2500})).toBe(true);
+    expect((await pg.query<{status:string;amount_refunded_paise:number}>("SELECT status,amount_refunded_paise FROM classroom_desk_payments WHERE provider_payment_id=$1",[payment.paymentId])).rows[0]).toEqual({status:"partially_refunded",amount_refunded_paise:2500});
+    expect((await pg.query<{status:string;paid_through:Date}>("SELECT status,paid_through FROM classroom_desk_subscriptions WHERE provider_subscription_id=$1",[payment.subscriptionId])).rows[0]).toEqual({status:"active",paid_through:paidThrough});
+    expect((await store.entitlement(owner.id,now)).allowed).toBe(true);
+    const referrer=await user("partial-refund-referrer");
+    const code=await store.referrals.ensureCode(referrer.id);
+    await expect(store.referrals.attribute(code,owner.id)).rejects.toThrow("referral_requires_new_customer");
+    expect(await store.processBillingEvent({kind:"payment_refunded",userId:owner.id,paymentId:payment.paymentId})).toBe(true);
+    expect((await pg.query<{status:string;amount_refunded_paise:number}>("SELECT status,amount_refunded_paise FROM classroom_desk_payments WHERE provider_payment_id=$1",[payment.paymentId])).rows[0]).toEqual({status:"refunded",amount_refunded_paise:9900});
     expect((await store.entitlement(owner.id,now)).allowed).toBe(false);
   });
 

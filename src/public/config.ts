@@ -7,7 +7,7 @@ export type RuntimeConfig = PublicOAuthConfig & {
   workerClientIp?: boolean;
   storeKind?: "memory" | "postgres" | "d1"; databaseUrl?: string; encryptionKeyBase64?: string;
   operatorName?: string; supportEmail?: string; chatgptPluginUrl?: string;
-  saasFlags?: SaaSFeatureFlags; stageMedia?: { wideVideo?: string; widePoster?: string; narrowVideo?: string; narrowPoster?: string };
+  saasFlags?: SaaSFeatureFlags;
 };
 const required = (name: string, env: NodeJS.ProcessEnv): string => {
   const value = env[name]?.trim();
@@ -21,13 +21,6 @@ const safeUrl = (name: string, value: string) => {
   return url;
 };
 
-function optionalMediaUrl(name: string, value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  if (!trimmed) return undefined;
-  const url = safeUrl(name, trimmed);
-  if (url.protocol !== "https:" || !url.hostname.endsWith(".cloudfront.net")) throw new Error(`${name} must be an HTTPS CloudFront URL.`);
-  return url.toString();
-}
 export function loadRuntimeConfig(env = process.env): RuntimeConfig {
   const production = env.NODE_ENV === "production";
   const originText = env.PUBLIC_APP_ORIGIN?.trim() || (production ? "" : "http://127.0.0.1:8787");
@@ -59,17 +52,11 @@ export function loadRuntimeConfig(env = process.env): RuntimeConfig {
     const url = safeUrl("CHATGPT_PLUGIN_URL", chatgptPluginUrl);
     if (url.protocol !== "https:" || !["chatgpt.com", "www.chatgpt.com"].includes(url.hostname)) throw new Error("CHATGPT_PLUGIN_URL must be an HTTPS ChatGPT URL.");
   }
-  const stageMedia = {
-    wideVideo: optionalMediaUrl("PUBLIC_STAGE_WIDE_VIDEO_URL", env.PUBLIC_STAGE_WIDE_VIDEO_URL),
-    widePoster: optionalMediaUrl("PUBLIC_STAGE_WIDE_POSTER_URL", env.PUBLIC_STAGE_WIDE_POSTER_URL),
-    narrowVideo: optionalMediaUrl("PUBLIC_STAGE_NARROW_VIDEO_URL", env.PUBLIC_STAGE_NARROW_VIDEO_URL),
-    narrowPoster: optionalMediaUrl("PUBLIC_STAGE_NARROW_POSTER_URL", env.PUBLIC_STAGE_NARROW_POSTER_URL),
-  };
   return {
     origin, mcpResource: resource, googleCallbackUrl: callback.toString(),
     googleClientId: env.GOOGLE_OAUTH_CLIENT_ID?.trim() || required("GOOGLE_OAUTH_CLIENT_ID", env),
     googleClientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || required("GOOGLE_OAUTH_CLIENT_SECRET", env),
-    port, production, bindHost: production ? "0.0.0.0" : "127.0.0.1", storeKind, databaseUrl, encryptionKeyBase64, operatorName, supportEmail, chatgptPluginUrl, stageMedia,
+    port, production, bindHost: production ? "0.0.0.0" : "127.0.0.1", storeKind, databaseUrl, encryptionKeyBase64, operatorName, supportEmail, chatgptPluginUrl,
   };
 }
 

@@ -3,12 +3,11 @@ import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/serv
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 
-export type GoogleGrant = { userId: string; refreshToken: string; scopes: string[]; createdAt: number; updatedAt: number; googleSubject?: string };
+export type GoogleGrant = { userId: string; refreshToken: string; scopes: string[]; createdAt: number; updatedAt: number };
+export type GoogleAccountBinding = { accountId: string; mcpUserId: string };
 export type GoogleFlow = {
   id: string; client: OAuthClientInformationFull; params: AuthorizationParams; userId: string;
-  googleState: string; googleVerifier: string; expiresAt: number; started: boolean;
-  account?: { userId: string; sessionId: string; googleSubject: string };
-  browserProof?: string;
+  googleState: string; googleVerifier: string; googleNonce?: string; expiresAt: number; started: boolean;
 };
 export type InternalCode = { code: string; clientId: string; userId: string; redirectUri: string; state?: string; challenge: string; resource?: URL; scopes: string[]; expiresAt: number };
 export type AccessRecord = { token: string; clientId: string; userId: string; scopes: string[]; resource?: URL; expiresAt: number };
@@ -20,8 +19,9 @@ export interface PublicAuthStore extends OAuthRegisteredClientsStore {
   getFlow(id: string): Promise<GoogleFlow | undefined>;
   takeFlowByGoogleState(state: string): Promise<GoogleFlow | undefined>;
   setFlowStarted(id: string): Promise<boolean>;
-  startAccountFlow(id: string, userId: string, account: NonNullable<GoogleFlow["account"]>): Promise<GoogleFlow | undefined>;
   putGrant(grant: GoogleGrant): Promise<void>;
+  /** Persist the Google grant and its MCP authorization code atomically where supported. */
+  putGrantAndCode(grant: GoogleGrant, code: InternalCode, binding?: GoogleAccountBinding): Promise<void>;
   getGrant(userId: string): Promise<GoogleGrant | undefined>;
   deleteUserAuthorization(userId: string): Promise<void>;
   putCode(code: InternalCode): Promise<void>;
@@ -61,21 +61,20 @@ export class MemoryPublicAuthStore implements PublicAuthStore {
     this.flows.delete(flow.id); return flow;
   }
   async setFlowStarted(id: string) { const flow = await this.getFlow(id); if (!flow || flow.started) return false; flow.started = true; return true; }
-  async startAccountFlow(id: string, userId: string, account: NonNullable<GoogleFlow["account"]>) {
-    const flow = this.flows.get(id);
-    if (!flow || flow.started || flow.expiresAt <= Date.now()) return undefined;
-    Object.assign(flow, { userId, account, started: true });
-    return flow;
-  }
   async putGrant(grant: GoogleGrant) { this.grants.set(grant.userId, grant); }
+  async putGrantAndCode(grant: GoogleGrant, code: InternalCode, binding?: GoogleAccountBinding) {
+    if (grant.userId !== code.userId) throw new Error("authorization_owner_mismatch");
+    if (binding && binding.mcpUserId !== grant.userId) throw new Error("authorization_owner_mismatch");
+    this.grants.set(grant.userId, grant);
+    this.codes.set(code.code, code);
+  }
   async getGrant(userId: string) { return this.grants.get(userId); }
   async deleteUserAuthorization(userId: string) { this.grants.delete(userId); await this.deleteUserTokens(userId); }
   async putCode(code: InternalCode) { this.codes.set(code.code, code); }
   async getCode(code: string) { const record = this.codes.get(code); if (record && record.expiresAt <= Date.now()) { this.codes.delete(code); return undefined; } return record; }
   async takeCode(code: string) {
     const record = this.codes.get(code);
-    if (!record) return undefined;
-    if (record.expiresAt <= Date.now()) { this.codes.delete(code); return undefined; }
+    if (!record || record.expiresAt <= Date.now()) { this.codes.delete(code); return undefined; }
     this.codes.delete(code);
     return record;
   }
@@ -93,8 +92,7 @@ export class MemoryPublicAuthStore implements PublicAuthStore {
   async getRefresh(token: string) { const record = this.refresh.get(token); if (record && record.expiresAt <= Date.now()) { this.refresh.delete(token); return undefined; } return record; }
   async takeRefresh(token: string) {
     const record = this.refresh.get(token);
-    if (!record) return undefined;
-    if (record.expiresAt <= Date.now()) { this.refresh.delete(token); return undefined; }
+    if (!record || record.expiresAt <= Date.now()) { this.refresh.delete(token); return undefined; }
     this.refresh.delete(token);
     return record;
   }

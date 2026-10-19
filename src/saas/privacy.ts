@@ -2,8 +2,7 @@ import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } f
 
 export type PrivateSaaSProfile = { googleSubject: string; email: string; displayName: string };
 
-/** Application-level protection for SaaS identity fields. The database keeps only
- * keyed lookup digests and an opaque ciphertext marker in legacy columns. */
+/** Version 1 profile envelope used by the already-applied D1 migration 0007. */
 export class SaaSProfileCipher {
   private readonly key: Buffer;
   private readonly lookupKey: Buffer;

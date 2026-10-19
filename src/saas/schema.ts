@@ -1,5 +1,5 @@
 /** Additive SaaS schema. Apply with a reviewed direct Neon migration, never at Worker request time. */
-export const SAAS_SCHEMA_VERSION = 2;
+export const SAAS_SCHEMA_VERSION = 5;
 export const SaaSMigration = `
 CREATE TABLE IF NOT EXISTS classroom_desk_users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -7,16 +7,22 @@ CREATE TABLE IF NOT EXISTS classroom_desk_users (
   email text NOT NULL,
   display_name text NOT NULL,
   profile_ciphertext text,
-  google_subject_hash text UNIQUE,
+  google_subject_hash text,
   email_hash text,
   display_name_hash text,
   role text NOT NULL DEFAULT 'STUDENT' CHECK (role IN ('SUPER_ADMIN','SUPPORT_ADMIN','STUDENT','TEACHER')),
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','deleted')),
-  dashboard_preference text CHECK (dashboard_preference IN ('student','teacher')),
   created_at timestamptz NOT NULL DEFAULT now(),
   last_login_at timestamptz
 );
-ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS dashboard_preference text CHECK (dashboard_preference IN ('student','teacher'));
+-- These columns are also added conditionally so existing installations can upgrade in place.
+ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS profile_ciphertext text;
+ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS google_subject_hash text;
+ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS email_hash text;
+ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS display_name_hash text;
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_desk_users_google_subject_hash_idx ON classroom_desk_users(google_subject_hash) WHERE google_subject_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS classroom_desk_users_email_hash_idx ON classroom_desk_users(email_hash) WHERE email_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS classroom_desk_users_display_name_hash_idx ON classroom_desk_users(display_name_hash) WHERE display_name_hash IS NOT NULL;
 CREATE TABLE IF NOT EXISTS classroom_desk_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES classroom_desk_users(id) ON DELETE CASCADE,
@@ -46,6 +52,14 @@ CREATE TABLE IF NOT EXISTS classroom_desk_subscriptions (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS classroom_desk_subscriptions_user_idx ON classroom_desk_subscriptions(user_id, status, paid_through);
+CREATE TABLE IF NOT EXISTS classroom_desk_subscription_creation_reservations (
+  user_id uuid PRIMARY KEY REFERENCES classroom_desk_users(id) ON DELETE CASCADE,
+  request_id uuid NOT NULL UNIQUE,
+  plan text NOT NULL CHECK (plan IN ('student','teacher')),
+  state text NOT NULL CHECK (state IN ('creating','unknown')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS classroom_desk_entitlement_grants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES classroom_desk_users(id) ON DELETE CASCADE,
@@ -54,8 +68,10 @@ CREATE TABLE IF NOT EXISTS classroom_desk_entitlement_grants (
   starts_at timestamptz NOT NULL,
   expires_at timestamptz NOT NULL,
   revoked_at timestamptz,
-  reason text
+  reason text,
+  last_operation_id text
 );
+ALTER TABLE classroom_desk_entitlement_grants ADD COLUMN IF NOT EXISTS last_operation_id text;
 CREATE INDEX IF NOT EXISTS classroom_desk_grants_user_idx ON classroom_desk_entitlement_grants(user_id, expires_at);
 CREATE TABLE IF NOT EXISTS classroom_desk_payments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -68,8 +84,12 @@ CREATE TABLE IF NOT EXISTS classroom_desk_payments (
   provider_payment_id text UNIQUE,
   provider_subscription_id text,
   status text NOT NULL,
+  amount_refunded_paise integer NOT NULL DEFAULT 0 CHECK (amount_refunded_paise >= 0 AND amount_refunded_paise <= amount_paise),
+  last_operation_id text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE classroom_desk_payments ADD COLUMN IF NOT EXISTS amount_refunded_paise integer NOT NULL DEFAULT 0 CHECK (amount_refunded_paise >= 0 AND amount_refunded_paise <= amount_paise);
+ALTER TABLE classroom_desk_payments ADD COLUMN IF NOT EXISTS last_operation_id text;
 CREATE TABLE IF NOT EXISTS classroom_desk_webhook_events (
   event_id text PRIMARY KEY,
   event_type text NOT NULL,
@@ -94,10 +114,10 @@ CREATE TABLE IF NOT EXISTS classroom_desk_connections (
   mcp_user_id text NOT NULL UNIQUE,
   connected_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE TABLE IF NOT EXISTS classroom_desk_oauth_accounts (
-  website_user_id uuid PRIMARY KEY REFERENCES classroom_desk_users(id) ON DELETE RESTRICT,
-  mcp_user_id text NOT NULL UNIQUE,
-  connected_at timestamptz NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS classroom_desk_user_preferences (
+  user_id uuid PRIMARY KEY REFERENCES classroom_desk_users(id) ON DELETE CASCADE,
+  experience text NOT NULL CHECK (experience IN ('student','teacher')),
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS classroom_desk_referrals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -106,9 +126,11 @@ CREATE TABLE IF NOT EXISTS classroom_desk_referrals (
   code text NOT NULL,
   qualified_at timestamptz,
   counted_at timestamptz,
+  qualified_operation_id text,
   created_at timestamptz NOT NULL DEFAULT now(),
   CHECK (referrer_user_id <> referred_user_id)
 );
+ALTER TABLE classroom_desk_referrals ADD COLUMN IF NOT EXISTS qualified_operation_id text;
 CREATE TABLE IF NOT EXISTS classroom_desk_referral_rewards (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES classroom_desk_users(id) ON DELETE RESTRICT,

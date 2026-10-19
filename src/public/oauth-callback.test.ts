@@ -151,7 +151,7 @@ describe("public OAuth callback behavior", () => {
       const missingCode = await fetch(`${origin}/oauth/google/callback?state=${encodeURIComponent(missingCodeState)}`, { redirect: "manual" });
       expect(missingCode.status).toBe(303);
       const errorRedirect = new URL(missingCode.headers.get("location")!);
-      expect(errorRedirect.searchParams.get("error")).toBe("access_denied");
+      expect(errorRedirect.searchParams.get("error")).toBe("server_error");
       expect(errorRedirect.searchParams.get("state")).toBe("missing-code-state");
       expect(errorRedirect.searchParams.has("code")).toBe(false);
 

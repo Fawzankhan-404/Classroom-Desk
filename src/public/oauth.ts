@@ -1,10 +1,12 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Response } from "express";
 import { OAuth2Client } from "googleapis-common";
 import type { OAuthServerProvider, AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
+import { InvalidClientMetadataError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import type { GoogleFlow, GoogleGrant, InternalCode, PublicAuthStore } from "./store.js";
+import type { GoogleAccountBinding, GoogleFlow, PublicAuthStore } from "./store.js";
 import { isExactPublicGoogleGrant, PUBLIC_CLASSROOM_SCOPES } from "../scopes.js";
 import { logGrantRefreshFailure, logGoogleAuthorizationFailure, logMcpTokenFailure } from "./log.js";
 
@@ -15,47 +17,129 @@ const CODE_TTL = 2 * 60 * 1000;
 const ACCESS_TTL = 60 * 60;
 const REFRESH_TTL = 30 * 24 * 60 * 60 * 1000;
 const randomToken = () => randomBytes(32).toString("base64url");
+const CHATGPT_MCP_REDIRECT_ORIGIN = "https://chatgpt.com";
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const GOOGLE_OAUTH_ERRORS = new Set([
+  "access_denied", "invalid_request", "unauthorized_client", "unsupported_response_type",
+  "invalid_scope", "server_error", "temporarily_unavailable", "interaction_required",
+  "login_required", "consent_required",
+]);
+
+function safeGoogleOAuthError(error: string): string {
+  return GOOGLE_OAUTH_ERRORS.has(error) ? error : "server_error";
+}
+
+function googleFailureCategory(error: unknown): "invalid_grant" | "invalid_client" | "invalid_request" | "identity_invalid" | "account_binding_conflict" | "storage_failure" | "other" {
+  const value = error as { code?: unknown; message?: unknown; response?: { data?: { error?: unknown } } } | null;
+  const code = typeof value?.response?.data?.error === "string" ? value.response.data.error : typeof value?.code === "string" ? value.code : value?.message;
+  if (code === "invalid_grant" || code === "invalid_client" || code === "invalid_request") return code;
+  if (code === "verified_google_identity_required" || code === "canonical_account_invalid") return "identity_invalid";
+  if (code === "google_subject_account_conflict") return "account_binding_conflict";
+  if (code === "database_unavailable" || code === "storage_unavailable") return "storage_failure";
+  return "other";
+}
 
 export type PublicOAuthConfig = {
   origin: URL;
   googleClientId: string;
   googleClientSecret: string;
   googleCallbackUrl: string;
+  /** Browser callback used by the authenticated incremental Teacher consent flow. */
+  teacherGoogleCallbackUrl?: string;
   mcpResource: URL;
   googleScopes?: readonly string[];
+  teacherScopes?: readonly string[];
+  teacherGrantValidator?: (scopes: string[]) => boolean;
+  teacherWriteScopes?: readonly string[];
+  teacherWriteGrantValidator?: (scopes: string[]) => boolean;
   googleGrantValidator?: (scopes: string[]) => boolean;
+  /** Validates the complete grant Google returns when incremental scopes are included. */
+  googleAuthorizationGrantValidator?: (scopes: string[]) => boolean;
+  googleStoredGrantValidator?: (scopes: string[]) => boolean;
+  googleIdentityResolver?: (identity: VerifiedGoogleIdentity) => Promise<string | GoogleAccountBinding>;
 };
 
-export type OAuthAccountSession = NonNullable<GoogleFlow["account"]> & { mcpUserId: string; displayName: string; legacyMcpUserId?: string };
-export interface OAuthAccountBinding {
-  session(cookie: string | undefined): Promise<OAuthAccountSession | null>;
-  identify(identity: { googleSubject: string; email: string; displayName: string }): Promise<{ account: OAuthAccountSession; token: string }>;
-  complete(flow: GoogleFlow, code: InternalCode, grant?: GoogleGrant): Promise<void>;
-}
+export type VerifiedGoogleIdentity = { googleSubject: string; email: string; displayName: string };
 
 export class PublicOAuthProvider implements OAuthServerProvider {
-  readonly clientsStore: PublicAuthStore;
+  readonly clientsStore: OAuthRegisteredClientsStore;
   readonly skipLocalPkceValidation = false;
-  constructor(readonly store: PublicAuthStore, readonly config: PublicOAuthConfig, readonly revokeGoogleToken?: (token: string) => Promise<void>, readonly accounts?: OAuthAccountBinding) { this.clientsStore = store; }
+  constructor(readonly store: PublicAuthStore, readonly config: PublicOAuthConfig, readonly revokeGoogleToken?: (token: string) => Promise<void>) {
+    this.clientsStore = {
+      getClient: (clientId) => store.getClient(clientId),
+      ...(store.registerClient ? {
+        registerClient: async (client) => {
+          if (!client.redirect_uris.length || client.redirect_uris.some((uri) => !this.isAllowedMcpRedirectUri(uri))) {
+            throw new InvalidClientMetadataError("Unsupported redirect URI");
+          }
+          return store.registerClient!(client);
+        },
+      } : {}),
+    };
+  }
   private get googleScopes() { return this.config.googleScopes ?? PUBLIC_CLASSROOM_SCOPES; }
+
+  private isAllowedMcpRedirectUri(value: string | undefined): boolean {
+    if (!value) return false;
+    try {
+      const redirect = new URL(value);
+      if (redirect.username || redirect.password || redirect.search || redirect.hash || !["https:", "http:"].includes(redirect.protocol)) return false;
+      const isChatGPTCallback = redirect.origin === CHATGPT_MCP_REDIRECT_ORIGIN
+        && /^\/connector\/oauth\/[A-Za-z0-9_-]{1,128}$/.test(redirect.pathname)
+        && !redirect.search && !redirect.hash;
+      if (isChatGPTCallback) return true;
+      return LOOPBACK_HOSTS.has(this.config.origin.hostname.toLowerCase())
+        && redirect.protocol === "http:"
+        && LOOPBACK_HOSTS.has(redirect.hostname.toLowerCase());
+    } catch { return false; }
+  }
+
+  /** Applies the server callback policy and the SDK's loopback-port exception to a requested redirect. */
+  isAllowedAuthorizationRedirect(client: OAuthClientInformationFull, requestedUri: string | undefined): boolean {
+    if (!requestedUri || !this.isAllowedMcpRedirectUri(requestedUri)) return false;
+    return client.redirect_uris.some((registeredUri) => {
+      if (!this.isAllowedMcpRedirectUri(registeredUri)) return false;
+      if (requestedUri === registeredUri) return true;
+      try {
+        const requested = new URL(requestedUri);
+        const registered = new URL(registeredUri);
+        return LOOPBACK_HOSTS.has(requested.hostname.toLowerCase())
+          && LOOPBACK_HOSTS.has(registered.hostname.toLowerCase())
+          && requested.protocol === registered.protocol
+          && requested.hostname === registered.hostname
+          && requested.pathname === registered.pathname
+          && requested.search === registered.search;
+      } catch { return false; }
+    });
+  }
+
+  isAllowedFlowRedirect(flow: GoogleFlow): boolean {
+    return this.isAllowedAuthorizationRedirect(flow.client, flow.params.redirectUri);
+  }
 
   private googleClient(redirectUri = this.config.googleCallbackUrl) {
     return new OAuth2Client(this.config.googleClientId, this.config.googleClientSecret, redirectUri);
   }
 
+  private teacherGoogleClient() {
+    const redirectUri = this.config.teacherGoogleCallbackUrl;
+    if (!redirectUri) throw new Error("teacher_consent_unavailable");
+    const callback = new URL(redirectUri);
+    if (callback.origin !== this.config.origin.origin || callback.pathname !== "/auth/google/callback" || callback.search || callback.hash) {
+      throw new Error("teacher_callback_invalid");
+    }
+    return this.googleClient(callback.toString());
+  }
+
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
+    if (!this.isAllowedAuthorizationRedirect(client, params.redirectUri)) throw new Error("Unsupported MCP redirect origin");
     if (params.resource && params.resource.href !== this.config.mcpResource.href) throw new Error("Invalid resource");
     const requested = params.scopes ?? [];
     if (requested.some((scope) => scope !== MCP_SCOPE && scope !== MCP_OFFLINE_SCOPE) || (requested.length && !requested.includes(MCP_SCOPE))) throw new Error("Unsupported scope");
     const flow: GoogleFlow = {
-      id: randomToken(), userId: randomUUID(), client, params, googleState: randomToken(), googleVerifier: randomToken(),
+      id: randomToken(), userId: randomUUID(), client, params, googleState: randomToken(), googleVerifier: randomToken(), googleNonce: randomToken(),
       expiresAt: Date.now() + FLOW_TTL, started: false,
     };
-    if (this.accounts) {
-      const browserToken = randomToken();
-      flow.browserProof = createHash("sha256").update(browserToken).digest("hex");
-      res.append("Set-Cookie", this.flowCookie(flow.id, browserToken));
-    }
     await this.store.putFlow(flow);
     const connect = new URL("/connect/google", this.config.origin);
     connect.searchParams.set("flow", flow.id);
@@ -64,140 +148,208 @@ export class PublicOAuthProvider implements OAuthServerProvider {
     res.redirect(302, connect.toString());
   }
 
-  private flowCookie(id: string, token = "") {
-    return `cd_oauth_${id}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${token ? 600 : 0}${this.config.origin.protocol === "https:" ? "; Secure" : ""}`;
+  async googleGrantScopes(userId: string): Promise<string[]> {
+    const grant = await this.store.getGrant(userId);
+    return grant ? [...grant.scopes] : [];
   }
 
-  private browserMatches(flow: GoogleFlow, cookie?: string) {
-    const value = cookie?.split(";").map(value => value.trim()).find(value => value.startsWith(`cd_oauth_${flow.id}=`))?.split("=")[1];
-    if (!value || !flow.browserProof) return false;
-    const supplied = createHash("sha256").update(value).digest();
-    const expected = Buffer.from(flow.browserProof, "hex");
-    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  async beginTeacherConsent(input: { userId: string; state: string; verifier: string; nonce: string }): Promise<string> {
+    const grant = await this.store.getGrant(input.userId);
+    const storedValidator = this.config.googleStoredGrantValidator ?? this.config.googleGrantValidator ?? isExactPublicGoogleGrant;
+    if (!grant || !storedValidator(grant.scopes) || !this.config.teacherScopes?.length || !this.config.teacherGrantValidator) throw new Error("teacher_consent_unavailable");
+    if (!/^[A-Za-z0-9_-]{32,128}$/.test(input.state) || !/^[A-Za-z0-9_-]{32,128}$/.test(input.verifier) || !/^[A-Za-z0-9_-]{32,128}$/.test(input.nonce)) throw new Error("teacher_consent_state_invalid");
+    return this.teacherGoogleClient().generateAuthUrl({
+      access_type: "offline",
+      prompt: "consent select_account",
+      include_granted_scopes: true,
+      scope: [...this.config.teacherScopes],
+      state: input.state,
+      nonce: input.nonce,
+      code_challenge: createPkceChallenge(input.verifier),
+      code_challenge_method: "S256",
+    } as never);
   }
 
-  clearFlowCookie(id: string) { return this.flowCookie(id); }
+  /** Incrementally request the broader Google coursework-management grant only after a teacher explicitly starts this flow. */
+  async beginTeacherWriteConsent(input: { userId: string; state: string; verifier: string; nonce: string }): Promise<string> {
+    const grant = await this.store.getGrant(input.userId);
+    const storedValidator = this.config.googleStoredGrantValidator ?? this.config.googleGrantValidator ?? isExactPublicGoogleGrant;
+    if (!grant || !storedValidator(grant.scopes) || !this.config.teacherGrantValidator?.(grant.scopes)
+      || !this.config.teacherWriteScopes?.length || !this.config.teacherWriteGrantValidator) throw new Error("teacher_write_consent_unavailable");
+    if (!/^[A-Za-z0-9_-]{32,128}$/.test(input.state) || !/^[A-Za-z0-9_-]{32,128}$/.test(input.verifier) || !/^[A-Za-z0-9_-]{32,128}$/.test(input.nonce)) throw new Error("teacher_consent_state_invalid");
+    return this.teacherGoogleClient().generateAuthUrl({
+      access_type: "offline",
+      prompt: "consent select_account",
+      include_granted_scopes: true,
+      scope: [...this.config.teacherWriteScopes],
+      state: input.state,
+      nonce: input.nonce,
+      code_challenge: createPkceChallenge(input.verifier),
+      code_challenge_method: "S256",
+    } as never);
+  }
 
-  async beginGoogle(flowId: string, cookie?: string, selectAccount = false): Promise<string> {
-    let flow = await this.store.getFlow(flowId);
-    if (this.accounts) {
-      if (!flow || !this.browserMatches(flow, cookie)) throw new Error("oauth_browser_mismatch");
-      const account = selectAccount ? null : await this.accounts.session(cookie);
-      if (account) {
-        flow = await this.store.startAccountFlow(flowId, account.mcpUserId, { userId: account.userId, sessionId: account.sessionId, googleSubject: account.googleSubject });
-        if (!flow) throw new Error("Authorization expired or already started");
-      } else if (!(await this.store.setFlowStarted(flowId))) throw new Error("Authorization expired or already started");
-      const grant = account ? await this.store.getGrant(flow.userId) ?? (account.legacyMcpUserId ? await this.store.getGrant(account.legacyMcpUserId) : undefined) : undefined;
-      // Legacy grants without verified OIDC ownership are retained but require
-      // one secure consent recovery before automatic reuse is permitted.
-      if (grant && grant.googleSubject === account?.googleSubject) {
-        try {
-          const auth = await this.googleAuthForUser(grant.userId);
-          if (!(await auth.getAccessToken()).token) throw new Error("Google grant unavailable");
-          const claimed = await this.store.takeFlowByGoogleState(flow.googleState);
-          if (!claimed) throw new Error("Authorization expired or already completed");
-          return await this.finishAuthorization(claimed, grant.userId === flow.userId ? undefined : { ...grant, userId: flow.userId, updatedAt: Date.now() });
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : "";
-          // A temporary upstream failure must not silently request new consent.
-          if (reason !== "Google grant unavailable" && !reason.includes("invalid_grant")) throw error;
-        }
-      }
-    } else if (!flow || !(await this.store.setFlowStarted(flowId))) throw new Error("Authorization expired or already started");
+  /** Incrementally add teacher read scopes to the same verified Google subject. */
+  async completeTeacherConsent(input: { userId: string; expectedGoogleSubject: string; code: string; verifier: string; nonce: string }): Promise<void> {
+    const existing = await this.store.getGrant(input.userId);
+    const storedValidator = this.config.googleStoredGrantValidator ?? this.config.googleGrantValidator ?? isExactPublicGoogleGrant;
+    if (!existing || !storedValidator(existing.scopes) || !this.config.teacherGrantValidator) throw new Error("teacher_grant_unavailable");
+    const client = this.teacherGoogleClient();
+    const { tokens } = await client.getToken({ code: input.code, codeVerifier: input.verifier });
+    const claims = await this.verifiedGoogleClaims(tokens.id_token, input.nonce);
+    if (claims.sub !== input.expectedGoogleSubject) throw new Error("teacher_google_account_mismatch");
+    const grantedScopes = (tokens.scope ?? "").split(/\s+/).filter(Boolean);
+    if (!this.config.teacherGrantValidator(grantedScopes) || !storedValidator(grantedScopes)) throw new Error("teacher_scope_mismatch");
+    const refreshToken = tokens.refresh_token ?? existing.refreshToken;
+    if (!refreshToken) throw new Error("teacher_refresh_token_unavailable");
+    await this.store.putGrant({ ...existing, refreshToken, scopes: grantedScopes, updatedAt: Date.now() });
+  }
+
+  /** Store the expanded grant only when Google confirms the same stable subject and the full required scope set. */
+  async completeTeacherWriteConsent(input: { userId: string; expectedGoogleSubject: string; code: string; verifier: string; nonce: string }): Promise<void> {
+    const existing = await this.store.getGrant(input.userId);
+    const storedValidator = this.config.googleStoredGrantValidator ?? this.config.googleGrantValidator ?? isExactPublicGoogleGrant;
+    if (!existing || !storedValidator(existing.scopes) || !this.config.teacherGrantValidator?.(existing.scopes) || !this.config.teacherWriteGrantValidator) throw new Error("teacher_write_grant_unavailable");
+    const client = this.teacherGoogleClient();
+    const { tokens } = await client.getToken({ code: input.code, codeVerifier: input.verifier });
+    const claims = await this.verifiedGoogleClaims(tokens.id_token, input.nonce);
+    if (claims.sub !== input.expectedGoogleSubject) throw new Error("teacher_write_google_account_mismatch");
+    const grantedScopes = (tokens.scope ?? "").split(/\s+/).filter(Boolean);
+    if (!this.config.teacherWriteGrantValidator(grantedScopes) || !storedValidator(grantedScopes)) throw new Error("teacher_write_scope_mismatch");
+    const refreshToken = tokens.refresh_token ?? existing.refreshToken;
+    if (!refreshToken) throw new Error("teacher_refresh_token_unavailable");
+    await this.store.putGrant({ ...existing, refreshToken, scopes: grantedScopes, updatedAt: Date.now() });
+  }
+
+  async beginGoogle(flowId: string): Promise<string> {
+    const flow = await this.store.getFlow(flowId);
+    if (!flow || !this.isAllowedFlowRedirect(flow) || !(await this.store.setFlowStarted(flowId))) throw new Error("Authorization expired, invalid, or already started");
     const client = this.googleClient();
     const url = client.generateAuthUrl({
-      access_type: "offline", prompt: "consent", include_granted_scopes: false,
-      scope: [...this.googleScopes, ...(this.accounts ? ["openid", "email", "profile"] : [])], state: flow.googleState,
-      ...(this.accounts ? { nonce: flow.googleState, prompt: "select_account consent" } : {}),
+      access_type: "offline", prompt: "consent", include_granted_scopes: true,
+      scope: [...this.googleScopes], state: flow.googleState,
+      ...(this.config.googleIdentityResolver ? { nonce: flow.googleNonce ?? flow.googleState } : {}),
       code_challenge: createPkceChallenge(flow.googleVerifier), code_challenge_method: "S256",
     } as never);
     return url;
   }
 
-  async completeGoogle(state: string | undefined, code: string | undefined, error: string | undefined, cookie?: string, setSession?: (token: string) => void): Promise<string> {
+  async completeGoogle(state: string | undefined, code: string | undefined, error: string | undefined): Promise<string> {
     if (!state) throw new Error("Invalid authorization callback");
     const flow = await this.store.takeFlowByGoogleState(state);
-    if (!flow || !flow.started) throw new Error("Invalid authorization callback");
-    if (this.accounts && !this.browserMatches(flow, cookie)) throw new Error("oauth_browser_mismatch");
-    if (flow.account) {
-      const session = await this.accounts?.session(cookie);
-      if (!session || session.userId !== flow.account.userId || session.sessionId !== flow.account.sessionId || session.googleSubject !== flow.account.googleSubject || session.mcpUserId !== flow.userId) throw new Error("website_session_changed_or_expired");
+    if (!flow || !flow.started || !this.isAllowedFlowRedirect(flow)) throw new Error("Invalid authorization callback");
+    if (error) {
+      logGoogleAuthorizationFailure("google_denied", { source: "provider", providerErrorCategory: error });
+      return this.clientErrorRedirect(flow, safeGoogleOAuthError(error));
     }
-    if (error || !code) {
-      logGoogleAuthorizationFailure("google_denied");
-      return this.clientErrorRedirect(flow, "access_denied");
+    if (!code) {
+      logGoogleAuthorizationFailure("callback_missing_code", { source: "worker", providerErrorCategory: "missing_code" });
+      return this.clientErrorRedirect(flow, "server_error");
     }
     const client = this.googleClient();
-    let storedGrant = false;
+    let failureStage: "google_token_exchange" | "google_identity_binding" | "grant_persistence" = "google_token_exchange";
     try {
       const { tokens } = await client.getToken({ code, codeVerifier: flow.googleVerifier });
       client.setCredentials(tokens);
-      let websiteToken: string | undefined;
-      let verifiedIdentity: { googleSubject: string; email: string; displayName: string } | undefined;
-      if (this.accounts) {
-        if (!tokens.id_token) throw new Error("google_identity_missing");
-        const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: this.config.googleClientId });
-        const identity = ticket.getPayload();
-        if (!identity?.sub || identity.nonce !== flow.googleState || !identity.email || identity.email_verified !== true) throw new Error("google_identity_mismatch");
-        if (flow.account && identity.sub !== flow.account.googleSubject) throw new Error("google_identity_mismatch");
-        verifiedIdentity = { googleSubject: identity.sub, email: identity.email, displayName: identity.name || identity.email };
-      }
-      const identityScopes = new Set(["openid", "email", "profile", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"]);
-      const granted = new Set((tokens.scope ?? "").split(/\s+/).filter(scope => scope && !(this.accounts && identityScopes.has(scope))));
+      const grantedScopes = (tokens.scope ?? "").split(/\s+/).filter(Boolean);
+      const granted = new Set(grantedScopes);
       const expected = new Set<string>(this.googleScopes);
-      if (!tokens.refresh_token) {
-        logGoogleAuthorizationFailure("missing_refresh_token");
-        const revoke = tokens.access_token;
-        if (revoke && !this.accounts) await client.revokeToken(revoke).catch(() => undefined);
-        return this.clientErrorRedirect(flow, "access_denied");
-      }
-      if (!(this.config.googleGrantValidator ? this.config.googleGrantValidator([...granted]) : isExactPublicGoogleGrant([...granted]))) {
+      const validator = this.config.googleGrantValidator ?? isExactPublicGoogleGrant;
+      const authorizationGrantValidator = this.config.googleAuthorizationGrantValidator ?? validator;
+      if (!authorizationGrantValidator(grantedScopes)) {
         logGoogleAuthorizationFailure("scope_mismatch", {
           missingScopes: [...expected].filter((scope) => !granted.has(scope)).length,
           extraScopes: [...granted].filter((scope) => !expected.has(scope)).length,
           missingScopeNames: [...expected].filter((scope) => !granted.has(scope)).map((scope) => scope.replace("https://www.googleapis.com/auth/", "")),
         });
-        const revoke = tokens.refresh_token ?? tokens.access_token;
-        if (revoke && !this.accounts) await client.revokeToken(revoke).catch(() => undefined);
         return this.clientErrorRedirect(flow, "access_denied");
       }
-      if (this.accounts && !flow.account && verifiedIdentity) {
-        const identified = await this.accounts.identify(verifiedIdentity);
-        flow.account = { userId: identified.account.userId, sessionId: identified.account.sessionId, googleSubject: identified.account.googleSubject };
-        flow.userId = identified.account.mcpUserId;
-        websiteToken = identified.token;
+      let grantUserId = flow.userId;
+      let accountBinding: GoogleAccountBinding | undefined;
+      if (this.config.googleIdentityResolver) {
+        failureStage = "google_identity_binding";
+        const resolved = await this.resolveGoogleIdentity(client, tokens.id_token, flow.googleNonce ?? "");
+        grantUserId = resolved.mcpUserId;
+        accountBinding = resolved;
       }
-      const grant = { userId: flow.userId, refreshToken: tokens.refresh_token, scopes: [...granted], createdAt: Date.now(), updatedAt: Date.now(), ...(flow.account ? { googleSubject: flow.account.googleSubject } : {}) };
-      if (!flow.account) { await this.store.putGrant(grant); storedGrant = true; }
-      const redirect = await this.finishAuthorization(flow, flow.account ? grant : undefined);
-      if (websiteToken) setSession?.(websiteToken);
-      return redirect;
+      const existingGrant = this.config.googleIdentityResolver ? await this.store.getGrant(grantUserId) : undefined;
+      const refreshToken = tokens.refresh_token ?? existingGrant?.refreshToken;
+      if (!refreshToken) {
+        logGoogleAuthorizationFailure("missing_refresh_token");
+        return this.clientErrorRedirect(flow, "server_error");
+      }
+      // Google returns the scopes represented by this combined authorization.
+      // Never union an old grant into a new response: the user may have revoked
+      // an incremental permission since the previous connection.
+      const storedScopes = [...granted];
+      const storedValidator = this.config.googleStoredGrantValidator ?? validator;
+      if (!storedValidator(storedScopes)) {
+        logGoogleAuthorizationFailure("stored_grant_scope_mismatch");
+        return this.clientErrorRedirect(flow, "server_error");
+      }
+      const mcpCode = randomToken();
+      const authorizationCode = {
+        code: mcpCode, clientId: flow.client.client_id, userId: grantUserId,
+        redirectUri: flow.params.redirectUri, state: flow.params.state,
+        challenge: flow.params.codeChallenge, resource: flow.params.resource ?? this.config.mcpResource,
+        scopes: flow.params.scopes?.length ? flow.params.scopes : [MCP_SCOPE], expiresAt: Date.now() + CODE_TTL,
+      };
+      failureStage = "grant_persistence";
+      await this.store.putGrantAndCode({
+        userId: grantUserId,
+        refreshToken,
+        scopes: storedScopes,
+        createdAt: existingGrant?.createdAt ?? Date.now(),
+        updatedAt: Date.now(),
+      }, authorizationCode, accountBinding);
+      const target = new URL(flow.params.redirectUri);
+      target.searchParams.set("code", mcpCode);
+      if (flow.params.state !== undefined) target.searchParams.set("state", flow.params.state);
+      return target.toString();
     } catch (error) {
-      const reason = error instanceof Error ? error.message : "";
-      logGoogleAuthorizationFailure(reason === "google_identity_missing" || reason === "google_identity_mismatch" || reason === "account_binding_conflict_or_session_expired" ? reason : "token_exchange_failed");
-      if (storedGrant) await this.store.deleteUserAuthorization(flow.userId).catch(() => undefined);
+      logGoogleAuthorizationFailure("callback_processing_failed", { stage: failureStage, failureCategory: googleFailureCategory(error) });
       return this.clientErrorRedirect(flow, "server_error");
     }
   }
 
-  private async finishAuthorization(flow: GoogleFlow, grant?: GoogleGrant): Promise<string> {
-    const code: InternalCode = {
-      code: randomToken(), clientId: flow.client.client_id, userId: flow.userId,
-      redirectUri: flow.params.redirectUri, state: flow.params.state, challenge: flow.params.codeChallenge,
-      resource: flow.params.resource ?? this.config.mcpResource, scopes: flow.params.scopes?.length ? flow.params.scopes : [MCP_SCOPE], expiresAt: Date.now() + CODE_TTL,
-    };
-    if (flow.account) {
-      if (!this.accounts) throw new Error("account_binding_unavailable");
-      await this.accounts.complete(flow, code, grant);
-    } else await this.store.putCode(code);
-    const target = new URL(flow.params.redirectUri);
-    target.searchParams.set("code", code.code);
-    if (flow.params.state !== undefined) target.searchParams.set("state", flow.params.state);
-    console.log(JSON.stringify({ event: "mcp_oauth_callback_ready", codePresent: true, statePresent: flow.params.state !== undefined, unified: Boolean(flow.account) }));
-    return target.toString();
+  private async resolveGoogleIdentity(client: OAuth2Client, idToken: string | null | undefined, expectedNonce: string): Promise<GoogleAccountBinding> {
+    const payload = await this.verifiedGoogleClaims(idToken, expectedNonce, client);
+    const resolved = await this.config.googleIdentityResolver!({
+      googleSubject: payload.sub,
+      email: payload.email,
+      displayName: payload.name ?? payload.email,
+    });
+    const binding = typeof resolved === "string" ? { accountId: resolved, mcpUserId: resolved } : resolved;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(binding.accountId)
+      || typeof binding.mcpUserId !== "string" || binding.mcpUserId.length < 1 || binding.mcpUserId.length > 256 || /[\u0000-\u001f\u007f]/.test(binding.mcpUserId)) throw new Error("canonical_account_invalid");
+    return binding;
+  }
+
+  private async verifiedGoogleClaims(idToken: string | null | undefined, expectedNonce: string, client = this.googleClient()): Promise<{ sub: string; email: string; name?: string }> {
+    if (!idToken || !expectedNonce) throw new Error("verified_google_identity_required");
+    const ticket = await client.verifyIdToken({ idToken, audience: this.config.googleClientId });
+    const payload = ticket.getPayload();
+    const audience = payload?.aud;
+    const audienceMatches = audience === this.config.googleClientId
+      || (Array.isArray(audience) && audience.includes(this.config.googleClientId)
+        && (audience.length === 1 || payload?.azp === this.config.googleClientId));
+    const now = Math.floor(Date.now() / 1000);
+    if (!payload
+      || (payload.iss !== "accounts.google.com" && payload.iss !== "https://accounts.google.com")
+      || !audienceMatches
+      || (payload.azp !== undefined && payload.azp !== this.config.googleClientId)
+      || typeof payload.exp !== "number" || payload.exp <= now
+      || typeof payload.iat !== "number" || payload.iat > now + 60
+      || payload.nonce !== expectedNonce
+      || typeof payload.sub !== "string" || !/^[A-Za-z0-9_-]{8,256}$/.test(payload.sub)
+      || typeof payload.email !== "string" || payload.email.length > 320
+      || !/^[^\s@]+@[^\s@]+$/.test(payload.email)
+      || payload.email_verified !== true) throw new Error("verified_google_identity_required");
+    return { sub: payload.sub, email: payload.email, ...(typeof payload.name === "string" && payload.name.trim() ? { name: payload.name.trim().slice(0, 256) } : {}) };
   }
 
   private clientErrorRedirect(flow: GoogleFlow, code: string) {
+    if (!this.isAllowedFlowRedirect(flow)) throw new Error("Invalid authorization callback destination");
     const target = new URL(flow.params.redirectUri);
     target.searchParams.set("error", code);
     if (flow.params.state !== undefined) target.searchParams.set("state", flow.params.state);
@@ -245,7 +397,6 @@ export class PublicOAuthProvider implements OAuthServerProvider {
     if (oldRefreshToken) {
       if (!(await this.store.rotateTokenPair(oldRefreshToken, clientId, accessRecord, refreshRecord))) { logMcpTokenFailure("refresh_token", "rotation_rejected"); throw new Error("Invalid refresh token"); }
     } else await this.store.putTokenPair(accessRecord, refreshRecord);
-    console.log(JSON.stringify({ event: "mcp_oauth_token_issued", refreshRotation: Boolean(oldRefreshToken) }));
     return { access_token: access, refresh_token: refresh, token_type: "bearer", expires_in: ACCESS_TTL, scope: scopes.join(" ") };
   }
 
@@ -261,7 +412,8 @@ export class PublicOAuthProvider implements OAuthServerProvider {
 
   async googleAuthForUser(userId: string): Promise<OAuth2Client> {
     const grant = await this.store.getGrant(userId);
-    if (!grant || !(this.config.googleGrantValidator ? this.config.googleGrantValidator(grant.scopes) : isExactPublicGoogleGrant(grant.scopes))) throw new Error("Google grant unavailable");
+    const validator = this.config.googleStoredGrantValidator ?? this.config.googleGrantValidator ?? isExactPublicGoogleGrant;
+    if (!grant || !validator(grant.scopes)) throw new Error("Google grant unavailable");
     const auth = this.googleClient();
     auth.setCredentials({ refresh_token: grant.refreshToken });
     auth.on("tokens", (tokens) => { if (tokens.refresh_token) void this.store.updateGrantRefreshToken(userId, tokens.refresh_token).catch(logGrantRefreshFailure); });
