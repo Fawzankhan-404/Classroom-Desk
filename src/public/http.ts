@@ -141,6 +141,11 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
       <h1>Support</h1>
       <p class="updated">Last updated: 3 October 2026.</p>
       <p>For connection problems, privacy questions, or deletion requests, contact <a href="${mailto}">${support}</a>.</p>
+      <section class="panel" id="project-support" aria-labelledby="project-support-title">
+        <h2 id="project-support-title">Support Classroom Desk</h2>
+        <p>The open-source project remains free. Voluntary donations help with maintenance, hosting, infrastructure, documentation, and future development; they do not unlock functionality, purchase a hosted plan, or change account permissions.</p>
+        <p>Recurring GitHub Sponsors support and optional one-time Buy Me a Coffee contributions will be linked here when the owner's accounts are active and verified. No donation payment links are configured yet.</p>
+      </section>
       <div class="panel">
         <h2>Include</h2>
         <ul><li>What you were trying to do</li><li>The page or ChatGPT step where the problem appeared</li><li>Any visible error message, without private Classroom content</li></ul>
@@ -549,6 +554,7 @@ function connectModalProgressScript() {
 
 function page(title: string, active: string, operator: string, support: string, origin: URL, body: string, compact = false) {
   const nav = (href: string, key: string, label: string) => `<a ${active === key ? 'aria-current="page"' : ""} href="${href}">${label}</a>`;
+  const projectSupportLink = active === "connect" ? "" : '<a href="/support#project-support">Support the Project</a>';
   const documentTitle = title === "Classroom Desk" ? "Classroom Desk | Google Classroom Meets ChatGPT" : `${title} | Classroom Desk`;
   const descriptions: Record<string,string> = { home:"Connect Google Classroom with ChatGPT. Access coursework, manage assignments, and stay organized.", pricing:"Classroom Desk pricing: Student ₹99/month, Teacher ₹199/month and an eligible ₹9 seven-day launch trial. Google authorization stays separate.", connect:"Connect Classroom Desk to ChatGPT and authorize the Google account linked to your profile. Current OAuth connections use verified Google identity binding.", refunds:"Classroom Desk refund and subscription cancellation policy.", privacy:"How Classroom Desk protects your Google Classroom authorization and account information.", terms:"Classroom Desk terms of service and authorized-use requirements.", support:"Get help with Classroom Desk connections, Google authorization, accounts and billing." };
   const description = descriptions[active] ?? descriptions.home!;
@@ -589,7 +595,7 @@ ${title === "Classroom Desk" ? '<link rel="preload" as="image" href="https://d2o
 <nav id="mobile-menu" class="mobile-menu" aria-label="Mobile navigation" hidden>${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/pricing", "pricing", "Pricing")}<a href="/login">Sign in</a><button class="button" type="button" data-connect-open>Connect to ChatGPT</button></nav>
 <main id="main-content">${body}</main>
 <footer class="site-footer">
-  <div class="footer-grid"><div><a class="brand footer-brand" href="/">${logoMark()}<span>Classroom Desk</span></a><p>Ask ChatGPT about your own authorized Google Classroom.</p></div><div><h2>Product</h2><a href="/#features">Features</a><a href="/#how-it-works">How it works</a><a href="/pricing">Pricing</a><a href="/connect">Connect</a></div><div><h2>Legal</h2><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refunds">Refunds and cancellation</a><a href="/support">Support</a></div><div><h2>Contact</h2><a href="mailto:${support}">${support}</a><p class="developer-credit">Built by <a href="https://fawzankhan-404.github.io/" target="_blank" rel="noopener noreferrer">${operator}</a>, an independent developer</p></div></div>
+  <div class="footer-grid"><div><a class="brand footer-brand" href="/">${logoMark()}<span>Classroom Desk</span></a><p>Ask ChatGPT about your own authorized Google Classroom.</p></div><div><h2>Product</h2><a href="/#features">Features</a><a href="/#how-it-works">How it works</a><a href="/pricing">Pricing</a><a href="/connect">Connect</a></div><div><h2>Legal</h2><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refunds">Refunds and cancellation</a><a href="/support">Support</a>${projectSupportLink}</div><div><h2>Contact</h2><a href="mailto:${support}">${support}</a><p class="developer-credit">Built by <a href="https://fawzankhan-404.github.io/" target="_blank" rel="noopener noreferrer">${operator}</a>, an independent developer</p></div></div>
   <p class="disclaimer">Classroom Desk is an independent integration and is not affiliated with or endorsed by Google or OpenAI. Google Classroom, ChatGPT, and OpenAI are trademarks of their respective owners.</p>
 </footer>
 ${connectGuideModal()}

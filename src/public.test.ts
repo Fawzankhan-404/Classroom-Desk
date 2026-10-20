@@ -322,6 +322,29 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain("Refunds and disputes");
     } finally { await close(ctx.server); }
   });
+  it("shows the non-intrusive project support information and footer link without payment URLs", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/support`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).toContain('id="project-support"');
+      expect(html).toContain("Support the Project");
+      expect(html).toContain("maintenance, hosting, infrastructure, documentation, and future development");
+      expect(html).toContain("do not unlock functionality");
+      expect(html).toContain("No donation payment links are configured yet.");
+      expect(html).not.toContain("buymeacoffee.com");
+      expect(html).not.toContain("github.com/sponsors/");
+      const homeResponse = await fetch(ctx.origin);
+      const homeHtml = await homeResponse.text();
+      expect(homeResponse.status).toBe(200);
+      expect(homeHtml).toContain('href="/support#project-support">Support the Project</a>');
+      const connectResponse = await fetch(`${ctx.origin}/connect`);
+      const connectHtml = await connectResponse.text();
+      expect(connectResponse.status).toBe(200);
+      expect(connectHtml).not.toContain('href="/support#project-support">Support the Project</a>');
+    } finally { await close(ctx.server); }
+  });
   it("rejects unauthenticated, malformed, and expired bearer tokens", async () => {
     const ctx = await setup();
     try {

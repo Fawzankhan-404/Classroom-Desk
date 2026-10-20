@@ -117,6 +117,12 @@ For vulnerability reports, follow the private process in [SECURITY.md](SECURITY.
 
 Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), use synthetic fixtures, and include focused tests for behavior changes. Do not include private Classroom content, production database exports, credentials, or OAuth tokens in issues or pull requests.
 
+## Support Classroom Desk
+
+Classroom Desk's source remains free and open source under Apache-2.0. The hosted service may offer separate plans; voluntary donations do not purchase a plan, unlock functionality, or change account permissions. Support helps with project maintenance, hosting, infrastructure, documentation, and future development.
+
+The intended options are recurring support through GitHub Sponsors and optional one-time contributions through Buy Me a Coffee. Those owner accounts are not yet verified as active, so payment links and a GitHub funding button are intentionally omitted. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for what needs to be configured.
+
 ## License and attribution
 
 Project source and documentation are available under the [Apache License 2.0](LICENSE). Third-party dependencies and materials retain their own licenses. The Classroom Desk name, logo, hosted service, and third-party marks are not granted under the source license; see [`NOTICE.md`](NOTICE.md).
