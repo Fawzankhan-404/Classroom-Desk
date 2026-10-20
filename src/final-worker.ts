@@ -20,6 +20,7 @@ import { buildPickerUrl } from "./v2/urls.js";
 import { discoverAttachments } from "./v2/attachments.js";
 import { isSaaSReconciliationEnabled, loadSaaSFeatureFlags } from "./saas/flags.js";
 import { SaaSStore } from "./saas/store.js";
+import { loadPricingReferralView } from "./saas/pricing-referral-view.js";
 import { registerWebsiteRoutes } from "./saas/website-routes.js";
 import { registerAdminRoutes } from "./saas/admin-routes.js";
 import { registerInternalConnectionStatus } from "./saas/connection-status.js";
@@ -168,6 +169,7 @@ export default {
       const { app } = createPublicApp({ ...config, workerClientIp: true }, store, publicProvider, () => store.ready(), createClients, {
         internalDelegationSecret: bindings.INTERNAL_DELEGATION_SECRET,
         resourceName: "Classroom Desk",
+        loadPricingReferral: (cookieHeader) => loadPricingReferralView(saasStore, cookieHeader, config.saasFlags?.referralRewards === true),
         stagingSubjectFingerprint: stagingDiagnosticsEnabled,
         entitlementCheck: (userId) => resolveMcpAccess(saasStore,userId,bindings.MCP_GRANDFATHERED_SUBJECT_HASHES,stagingTestEntitlement),
         mcpFactory: async (auth, userId) => {

@@ -11,6 +11,7 @@ import {registerInternalLink} from "./internal-link.js";
 import {registerAdminRoutes} from "./admin-routes.js";
 import { reconcileRecentPayments } from "./reconciliation.js";
 import { renderSubscription } from "./account-portal.js";
+import { safeWebsiteReturnPath } from "./website-routes.js";
 
 describe("Account portal with isolated PostgreSQL persistence", () => {
   const pg=new PGlite();
@@ -65,6 +66,37 @@ describe("Account portal with isolated PostgreSQL persistence", () => {
     const grant=await pg.query<{revoked_at:Date}>("SELECT revoked_at FROM classroom_desk_entitlement_grants WHERE user_id=$1",[referrer.id]);
     expect(grant.rows[0].revoked_at).toBeTruthy();
   });
+  it("attributes a referral only to the authenticated session account and rejects self, duplicate, and expired requests", async () => {
+    const referrer = await store.upsertGoogleIdentity(identity("http-referrer"));
+    const referred = await store.upsertGoogleIdentity(identity("http-referred"));
+    const code = await store.referrals.ensureCode(referrer.id);
+    const session = await store.sessions.create(referred.id);
+    const app = express();
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: false }));
+    registerWebsiteRoutes(app, { store, secureCookies: false, referralRewardsEnabled: true });
+    const server = createServer(app);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const headers = { cookie: `cd_session=${session.token}`, origin, "content-type": "application/json" };
+    try {
+      expect((await fetch(`${origin}/api/referrals`)).status).toBe(401);
+      expect((await fetch(`${origin}/api/referrals/attribute`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify({ code }) })).status).toBe(401);
+      const response = await fetch(`${origin}/api/referrals/attribute`, { method: "POST", headers, body: JSON.stringify({ code, userId: referrer.id }) });
+      expect(response.status).toBe(201);
+      const saved = await pg.query<{ referrer_user_id: string; referred_user_id: string }>(`SELECT referrer_user_id,referred_user_id FROM classroom_desk_referrals WHERE referred_user_id=$1`, [referred.id]);
+      expect(saved.rows[0]).toEqual({ referrer_user_id: referrer.id, referred_user_id: referred.id });
+
+      const duplicate = await fetch(`${origin}/api/referrals/attribute`, { method: "POST", headers, body: JSON.stringify({ code }) });
+      expect(duplicate.status).toBe(409);
+      const selfSession = await store.sessions.create(referrer.id);
+      const self = await fetch(`${origin}/api/referrals/attribute`, { method: "POST", headers: { ...headers, cookie: `cd_session=${selfSession.token}` }, body: JSON.stringify({ code }) });
+      expect(self.status).toBe(409);
+      const expired = await store.sessions.create(await store.upsertGoogleIdentity(identity("http-expired-referral")).then(user => user.id), new Date(Date.now() - 31 * 86400000));
+      const expiredResponse = await fetch(`${origin}/api/referrals/attribute`, { method: "POST", headers: { ...headers, cookie: `cd_session=${expired.token}` }, body: JSON.stringify({ code }) });
+      expect(expiredResponse.status).toBe(401);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
   it("protects portal routes, validates deletion confirmation, and revokes a real SQL session through both logout routes",async()=>{
     const user=await store.upsertGoogleIdentity(identity("http"));
     const app=express();app.use(express.urlencoded({extended:false}));registerWebsiteRoutes(app,{store,secureCookies:false,billingEnabled:false,referralRewardsEnabled:false});
@@ -93,6 +125,11 @@ describe("Account portal with isolated PostgreSQL persistence", () => {
   });
   it("does not activate future grants",()=>{
     expect(resolveEntitlement({now:new Date("2026-10-10"),user:{status:"active"},grants:[{id:"g",userId:"u",plan:"student",source:"manual",startsAt:new Date("2026-11-01"),expiresAt:new Date("2026-12-01"),revokedAt:null}]}).allowed).toBe(false);
+  });
+  it("allows only safe Pricing return paths with a single referral code", () => {
+    expect(safeWebsiteReturnPath("/pricing?ref=CD-a1b2c3d4e5#refer-and-earn")).toBe("/pricing?ref=CD-A1B2C3D4E5#refer-and-earn");
+    expect(safeWebsiteReturnPath("/pricing?ref=CD-A1B2C3D4E5&next=https://attacker.invalid")).toBe("/app");
+    expect(safeWebsiteReturnPath("//attacker.invalid/pricing")).toBe("/app");
   });
   it("atomically processes webhook delivery and rejects duplicates or changed payloads",async()=>{
     const user=await store.upsertGoogleIdentity(identity("webhook"));

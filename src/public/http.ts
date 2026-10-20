@@ -14,6 +14,7 @@ import { createServer } from "../server.js";
 import { MCP_OFFLINE_SCOPE, MCP_SCOPE, PublicOAuthProvider } from "./oauth.js";
 import { loadSaaSFeatureFlags } from "../saas/flags.js";
 import { renderPricingPage } from "../saas/portal.js";
+import type { PricingReferralView } from "../saas/pricing-referral-view.js";
 import type { PublicAuthStore } from "./store.js";
 import type { RuntimeConfig } from "./config.js";
 import { logHttp, logOAuthCallbackRedirect, logOAuthCallbackRejected } from "./log.js";
@@ -25,7 +26,7 @@ type Session = { userId: string; transport: StreamableHTTPServerTransport; serve
 type AuthenticatedRequest = Request & { auth?: AuthInfo };
 export type RawBodyRequest = Request & { rawBody?: Buffer };
 type McpFactory = (auth: OAuth2Client, userId: string) => Promise<McpServer>;
-type PublicAppOptions = { mcpFactory?: McpFactory; resourceName?: string; registerRoutes?: (app: express.Express) => void; entitlementCheck?: (userId: string) => Promise<{ allowed: boolean; reason: string }>; publicOnly?: boolean; internalDelegationSecret?: string; stagingSubjectFingerprint?: boolean };
+type PublicAppOptions = { mcpFactory?: McpFactory; resourceName?: string; registerRoutes?: (app: express.Express) => void; entitlementCheck?: (userId: string) => Promise<{ allowed: boolean; reason: string }>; loadPricingReferral?: (cookieHeader: string | undefined) => Promise<PricingReferralView>; publicOnly?: boolean; internalDelegationSecret?: string; stagingSubjectFingerprint?: boolean };
 
 export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, provider = new PublicOAuthProvider(store, config), readyCheck?: () => Promise<void>, clientsFactory: (auth: OAuth2Client) => ClassroomClients = createClients, options: PublicAppOptions = {}) {
   const app = express();
@@ -70,7 +71,23 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
 
   const metadataUrl = new URL("/.well-known/oauth-protected-resource/mcp", config.origin).toString();
   app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
-  app.get("/pricing", (_req, res) => res.type("html").send(page("Pricing", "pricing", operator, support, config.origin, pricingBody(config.saasFlags ?? loadSaaSFeatureFlags(process.env)))));
+  app.get("/pricing", async (req, res) => {
+    const flags = config.saasFlags ?? loadSaaSFeatureFlags(process.env);
+    const cookieHeader = req.get("cookie");
+    const referralParam = req.query.ref;
+    const referralCode = typeof referralParam === "string" ? normalizedReferralCode(referralParam) : null;
+    const invalidReferralLink = referralParam !== undefined && !referralCode;
+    if (cookieHeader || referralParam !== undefined) res.setHeader("Cache-Control", "no-store");
+    let referralView: PricingReferralView = cookieHeader && !flags.referralRewards ? { state: "paused" } : { state: "signed_out" };
+    if (flags.referralRewards && cookieHeader) {
+      if (!options.loadPricingReferral) referralView = { state: "unavailable" };
+      else {
+        try { referralView = await options.loadPricingReferral(cookieHeader); }
+        catch { referralView = { state: "unavailable" }; }
+      }
+    }
+    return res.type("html").send(page("Pricing", "pricing", operator, support, config.origin, pricingBody(flags, referralView, referralCode, invalidReferralLink, config.origin)));
+  });
   const readyLimit = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false, keyGenerator: workerKeyGenerator,
     handler: (_req, res) => res.status(429).json({ error: "rate_limited" }),
   });
@@ -96,7 +113,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   });
   app.get("/assets/connect.js", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=86400, no-transform");
-    res.type("js").send(connectScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript());
+    res.type("js").send(connectScript() + pricingReferralScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript());
   });
   app.get("/", (_req, res) => res.type("html").send(page("Classroom Desk", "home", operator, support, config.origin, homeBody())));
   app.get("/connect", (_req, res) => res.type("html").send(page("Connect to ChatGPT", "connect", operator, support, config.origin, connectBody())));
@@ -441,11 +458,69 @@ function homeBody() {
   <section class="closing-cta"><h2>Ready to ask your Classroom a question?</h2><div><button class="button" type="button" data-connect-open>Connect to ChatGPT</button><a class="text-link" href="/pricing">See pricing <span aria-hidden="true">↗</span></a></div></section>`;
 }
 
-function pricingBody(flags: ReturnType<typeof loadSaaSFeatureFlags>) {
+function pricingBody(
+  flags: ReturnType<typeof loadSaaSFeatureFlags>,
+  referralView: PricingReferralView,
+  referralCode: string | null,
+  invalidReferralLink: boolean,
+  origin: URL,
+) {
   const open = flags.billingUi;
   const status = open ? "" : `<p class="status-strip">Checkout is not open yet. Plans are shown for reference.</p>`;
   const action = open ? `<a class="button" href="/app/billing">Choose plan</a>` : `<span class="disabled-control">Not open yet</span><a class="text-link" href="/connect">Connect Classroom Desk</a>`;
-  return `<article class="pricing-page"><p class="eyebrow">Pricing</p><h1>Useful Classroom access, clearly priced.</h1><p class="page-lead">Classroom Desk brings your authorized Google Classroom context into ChatGPT. Plans cover product access; Google authorization remains your separate decision.</p>${status}<section class="pricing-grid" aria-label="Classroom Desk plans"><article class="plan-card"><p class="eyebrow">Try it</p><h2>₹9 once</h2><p>Seven days of access from verified payment. No automatic conversion to a subscription.</p><ul><li>Ask about courses and coursework</li><li>Check deadlines and activity</li><li>Review announcements and submissions</li></ul>${action}</article><article class="plan-card featured"><p class="eyebrow">For students</p><h2>₹99 <small>per month</small></h2><p>Keep everyday coursework questions close to the conversation.</p><ul><li>Authorized courses and coursework</li><li>Upcoming, missing and returned work</li><li>Announcements, topics and activity</li><li>Your own submission status</li><li>Supported teacher files by explicit authorization</li><li>Download PDFs and attach them yourself in Classroom</li></ul>${action}</article><article class="plan-card"><p class="eyebrow">For teachers</p><h2>₹199 <small>per month</small></h2><p>A planned teacher-focused tier for supported Classroom workflows.</p><ul><li>Monthly product access</li><li>Google authorization required</li><li>Teacher features open separately</li></ul><p class="muted">Not open yet. No checkout is available.</p>${action}</article></section><section class="compare"><h2>What every plan requires</h2><div class="table-scroll"><table><thead><tr><th>Requirement</th><th>Why it matters</th></tr></thead><tbody><tr><th>Compatible ChatGPT connection</th><td>ChatGPT controls whether custom connections are available to your plan or workspace.</td></tr><tr><th>Your Google authorization</th><td>A subscription never grants access to Classroom data by itself.</td></tr><tr><th>Classroom write boundary</th><td>Classroom Desk does not submit student work, publish drafts, or write grades automatically; separately authorized draft creation or updates require explicit confirmation.</td></tr></tbody></table></div></section><section class="plain-billing"><h2>Billing in plain words</h2><div><p><strong>Trial</strong><br>The ₹9 trial lasts exactly 168 hours from verified payment and does not auto-convert.</p><p><strong>Monthly plans</strong><br>Cancellation stops future renewals where supported, while access continues through the verified paid-through date.</p><p><strong>Refunds</strong><br>Refund requests are reviewed against the provider transaction, payment state, access period and applicable merchant policy.</p></div><a class="text-link" href="/refunds">Read the refund and cancellation policy <span aria-hidden="true">↗</span></a></section></article>`;
+  const plans = `<section class="pricing-grid" aria-label="Classroom Desk plans"><article class="plan-card"><p class="eyebrow">Try it</p><h2>₹9 once</h2><p>Seven days of access from verified payment. No automatic conversion to a subscription.</p><ul><li>Ask about courses and coursework</li><li>Check deadlines and activity</li><li>Review announcements and submissions</li></ul>${action}</article><article class="plan-card featured"><p class="eyebrow">For students</p><h2>₹99 <small>per month</small></h2><p>Keep everyday coursework questions close to the conversation.</p><ul><li>Authorized courses and coursework</li><li>Upcoming, missing and returned work</li><li>Announcements, topics and activity</li><li>Your own submission status</li><li>Supported teacher files by explicit authorization</li><li>Download PDFs and attach them yourself in Classroom</li></ul>${action}</article><article class="plan-card"><p class="eyebrow">For teachers</p><h2>₹199 <small>per month</small></h2><p>A planned teacher-focused tier for supported Classroom workflows.</p><ul><li>Monthly product access</li><li>Google authorization required</li><li>Teacher features open separately</li></ul><p class="muted">Not open yet. No checkout is available.</p>${action}</article></section>`;
+  const referrals = renderPricingReferralSection(flags.referralRewards, referralView, referralCode, invalidReferralLink, origin);
+  const referralJump = `<a class="button secondary referral-jump" href="#refer-and-earn">Refer &amp; Earn <span aria-hidden="true">↓</span></a>`;
+  const comparison = `<section class="compare"><h2>What every plan requires</h2><div class="table-scroll"><table><thead><tr><th>Requirement</th><th>Why it matters</th></tr></thead><tbody><tr><th>Compatible ChatGPT connection</th><td>ChatGPT controls whether custom connections are available to your plan or workspace.</td></tr><tr><th>Your Google authorization</th><td>A subscription never grants access to Classroom data by itself.</td></tr><tr><th>Classroom write boundary</th><td>Classroom Desk does not submit student work, publish drafts, or write grades automatically; separately authorized draft creation or updates require explicit confirmation.</td></tr></tbody></table></div></section>`;
+  const billing = `<section class="plain-billing"><h2>Billing in plain words</h2><div><p><strong>Trial</strong><br>The ₹9 trial lasts exactly 168 hours from verified payment and does not auto-convert.</p><p><strong>Monthly plans</strong><br>Cancellation stops future renewals where supported, while access continues through the verified paid-through date.</p><p><strong>Refunds</strong><br>Refund requests are reviewed against the provider transaction, payment state, access period and applicable merchant policy.</p></div><a class="text-link" href="/refunds">Read the refund and cancellation policy <span aria-hidden="true">↗</span></a></section>`;
+  return `<article class="pricing-page"><p class="eyebrow">Pricing</p><h1>Useful Classroom access, clearly priced.</h1><p class="page-lead">Classroom Desk brings your authorized Google Classroom context into ChatGPT. Plans cover product access; Google authorization remains your separate decision.</p>${status}${referralJump}${plans}${referrals}${comparison}${billing}</article>`;
+}
+
+function normalizedReferralCode(value: string): string | null {
+  const code = value.trim().toUpperCase();
+  return /^CD-[0-9A-F]{10}$/.test(code) ? code : null;
+}
+
+export function renderPricingReferralSection(enabled: boolean, view: PricingReferralView, referralCode: string | null, invalidReferralLink: boolean, origin: URL): string {
+  const title = `<div class="referral-intro"><p class="eyebrow">Referral program</p><h2 id="referral-title">Refer &amp; Earn</h2>`;
+  const steps = `<div class="referral-rules"><h3>How it works</h3><ol class="referral-steps"><li><span>Share your link.</span> The invited person signs in and applies the code before their first paid subscription payment.</li><li><span>First verified monthly payment.</span> Trials and link visits alone do not qualify.</li><li><span>Two qualifying referrals.</span> The referrer receives 30 days of Student access.</li></ol><details class="referral-terms"><summary>Eligibility and restrictions</summary><p>Referred accounts must have no previous subscription payment. Self-referrals and duplicate attributions are rejected. A verified refund can reverse referral credit and its related reward. Rewards are account access, not cash payouts.</p></details></div>`;
+  const sectionOpen = `<section id="refer-and-earn" class="referral-program" aria-labelledby="referral-title">`;
+  if (view.state === "signed_out" && !enabled) {
+    const href = `/login?next=${encodeURIComponent("/pricing#refer-and-earn")}`;
+    return `${sectionOpen}${title}<p>Referral rewards are paused in this environment. Sign-in is required for account referral details, but no referral code or reward is created while the backend reward setting is off.</p></div><div class="referral-panel"><p class="referral-state">Not currently active</p><a class="button" href="${escapeHtml(href)}">Sign in to Refer</a><p class="referral-note">If the program reopens, your personal code and progress will appear only after the server verifies your account session.</p></div></section>`;
+  }
+  if (!enabled || view.state === "paused") {
+    return `${sectionOpen}${title}<p>Referral rewards are paused in this environment. New referral codes, attributions, and reward grants are disabled. Existing account records remain intact.</p></div><div class="referral-panel"><p class="referral-state">Not currently active</p><p>No new rewards are available while the backend reward setting is off.</p></div></section>`;
+  }
+  if (view.state === "signed_out") {
+    const next = `/pricing${referralCode ? `?ref=${encodeURIComponent(referralCode)}` : ""}#refer-and-earn`;
+    const href = `/login?next=${encodeURIComponent(next)}`;
+    const message = invalidReferralLink ? "This referral link is incomplete or invalid." : referralCode ? "Sign in to apply the invitation code to your account." : "Sign in to create or view your personal referral link.";
+    return `${sectionOpen}${title}<p>Share Classroom Desk with someone who could use a clearer view of their Classroom work. Referral progress comes from account records, not link clicks.</p>${steps}</div><div class="referral-panel">${invalidReferralLink ? `<p class="referral-state" role="status">${message}</p>` : `<p>${message}</p>`}<a class="button" href="${escapeHtml(href)}">Sign in to Refer</a><p class="referral-note">Sign-in returns to this Pricing section. Your own referral details are shown only after the server verifies your account session.</p></div></section>`;
+  }
+  if (view.state !== "ready") {
+    return `${sectionOpen}${title}<p>Referral progress is available only after the signed-in account is verified.</p>${steps}</div><div class="referral-panel"><p role="status">We could not load referral information right now.</p><a class="text-link" href="/app/referrals">Open your referral dashboard</a></div></section>`;
+  }
+
+  const summary = view.summary;
+  const shareUrl = new URL(`/pricing?ref=${encodeURIComponent(summary.code)}`, origin).toString();
+  const remaining = summary.qualified % 2 === 0 ? 2 : 1;
+  const history = summary.history?.length
+    ? `<ul class="referral-history">${summary.history.map(reward => {
+      const state = reward.revoked ? "Reversed" : reward.expiresAt.getTime() <= Date.now() ? "Expired" : reward.startsAt.getTime() > Date.now() ? "Scheduled" : "Available";
+      return `<li><span>30-day Student access</span><span>${state} · ${escapeHtml(formatReferralDate(reward.startsAt))}–${escapeHtml(formatReferralDate(reward.expiresAt))}</span></li>`;
+    }).join("")}</ul>`
+    : `<p>No reward credits recorded yet.</p>`;
+  const invitation = invalidReferralLink
+    ? `<p class="referral-state" role="status">This referral link is incomplete or invalid.</p>`
+    : referralCode
+    ? `<form class="referral-apply" data-referral-attribute><input type="hidden" name="code" value="${escapeHtml(referralCode)}"><p>An invitation code is ready. Apply it to this signed-in account before its first paid subscription payment.</p><button class="button" type="submit">Apply referral code</button><p class="referral-state" data-referral-feedback role="status" aria-live="polite"></p><a class="text-link" data-referral-login href="/login?next=${encodeURIComponent(`/pricing?ref=${encodeURIComponent(referralCode)}#refer-and-earn`)}" hidden>Sign in again</a></form>`
+      : `<p class="referral-note">A referral is recorded only after the invited person signs in and applies this code. Opening the link does not qualify a referral.</p>`;
+  return `${sectionOpen}${title}<p>Earn account credit for inviting eligible Classroom Desk users. The existing server-side referral and billing rules apply.</p>${steps}</div><div class="referral-panel"><p class="referral-state">Your personal referral link</p><label class="referral-link-label" for="personal-referral-link">Share this link</label><div class="referral-link-row"><input id="personal-referral-link" type="url" readonly value="${escapeHtml(shareUrl)}"><button class="button secondary" type="button" data-copy-referral="${escapeHtml(shareUrl)}"><span data-copy-label>Copy link</span></button></div><dl class="referral-stats"><div><dt>Attributed accounts</dt><dd>${summary.total}</dd></div><div><dt>Awaiting payment</dt><dd>${summary.pending}</dd></div><div><dt>Qualifying payments</dt><dd>${summary.qualified}</dd></div><div><dt>Rewards recorded</dt><dd>${summary.rewards}</dd></div></dl><p>${remaining} more qualifying payment${remaining === 1 ? "" : "s"} toward the next 30-day Student access credit. Verified rewards are applied automatically; no redemption request is needed.</p><h3>Reward status</h3>${history}${invitation}</div></section>`;
+}
+
+function formatReferralDate(value: Date): string {
+  return Number.isNaN(value.getTime()) ? "Date unavailable" : value.toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function connectBody() {
@@ -501,6 +576,64 @@ function connectScript() {
     document.querySelectorAll("[data-copy-mcp]").forEach(b => bindCopy(b, () => b.dataset.copyMcp || ""));
     document.querySelectorAll("[data-copy-prompt]").forEach(b => bindCopy(b, () => b.dataset.copyPrompt || ""));
     const guides = [...document.querySelectorAll("[data-connect-guide]")]; const setGuide = (root, index) => { const steps = [...root.querySelectorAll("[data-guide-step]")]; const number = root.querySelector("[data-guide-number]"); const back = root.querySelector("[data-guide-back]"); const next = root.querySelector("[data-guide-next]"); steps.forEach((s, i) => { s.hidden = i !== index; }); if (number) number.textContent = String(index + 1); if (back) back.hidden = index === 0; if (next) next.textContent = index === steps.length - 1 ? "Done" : "Next"; root.dataset.step = String(index); }; guides.forEach(root => { let index = 0; const next = root.querySelector("[data-guide-next]"); const back = root.querySelector("[data-guide-back]"); next?.addEventListener("click", () => { if (index < 2) { index += 1; setGuide(root, index); } }); back?.addEventListener("click", () => { index = Math.max(0, index - 1); setGuide(root, index); }); setGuide(root, 0); }); const modal = document.querySelector("[data-connect-modal]"); let lastTrigger = null; const open = trigger => { lastTrigger = trigger; modal?.showModal(); document.body.classList.add("modal-open"); modal?.querySelector("button")?.focus(); }; document.querySelectorAll("[data-connect-open]").forEach(b => b.addEventListener("click", () => open(b))); modal?.querySelector("[data-connect-close]")?.addEventListener("click", () => modal.close()); modal?.addEventListener("click", e => { if (e.target === modal) modal.close(); }); modal?.addEventListener("close", () => { document.body.classList.remove("modal-open"); lastTrigger?.focus(); }); const menu = document.querySelector(".menu-toggle"); const mobile = document.querySelector("#mobile-menu"); menu?.addEventListener("click", () => { const open = menu.getAttribute("aria-expanded") === "true"; menu.setAttribute("aria-expanded", String(!open)); mobile.hidden = open; }); const tabs = [...document.querySelectorAll("[data-prompt-tab]")]; const answers = ["What assignments do I have?", "What deadlines are coming up?", "Show my recent Classroom activity.", "Show announcements from my courses.", "Find missing or returned work.", "Explain the instructions for my assignment."]; const replies = ["You have three current items: a Physics lab report, History reading notes, and a returned Biology assignment. Check each Classroom item for its latest details.", "Your next example deadline is a Physics lab report tomorrow, followed by History reading notes on Friday.", "Your recent example activity includes one returned assignment and two course updates.", "Your courses have example announcements about a reading reminder and a lab session.", "Example results show one returned item and one missing item. Open Classroom for the source details.", "I can explain instructions returned from Classroom. For an attachment, authorize that exact file first."]; const q = document.querySelector("[data-example-question]"); const a = document.querySelector("[data-example-answer]"); tabs.forEach((tab, i) => { tab.addEventListener("click", () => { tabs.forEach(t => t.setAttribute("aria-selected", "false")); tab.setAttribute("aria-selected", "true"); if(q) q.textContent = answers[i]; if(a) a.textContent = replies[i]; }); tab.addEventListener("keydown", e => { if (!["ArrowDown","ArrowRight","ArrowUp","ArrowLeft","Home","End"].includes(e.key)) return; e.preventDefault(); let j = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key.includes("Down") || e.key.includes("Right") ? 1 : -1) + tabs.length) % tabs.length; tabs[j].focus(); tabs[j].click(); }); }); })();`;
+}
+
+function pricingReferralScript() {
+  return `(() => {
+    const writeClipboard = async text => {
+      try { await navigator.clipboard.writeText(text); return true; }
+      catch {
+        let area;
+        try { area = document.createElement("textarea"); area.value = text; area.readOnly = true; document.body.append(area); area.select(); return document.execCommand("copy"); }
+        catch { return false; }
+        finally { area?.remove(); }
+      }
+    };
+    document.querySelectorAll("[data-copy-referral]").forEach(button => {
+      const label = button.querySelector("[data-copy-label]");
+      const initial = label?.textContent || "Copy link";
+      button.addEventListener("click", async () => {
+        const copied = await writeClipboard(button.dataset.copyReferral || "");
+        if (!label) return;
+        label.textContent = copied ? "Copied" : "Copy failed";
+        window.setTimeout(() => { label.textContent = initial; }, 1800);
+      });
+    });
+    const messages = {
+      invalid_referral: "This referral code is invalid or cannot be applied to this account.",
+      referral_requires_new_customer: "This account is not eligible because it already has a subscription payment.",
+      referral_already_attributed: "A referral has already been recorded for this account.",
+      referrals_not_enabled: "Referral rewards are paused in this environment."
+    };
+    document.querySelectorAll("form[data-referral-attribute]").forEach(form => {
+      form.addEventListener("submit", async event => {
+        event.preventDefault();
+        const button = form.querySelector("button[type=submit]");
+        const feedback = form.querySelector("[data-referral-feedback]");
+        const login = form.querySelector("[data-referral-login]");
+        const code = form.querySelector('input[name="code"]')?.value || "";
+        if (!button || !feedback || !code) return;
+        button.disabled = true;
+        feedback.textContent = "Saving referral…";
+        try {
+          const response = await fetch("/api/referrals/attribute", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ code }) });
+          const result = await response.json().catch(() => ({}));
+          if (response.ok) {
+            feedback.textContent = "Referral saved. Rewards require a verified first monthly subscription payment.";
+            form.dataset.referralApplied = "true";
+            return;
+          }
+          const error = typeof result.error === "string" ? result.error : "";
+          feedback.textContent = response.status === 401 ? "Your sign-in has expired. Sign in again to apply this code." : messages[error] || "We could not apply this referral code. Please try again.";
+          if (response.status === 401 && login) login.hidden = false;
+        } catch {
+          feedback.textContent = "We could not reach Classroom Desk. Check your connection and try again.";
+        } finally {
+          if (form.dataset.referralApplied !== "true") button.disabled = false;
+        }
+      });
+    });
+  })();`;
 }
 
 function connectModalBridgeScript() {
@@ -577,7 +710,7 @@ function page(title: string, active: string, operator: string, support: string, 
 ${title === "Classroom Desk" ? '<link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/5c3ec08f-2dbf-4c0a-8588-f6106a789443.webp" media="(min-width:768px)" fetchpriority="high"><link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/0f4926a4-e660-4df2-9195-2bfb3e341bdd.webp" media="(max-width:767px)" fetchpriority="high">' : ""}
 <link rel="icon" type="image/svg+xml" href="/assets/classroom-desk-favicon.svg">
 <link rel="apple-touch-icon" href="/assets/classroom-desk-logo.svg">
-<style>${siteStyles()}${designStyles()}.numbered-steps b{color:#176b4b!important}.site-header .brand,.desktop-nav a,.header-actions a{min-height:44px;display:inline-flex;align-items:center}.header-cta{min-height:44px!important}.modal-header .eyebrow{color:#b8f3d5}.close-button{min-width:44px;min-height:44px;flex-shrink:0}.copy-chip button{min-width:44px;min-height:44px}@media(max-width:767px) and (max-height:900px){.modal-shell .guide-visual{display:none}}</style>
+<style>${siteStyles()}${designStyles()}${pricingReferralStyles()}.numbered-steps b{color:#176b4b!important}.site-header .brand,.desktop-nav a,.header-actions a{min-height:44px;display:inline-flex;align-items:center}.header-cta{min-height:44px!important}.modal-header .eyebrow{color:#b8f3d5}.close-button{min-width:44px;min-height:44px;flex-shrink:0}.copy-chip button{min-width:44px;min-height:44px}@media(max-width:767px) and (max-height:900px){.modal-shell .guide-visual{display:none}}</style>
 </head>
 <body class="${compact ? "compact" : ""}${title === "Classroom Desk" ? " home-page" : ""}">
 <a class="skip-link" href="#main-content">Skip to content</a>
@@ -593,7 +726,7 @@ ${title === "Classroom Desk" ? '<link rel="preload" as="image" href="https://d2o
   <p class="disclaimer">Classroom Desk is an independent integration and is not affiliated with or endorsed by Google or OpenAI. Google Classroom, ChatGPT, and OpenAI are trademarks of their respective owners.</p>
 </footer>
 ${connectGuideModal()}
-<script src="/assets/connect.js?v=20261010-hardening1" defer></script>
+<script src="/assets/connect.js?v=20261020-referrals1" defer></script>
 </body>
 </html>`;
 }
@@ -671,6 +804,40 @@ html{scroll-behavior:smooth}body{background:var(--paper);color:var(--ink);font-f
  @media(max-width:900px){.site-header{height:64px;padding:0 20px}.desktop-nav,.header-actions .nav-signin{display:none!important}.header-actions{display:flex;align-items:center;margin-left:auto;gap:8px;flex:0 0 auto}.menu-toggle{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:7px 11px}.mobile-menu{display:grid;gap:0;padding:12px 20px;background:var(--paper);border-bottom:1px solid var(--line)}.mobile-menu[hidden]{display:none}.mobile-menu a{padding:12px 0;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none}.mobile-menu .button{margin-top:12px}}
  @media(max-width:420px){.site-header{padding:0 16px}.header-cta{display:none!important}.mobile-menu{padding-inline:16px}.footer-grid{grid-template-columns:1fr}}
  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.button{transition:none}.example-panel{animation:none}}
+`;
+}
+
+function pricingReferralStyles() {
+  return `
+.referral-program{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1.75rem 3rem;margin:3rem 0;padding:2rem 0;border-top:2px solid var(--ink);border-bottom:1px solid var(--line);align-items:start}
+.referral-jump{margin:.5rem 0 1rem;text-decoration:none}
+.referral-intro h2{font-size:clamp(2rem,4vw,3.1rem);line-height:1;letter-spacing:-.055em;margin:.15rem 0 .85rem;color:var(--ink)}
+.referral-intro>p:not(.eyebrow){max-width:40rem;color:var(--muted);margin:.25rem 0 1.35rem}
+.referral-rules{border-top:1px solid var(--line);padding-top:1rem}
+.referral-rules h3,.referral-panel h3{font-size:1rem;letter-spacing:-.015em;margin:.1rem 0 .8rem}
+.referral-steps{margin:.2rem 0 .9rem;padding-left:1.25rem}
+.referral-steps li{padding:.22rem 0 .35rem .2rem;color:var(--muted)}
+.referral-steps li span{color:var(--ink);font-weight:700}
+.referral-terms{margin-top:.8rem;border-top:1px solid var(--line);padding-top:.65rem}
+.referral-terms summary{cursor:pointer;color:var(--deep);font-weight:700}
+.referral-terms p{margin:.55rem 0 0;color:var(--muted);font-size:.9rem}
+.referral-note{font-size:.9rem;line-height:1.55;color:var(--muted);margin:.8rem 0 0}
+.referral-panel{min-width:0;padding:1.4rem 0 0 1.5rem;border-left:1px solid var(--line)}
+.referral-panel>p:first-child{margin-top:0}
+.referral-state{font-weight:700;color:var(--deep)}
+.referral-link-label{display:block;font-size:.9rem;font-weight:700;margin:.85rem 0 .35rem}
+.referral-link-row{display:flex;align-items:stretch;gap:.55rem;min-width:0}
+.referral-link-row input{min-width:0;flex:1;border:1px solid var(--line);border-radius:7px;background:var(--white);padding:.7rem .75rem;color:var(--ink);font:inherit;font-size:.88rem}
+.referral-link-row .button{flex:0 0 auto;min-height:44px;padding:.65rem .9rem}
+.referral-stats{display:grid;grid-template-columns:1fr 1fr;gap:.65rem 1rem;margin:1.15rem 0;padding:.9rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.referral-stats div{min-width:0}.referral-stats dt{font-size:.82rem;color:var(--muted)}.referral-stats dd{margin:.08rem 0 0;font-size:1.25rem;font-weight:750;color:var(--deep)}
+.referral-history{list-style:none;margin:.4rem 0 1.1rem;padding:0;border-top:1px solid var(--line)}
+.referral-history li{display:flex;justify-content:space-between;gap:1rem;padding:.65rem 0;border-bottom:1px solid var(--line);font-size:.9rem}
+.referral-history li span:last-child{color:var(--muted);text-align:right}
+.referral-apply{border-top:1px solid var(--line);padding-top:1rem;margin-top:1rem}
+.referral-apply button:disabled{opacity:.65;cursor:wait}
+.referral-apply [role=status]{min-height:1.5em}
+@media(max-width:767px){.referral-program{grid-template-columns:1fr;gap:1.4rem;margin:2.5rem 0;padding:1.5rem 0}.referral-panel{border-left:0;border-top:1px solid var(--line);padding:1.25rem 0 0}.referral-link-row{flex-wrap:wrap}.referral-link-row input{flex-basis:100%}.referral-link-row .button{width:100%}.referral-history li{align-items:flex-start;flex-direction:column;gap:.15rem}.referral-history li span:last-child{text-align:left}}
 `;
 }
 

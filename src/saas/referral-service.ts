@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { SqlDatabase } from "../public/postgres.js";
 
-export interface ReferralSummary { code: string; total: number; pending: number; qualified: number; rewards: number; extraDays: number; history?:Array<{createdAt:Date;expiresAt:Date;revoked:boolean}>; }
+export interface ReferralSummary { code: string; total: number; pending: number; qualified: number; rewards: number; extraDays: number; history?:Array<{createdAt:Date;startsAt:Date;expiresAt:Date;revoked:boolean}>; }
 
 export function newReferralCode(): string { return `CD-${randomBytes(5).toString("hex").toUpperCase()}`; }
 
@@ -54,9 +54,9 @@ export class ReferralService {
     const [code, counts, rewards] = await Promise.all([
       this.ensureCode(userId),
       this.db.query<{ total: string; pending: string; qualified: string }>(`SELECT count(*) total, count(*) FILTER (WHERE qualified_at IS NULL) pending, count(*) FILTER (WHERE counted_at IS NOT NULL) qualified FROM classroom_desk_referrals WHERE referrer_user_id=$1`, [userId]),
-      this.db.query<{created_at:Date;expires_at:Date;revoked_at:Date|null}>(`SELECT r.created_at,g.expires_at,g.revoked_at FROM classroom_desk_referral_rewards r JOIN classroom_desk_entitlement_grants g ON g.id=r.grant_id WHERE r.user_id=$1 ORDER BY r.created_at DESC`, [userId]),
+      this.db.query<{created_at:Date;starts_at:Date;expires_at:Date;revoked_at:Date|null}>(`SELECT r.created_at,g.starts_at,g.expires_at,g.revoked_at FROM classroom_desk_referral_rewards r JOIN classroom_desk_entitlement_grants g ON g.id=r.grant_id WHERE r.user_id=$1 ORDER BY r.created_at DESC`, [userId]),
     ]);
     const row = counts.rows[0]; const qualified = Number(row?.qualified ?? 0); const rewardCount = rewards.rows.length;
-    return { code, total: Number(row?.total ?? 0), pending: Number(row?.pending ?? 0), qualified, rewards: rewardCount, extraDays: rewards.rows.filter(r=>!r.revoked_at).length * 30, history:rewards.rows.map(r=>({createdAt:new Date(r.created_at),expiresAt:new Date(r.expires_at),revoked:Boolean(r.revoked_at)})) };
+    return { code, total: Number(row?.total ?? 0), pending: Number(row?.pending ?? 0), qualified, rewards: rewardCount, extraDays: rewards.rows.filter(r=>!r.revoked_at).length * 30, history:rewards.rows.map(r=>({createdAt:new Date(r.created_at),startsAt:new Date(r.starts_at),expiresAt:new Date(r.expires_at),revoked:Boolean(r.revoked_at)})) };
   }
 }
