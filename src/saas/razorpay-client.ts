@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { planPricePaise, TRIAL_PRICE_PAISE } from "./campaign.js";
 import type { Plan } from "./types.js";
 
-export interface RazorpayOrder { id: string; amount: number; currency: string; status: string; receipt?: string; notes?: Record<string, string>; }
+export interface RazorpayOrder { id: string; amount: number; amount_paid?: number; amount_due?: number; created_at?: number; currency: string; status: string; receipt?: string; notes?: Record<string, string>; }
 export interface RazorpaySubscription { id: string; plan_id: string; status: string; charge_at?: number; current_start?: number; current_end?: number; has_scheduled_changes?: boolean; change_scheduled_at?: number | null; notes?: Record<string, string>; }
 export interface RazorpayPayment { id: string; order_id?: string | null; subscription_id?: string | null; invoice_id?: string | null; amount: number; currency: string; status: string; refund_status?: string | null; amount_refunded?: number; created_at?: number; notes?: Record<string, string>; }
 export interface RazorpayInvoice { id: string; subscription_id: string; payment_id: string; order_id?: string | null; amount: number; currency: string; status: string; billing_start?: number | null; billing_end?: number | null; }
@@ -88,7 +88,7 @@ export class RazorpayClient {
 
   async createTrialOrder(receipt: string, userId: string): Promise<RazorpayOrder> {
     const order = await this.post<RazorpayOrder>("/orders", { amount: TRIAL_PRICE_PAISE, currency: "INR", receipt: receipt.length > 0 && receipt.length <= 40 ? receipt : trialOrderReceipt(receipt), notes: { product: "classroom_desk_trial", user_id: userId, kind: "trial" } });
-    if (!order || !/^order_[A-Za-z0-9_]+$/.test(order.id) || order.amount !== TRIAL_PRICE_PAISE || order.currency !== "INR" || order.status !== "created") throw new Error("billing_order_mismatch");
+    if (!order || !/^order_[A-Za-z0-9_]+$/.test(order.id) || order.amount !== TRIAL_PRICE_PAISE || order.currency !== "INR" || order.status !== "created" || !Number.isSafeInteger(order.created_at)) throw new Error("billing_order_mismatch");
     return order;
   }
 

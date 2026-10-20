@@ -9,7 +9,7 @@ import { accountScript, html, renderProfile, renderSubscription, renderReferrals
 import type {ConnectionStatus} from "./connection-status.js";
 import { verifyCheckoutSignature, verifySubscriptionSignature } from "./razorpay.js";
 import { parseRazorpayEvent } from "./billing-events.js";
-import { planPricePaise, TRIAL_PRICE_PAISE } from "./campaign.js";
+import { CAMPAIGN_END_ISO, planPricePaise, TRIAL_PRICE_PAISE } from "./campaign.js";
 import { renderExperienceSelector, renderStudentDashboard, renderTeacherCourse, renderTeacherDashboard, renderTeacherSubmissions, type StudentDashboardState, type TeacherDashboardState } from "./dashboard-pages.js";
 import type { DashboardExperience, SaaSUser } from "./types.js";
 import type { TeacherCourseworkDraftInput } from "../v2/teacher.js";
@@ -185,6 +185,11 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
       const order = await options.razorpay.createTrialOrder(trialOrderReceipt(`${session.userId}_${Date.now()}`), session.userId);
       if (!order || !/^order_[A-Za-z0-9_]+$/.test(order.id) || order.amount !== TRIAL_PRICE_PAISE || order.currency !== "INR" || order.status !== "created"
         || (order.notes?.user_id && order.notes.user_id !== session.userId)) throw new Error("billing_order_mismatch");
+      if (!Number.isSafeInteger(order.created_at) || order.created_at! * 1000 > Date.parse(CAMPAIGN_END_ISO)) {
+        await options.store.recordPendingTrialOrder(session.userId, order.id, order.amount, order.currency);
+        await options.store.expirePendingTrialOrder(session.userId, order.id);
+        return res.status(409).json({ error: "trial_not_eligible" });
+      }
       await options.store.recordPendingTrialOrder(session.userId, order.id, order.amount, order.currency);
       return res.status(201).json({ orderId: order.id, amountPaise: order.amount, currency: order.currency, keyId: options.razorpayKeyId ?? null });
     }
@@ -202,13 +207,16 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
     if (!pending) return res.status(409).json({ error: "trial_not_pending" });
     if (pending.kind === "reconciliation_required") return res.status(409).json({ error: "trial_creation_requires_reconciliation" });
     try {
-      const [order, payments] = await Promise.all([options.razorpay.getOrder(pending.orderId), options.razorpay.getOrderPayments(pending.orderId, 20, 0)]);
-      const captured = payments.items.find(payment => payment.order_id === pending.orderId && ["captured", "refunded"].includes(payment.status));
-      if (captured || order.status === "paid") return res.status(409).json({ error: "payment_processing" });
+      const [order, payments] = await Promise.all([options.razorpay.getOrder(pending.orderId), options.razorpay.getOrderPayments(pending.orderId, 100, 0)]);
+      const paymentsComplete = payments.items.length < 100;
+      const paymentsBelongToOrder = payments.items.every(payment => payment.order_id === pending.orderId);
+      const paymentInFlightOrComplete = payments.items.some(payment => payment.status !== "failed");
+      if (!paymentsComplete || !paymentsBelongToOrder || paymentInFlightOrComplete || order.status === "paid") return res.status(409).json({ error: "payment_processing" });
       if (!['created', 'attempted'].includes(order.status) || order.amount !== TRIAL_PRICE_PAISE || order.currency !== "INR" || (order.notes?.user_id && order.notes.user_id !== session.userId)) {
         await options.store.expirePendingTrialOrder(session.userId, pending.orderId);
         return res.status(409).json({ error: "trial_attempt_expired" });
       }
+      if (order.amount_paid !== 0 || order.amount_due !== order.amount) return res.status(409).json({ error: "payment_processing" });
       return res.status(200).json({ orderId: order.id, amountPaise: order.amount, currency: order.currency, keyId: options.razorpayKeyId ?? null, resumed: true });
     } catch { return res.status(502).json({ error: "billing_provider_unavailable" }); }
   });

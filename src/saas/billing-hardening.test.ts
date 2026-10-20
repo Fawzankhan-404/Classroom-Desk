@@ -17,6 +17,10 @@ const secret = "synthetic-billing-secret";
 const now = new Date();
 const planIds = { student: "plan_student", teacher: "plan_teacher" };
 const sign = (value: string) => createHmac("sha256", secret).update(value).digest("hex");
+const setTimeBeforeTrialCutoff = () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(Date.parse(CAMPAIGN_END_ISO) - 1));
+};
 
 describe("billing provider boundaries (all fetches mocked)", () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
@@ -36,6 +40,7 @@ describe("billing provider boundaries (all fetches mocked)", () => {
   });
 
   it("hides plan and trial offers when billing is disabled and keeps them in enabled environments", () => {
+    setTimeBeforeTrialCutoff();
     const view = { user: { id:"00000000-0000-0000-0000-000000000001", googleSubject:"s", email:"reviewer@example.invalid", displayName:"Reviewer", role:"student", status:"active", createdAt:now, lastLoginAt:now }, entitlement:{allowed:false,reason:"expired",plan:null,expiresAt:null}, history:{trialStatus:"eligible",trialExpiresAt:null,subscriptions:[],referralsMade:0}, payments:[], linked:false, deletionRequested:false } as never;
     const stagingPage = renderSubscription(view, false);
     expect(stagingPage).toContain("Checkout is unavailable right now");
@@ -56,7 +61,7 @@ describe("billing provider boundaries (all fetches mocked)", () => {
       const body = JSON.parse(String(init.body));
       expect(body.receipt.length).toBeLessThanOrEqual(40);
       expect(body.notes).toMatchObject({ user_id: "owner", kind: "trial" });
-      return Response.json({ id: "order_test", amount: 900, currency: "INR", status: "created" });
+      return Response.json({ id: "order_test", amount: 900, currency: "INR", status: "created", created_at: Math.floor(Date.now() / 1000) });
     });
     vi.stubGlobal("fetch", fetch);
     await new RazorpayClient("synthetic-key", secret).createTrialOrder(`trial_${"a".repeat(36)}_1791633600000`, "owner");
@@ -139,11 +144,12 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
     store = new SaaSStore(db);
   },30000);
   beforeEach(async () => { await pg.exec("TRUNCATE classroom_desk_users,classroom_desk_webhook_events CASCADE"); });
+  afterEach(() => vi.useRealTimers());
   afterAll(async () => { await pg.close(); });
 
   const user = (name:string) => store.upsertGoogleIdentity({googleSubject:`billing-${name}`,email:`${name}@example.invalid`,displayName:name,now});
   const captured = (id:string,extra:Partial<RazorpayPayment>={}) => ({id,amount:900,currency:"INR",status:"captured",created_at:Math.floor(Date.now()/1000)-3600,...extra});
-  const order = (owner:string,status="paid") => ({id:"order_owned",amount:900,currency:"INR",status,notes:{user_id:owner,kind:"trial",product:"classroom_desk_trial"}});
+  const order = (owner:string,status="paid") => ({id:"order_owned",amount:900,amount_paid:status === "paid" ? 900 : 0,amount_due:status === "paid" ? 0 : 900,created_at:Math.floor(Date.now()/1000),currency:"INR",status,notes:{user_id:owner,kind:"trial",product:"classroom_desk_trial"}});
   const subscription = (owner:string):RazorpaySubscription => ({id:"sub_owned",plan_id:planIds.student,status:"active",current_start:Math.floor(Date.now()/1000)-3600,current_end:Math.floor(Date.now()/1000)+30*86400,notes:{user_id:owner,plan:"student"}});
 
   async function harness(ownerId:string,provider:Partial<RazorpayClient>) {
@@ -163,6 +169,7 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
   const subBody = () => ({razorpay_subscription_id:"sub_owned",razorpay_payment_id:"pay_owned",razorpay_signature:sign("pay_owned|sub_owned")});
 
   it("persists the pending order before returning checkout data with a bounded receipt", async () => {
+    setTimeBeforeTrialCutoff();
     const owner = await user("order-owner");
     const createTrialOrder = vi.fn(async (receipt:string) => {expect(receipt.length).toBeLessThanOrEqual(40);return order(owner.id,"created");});
     const send = await harness(owner.id,{createTrialOrder});
@@ -172,6 +179,7 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
   });
 
   it("keeps trial eligibility reserved after an ambiguous provider failure", async () => {
+    setTimeBeforeTrialCutoff();
     const owner = await user("trial-provider-ambiguous");
     const createTrialOrder = vi.fn(async () => { throw new Error("synthetic provider timeout after request send"); });
     const send = await harness(owner.id, { createTrialOrder });
@@ -184,6 +192,7 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
   });
 
   it("does not release a trial when the provider created an order but local persistence failed", async () => {
+    setTimeBeforeTrialCutoff();
     const owner = await user("trial-persistence-ambiguous");
     const createTrialOrder = vi.fn(async () => order(owner.id, "created"));
     const send = await harness(owner.id, { createTrialOrder });
@@ -269,6 +278,7 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
   });
 
   it("does not create a second trial order from an old but still open reservation", async () => {
+    setTimeBeforeTrialCutoff();
     const owner = await user("trial-open-stale");
     const createTrialOrder = vi.fn(async () => order(owner.id, "created"));
     const send = await harness(owner.id, { createTrialOrder });
@@ -278,6 +288,64 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
     expect(createTrialOrder).toHaveBeenCalledTimes(1);
     const resume = await harness(owner.id, { getOrder: async () => order(owner.id, "created"), getOrderPayments: async () => ({ count: 0, items: [] }) });
     expect(await resume("/api/billing/trial/resume")).toMatchObject({ status: 200, data: { orderId: "order_owned", resumed: true } });
+  });
+
+  it("does not create new trial orders after the campaign cutoff", async () => {
+    const owner = await user("trial-after-cutoff");
+    const createTrialOrder = vi.fn(async () => order(owner.id, "created"));
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.parse(CAMPAIGN_END_ISO) + 1));
+    const send = await harness(owner.id, { createTrialOrder });
+
+    expect(await send("/api/billing/trial/order")).toEqual({ status: 409, data: { error: "trial_not_eligible" } });
+    expect(createTrialOrder).not.toHaveBeenCalled();
+  });
+
+  it("does not return checkout data if the provider timestamps order creation after the cutoff", async () => {
+    const owner = await user("trial-provider-created-after-cutoff");
+    setTimeBeforeTrialCutoff();
+    const createTrialOrder = vi.fn(async () => {
+      vi.setSystemTime(new Date(Date.parse(CAMPAIGN_END_ISO) + 1000));
+      return order(owner.id, "created");
+    });
+    const send = await harness(owner.id, { createTrialOrder });
+
+    expect(await send("/api/billing/trial/order")).toEqual({ status: 409, data: { error: "trial_not_eligible" } });
+    expect(createTrialOrder).toHaveBeenCalledTimes(1);
+    expect(await store.pendingTrialOrder(owner.id)).toBeNull();
+  });
+
+  it("resumes a pre-cutoff trial only while the provider still reports a payable order", async () => {
+    const owner = await user("trial-resume-after-cutoff");
+    await store.beginTrialPurchase(owner.id, new Date(Date.parse(CAMPAIGN_END_ISO) - 1));
+    await store.recordPendingTrialOrder(owner.id, "order_owned", 900, "INR");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.parse(CAMPAIGN_END_ISO) + 1));
+
+    const failedAttempt = { id: "pay_failed", order_id: "order_owned", amount: 900, currency: "INR", status: "failed" };
+    const payable = await harness(owner.id, { getOrder: async () => order(owner.id, "attempted"), getOrderPayments: async () => ({ count: 1, items: [failedAttempt] }) });
+    expect(await payable("/api/billing/trial/resume")).toMatchObject({ status: 200, data: { orderId: "order_owned", resumed: true } });
+
+    const closed = await harness(owner.id, { getOrder: async () => order(owner.id, "closed"), getOrderPayments: async () => ({ count: 0, items: [] }) });
+    expect(await closed("/api/billing/trial/resume")).toMatchObject({ status: 409, data: { error: "trial_attempt_expired" } });
+  });
+
+  it("does not resume after cutoff while a provider payment is still in flight", async () => {
+    const owner = await user("trial-payment-in-flight");
+    await store.beginTrialPurchase(owner.id, new Date(Date.parse(CAMPAIGN_END_ISO) - 1));
+    await store.recordPendingTrialOrder(owner.id, "order_owned", 900, "INR");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.parse(CAMPAIGN_END_ISO) + 1));
+    const authorized = { id: "pay_authorized", order_id: "order_owned", amount: 900, currency: "INR", status: "authorized" };
+    const failedAttempt = { id: "pay_failed", order_id: "order_owned", amount: 900, currency: "INR", status: "failed" };
+    const send = await harness(owner.id, { getOrder: async () => order(owner.id, "attempted"), getOrderPayments: async () => ({ count: 1, items: [authorized] }) });
+    expect(await send("/api/billing/trial/resume")).toMatchObject({ status: 409, data: { error: "payment_processing" } });
+
+    const missingOrderAmounts = await harness(owner.id, { getOrder: async () => ({ ...order(owner.id, "attempted"), amount_due: undefined }), getOrderPayments: async () => ({ count: 1, items: [failedAttempt] }) });
+    expect(await missingOrderAmounts("/api/billing/trial/resume")).toMatchObject({ status: 409, data: { error: "payment_processing" } });
+
+    const unboundedPaymentPage = await harness(owner.id, { getOrder: async () => order(owner.id, "attempted"), getOrderPayments: async () => ({ count: 100, items: Array.from({ length: 100 }, (_unused, index) => ({ ...failedAttempt, id: `pay_failed_${index}` })) }) });
+    expect(await unboundedPaymentPage("/api/billing/trial/resume")).toMatchObject({ status: 409, data: { error: "payment_processing" } });
   });
 
   it("blocks another session and unknown orders before any provider reads", async () => {

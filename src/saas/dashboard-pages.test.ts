@@ -82,7 +82,7 @@ describe("account dashboard pages", () => {
         { studentName: "F", state: "FUTURE_GOOGLE_STATE", late: false, assignedGrade: null, updateTime: null },
       ],
     });
-    for (const status of ["Not submitted", "In progress", "Turned in", "Returned", "Returned to student", "Status not available"]) expect(html).toContain(status);
+    for (const status of ["Not submitted", "In progress", "Turned in", "Returned", "Unsubmitted by student", "Status not available"]) expect(html).toContain(status);
     expect(html).not.toContain("RECLAIMED_BY_STUDENT");
     expect(html).not.toContain("FUTURE_GOOGLE_STATE");
   });
