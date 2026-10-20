@@ -211,6 +211,22 @@ describe("billing terminal-state and referral security with isolated SQL",()=>{
 });
 
 describe("website login browser binding",()=>{
+  it("stores the safe Pricing referral destination with the OAuth transaction",async()=>{
+    const pending=new Map<string,unknown>();
+    const app=express();
+    registerWebsiteRoutes(app,{store:{} as SaaSStore,secureCookies:false,oauth:{clientId:"fixture",clientSecret:"fixture",origin:"http://127.0.0.1",callbackUrl:"http://127.0.0.1/auth/google/callback"},oauthStateStore:{putEphemeral:async(kind,key,value)=>{pending.set(`${kind}:${key}`,value);},takeEphemeral:async()=>undefined}});
+    const server=app.listen(0,"127.0.0.1");await new Promise<void>(r=>server.once("listening",r));const origin=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
+    const returnTo="/pricing?ref=CD-A1B2C3D4E5#refer-and-earn";
+    try {
+      const response=await fetch(`${origin}/login?next=${encodeURIComponent(returnTo)}`,{redirect:"manual"});
+      const googleUrl=new URL(response.headers.get("location")!);
+      const state=googleUrl.searchParams.get("state")!;
+      expect(response.status).toBe(302);
+      expect(googleUrl.origin).toBe("https://accounts.google.com");
+      expect(pending.get(`website_login:${state}`)).toMatchObject({returnTo});
+    } finally {await new Promise<void>(r=>server.close(()=>r()));}
+  });
+
   it("requires the initiating browser nonce before consuming Google OAuth state",async()=>{
     const pending=new Map<string,unknown>();const stateKey=(_kind:string,key:string)=>`${_kind}:${key}`;const take=vi.fn(async(kind:string,key:string)=>{const lookup=stateKey(kind,key);const value=pending.get(lookup);pending.delete(lookup);return value;});
     const app=express();registerWebsiteRoutes(app,{store:{} as SaaSStore,secureCookies:false,oauth:{clientId:"fixture",clientSecret:"fixture",origin:"http://127.0.0.1",callbackUrl:"http://127.0.0.1/auth/google/callback"},oauthStateStore:{putEphemeral:async(kind,key,value)=>{pending.set(stateKey(kind,key),value);},takeEphemeral:take as never}});
