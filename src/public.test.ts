@@ -51,8 +51,8 @@ describe("public V1 scopes and projections", () => {
     expect(mapped.materials[0]).toMatchObject({ title: "Teacher notes", type: "Drive attachment", attachment_content_available: false, reason: "Public V1 does not request Google Drive access." });
   });
   it("maps upstream failures without copying messages or response bodies", () => {
-    expect(publicError({ response: { status: 403, data: { token: "secret", message: "private" } }, message: "private path C:\\" })).toMatch(/Permission not granted/);
-    expect(publicError({ response: { status: 401 }, message: "Bearer secret" })).toMatch(/authorization expired/i);
+    expect(publicError({ response: { status: 403, data: { token: "secret", message: "private" } }, message: "private path C:\\" })).toMatch(/Google did not allow this request/);
+    expect(publicError({ response: { status: 401 }, message: "Bearer secret" })).toMatch(/needs to be reconnected/i);
   });
   it("rejects invalid public origin, callback, resource and port configuration", () => {
     const base = { GOOGLE_OAUTH_CLIENT_ID: "test-id", GOOGLE_OAUTH_CLIENT_SECRET: "test-secret", PUBLIC_APP_ORIGIN: "https://classroom.example" };
@@ -144,7 +144,7 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(response.status).toBe(200);
       expect(html).toMatch(/<head>[\s\S]*<title>Classroom Desk \| Google Classroom Meets ChatGPT<\/title>[\s\S]*<\/head>/);
       expect(html.match(/<title>/g)?.length).toBe(1);
-      expect(html).toContain('<meta name="description" content="Connect Google Classroom with ChatGPT. Access coursework, manage assignments, and stay organized.">');
+      expect(html).toContain('<meta name="description" content="Ask ChatGPT about your authorized Google Classroom courses, assignments, announcements, and deadlines.">');
       expect(html).toContain('<meta property="og:title" content="Classroom Desk | Google Classroom Meets ChatGPT">');
       expect(html).toContain('<meta property="og:type" content="website">');
       expect(html).toContain('<meta property="og:url"');
@@ -335,11 +335,11 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain("₹999");
       expect(html).toContain('id="support-custom-amount" type="number"');
       expect(html).toContain('disabled aria-disabled="true" aria-describedby="support-custom-amount-status"');
-      expect(html).toContain("Razorpay’s Donation Payment Button supports a supporter-chosen amount");
+      expect(html).toContain("Custom contributions are not available yet.");
       expect(html).toContain("maintenance, hosting, infrastructure, documentation, and future development");
       expect(html).toContain("it does not unlock features, change account permissions, or purchase a hosted plan");
       expect(html).toContain('class="button secondary" type="button" disabled aria-disabled="true"');
-      expect(html).toContain("No payment will be collected from this page");
+      expect(html).toContain("No payment can be made from this page right now.");
       expect(html).not.toContain("buymeacoffee.com");
       expect(html).not.toContain("github.com/sponsors/");
       expect(html).not.toContain("href=\"https://rzp.io/");
@@ -622,7 +622,7 @@ describe("public OAuth and HTTP authorization boundary", () => {
       const html = await page.text();
       expect(html).toContain("Continue with Google"); expect(html).toContain("read-only access to supported Google Classroom data");
       expect(html).toContain("&lt;img src=x&gt;"); expect(html).toContain("http://127.0.0.1");
-      expect(html).toContain("client name is supplied by the connecting MCP client and is not verified");
+      expect(html).toContain("app name is supplied by the app requesting access and is not verified");
       expect(html).toContain("After Google authorization, the response will be returned to <code>http://127.0.0.1/cb</code>");
       expect(html).toContain("We never ask for your Google password."); expect(html).toContain("This consent does not request Google Drive access.");
       expect(html).toContain("Disconnect is available");
@@ -651,8 +651,8 @@ describe("public OAuth and HTTP authorization boundary", () => {
       const response = await fetch(`${ctx.origin}/connect/google?flow=${flow.id}`);
       const html = await response.text();
       expect(response.status).toBe(200);
-      expect(html).toContain("create an unpublished draft or update an existing unpublished draft");
-      expect(html).toContain("does not change published coursework, submit student work, publish drafts, or write grades");
+      expect(html).toContain("Teacher draft tools need an additional Google permission and your confirmation for each action");
+      expect(html).toContain("does not write grades, publish drafts, or submit student work");
       expect(html).not.toContain("does not edit existing coursework");
     } finally { await close(ctx.server); }
   });

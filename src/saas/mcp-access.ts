@@ -37,12 +37,12 @@ export function accessGuidance(access: McpAccess, origin: string) {
     message: access.reason === "staging_test" ? `Temporary staging-only student access is active until ${new Date(access.expiresAt ?? 0).toISOString()}. Google permissions still apply to every operation.`
       : access.allowed ? "Classroom Desk access is active. Google permissions still apply to every operation."
       : restricted ? "This account is restricted. Contact Classroom Desk support."
-      : google ? "Google Classroom authorization is missing or expired. Reconnect in ChatGPT and select the Google account containing your courses."
-      : policy ? "Classroom Desk could not verify this connection's access policy. No Classroom data was accessed; retry shortly or contact support with the time of the error."
+      : google ? "Your Google Classroom connection is missing or expired. Reconnect in ChatGPT and choose the Google account that contains your courses."
+      : policy ? "We could not check whether this connection can access Classroom. No Classroom data was accessed. Try again shortly or contact support with the time of the error."
       : unavailable ? "Access could not be verified temporarily. No Classroom data was accessed. Try again shortly."
-      : setup ? "Sign in to Classroom Desk and use the Google account linked to your profile. New OAuth connections bind through a verified Google identity. Manual pairing is only for older MCP connections; an eligible trial or subscription may still be required."
-      : stagingExpired ? "This staging account is connected, but no temporary staging entitlement is active. Verify the Google account linked on the staging website. No Classroom data was accessed."
-      : "Classroom Desk is connected, but access is not active. Check your payment or choose a plan, then retry here.",
+      : setup ? "Sign in to Classroom Desk and authorize the Google account that contains your courses. New connections link automatically when Google confirms the same account. Older connections may need a one-time link from Account settings. An active trial or subscription may be required."
+      : stagingExpired ? "This test account is connected, but temporary test access is not active. Check which Google account is linked on the website. No Classroom data was accessed."
+      : "Classroom Desk is connected, but account access is not active. Review your account status and available options, then try again.",
     actionUrl: new URL(access.reason === "staging_test" ? "/app" : restricted ? "/support" : setup || stagingExpired ? "/app/connection" : google ? "/connect" : "/app/subscription", origin).toString(),
   };
 }
@@ -84,10 +84,10 @@ export async function hasTeacherMcpEntitlement(
 export function registerMcpOnboarding(server: McpServer, check: () => Promise<McpAccess>, origin: string, stagingSubject?: string) {
   const meta = { securitySchemes: [{ type: "oauth2", scopes: ["mcp:tools"] }] };
   const annotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
-  server.registerTool("classroom_desk_status", { description: "Check this authenticated connection's server-verified access and setup instructions. Does not read Classroom or expose account/payment details. An isolated staging diagnostic may add a one-way subject fingerprint for a temporary test entitlement.", inputSchema: {}, _meta: meta, annotations }, async () => {
+  server.registerTool("classroom_desk_status", { description: "Check whether this connection can use Classroom Desk and get setup help. This does not read Classroom or show account or payment details.", inputSchema: {}, _meta: meta, annotations }, async () => {
     const guidance = accessGuidance(await check().catch(() => ({ allowed: false, reason: "temporarily_unavailable" })), origin);
     const result = stagingSubject ? { ...guidance, stagingSubjectFingerprint: stagingSubjectFingerprint(stagingSubject) } : guidance;
     return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
   });
-  server.registerTool("classroom_desk_help", { description: "Explain supported Classroom Desk features and safe setup. No Classroom data is read.", inputSchema: {}, _meta: meta, annotations }, async () => ({ content: [{ type: "text", text: JSON.stringify({ features: ["Authorized courses", "Assignments and deadlines", "Announcements", "Your own submission status"], setupUrl: new URL("/connect", origin).toString(), accountUrl: new URL("/app/connection", origin).toString(), supportUrl: new URL("/support", origin).toString(), message: "Sign in with the Google account linked to your Classroom Desk profile, then authorize Classroom through ChatGPT. New OAuth connections bind with a verified Google identity. Manual pairing is only for older connections. Never share Google passwords. File tools are available only when advertised and explicitly authorized." }) }] }));
+  server.registerTool("classroom_desk_help", { description: "Explain supported Classroom Desk features and safe setup. No Classroom data is read.", inputSchema: {}, _meta: meta, annotations }, async () => ({ content: [{ type: "text", text: JSON.stringify({ features: ["Authorized courses", "Assignments and deadlines", "Announcements", "Your own submission status"], setupUrl: new URL("/connect", origin).toString(), accountUrl: new URL("/app/connection", origin).toString(), supportUrl: new URL("/support", origin).toString(), message: "Sign in to Classroom Desk with the Google account you use for Classroom, then authorize that account in ChatGPT. New connections link automatically when Google confirms the same account. Older connections may need a one-time link from Account settings. Never share Google passwords. File access is available only when supported and specifically authorized." }) }] }));
 }
