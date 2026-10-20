@@ -184,6 +184,7 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(script).toContain("navigator.clipboard.writeText(text)");
       expect(script).toContain('document.execCommand("copy")');
       expect(html).toContain("Eligibility and restrictions");
+      expect(html).toContain("partial refunds do not currently reverse referral qualification");
       expect(html).toContain('id="refer-and-earn"');
     } finally { await close(ctx.server); }
   });

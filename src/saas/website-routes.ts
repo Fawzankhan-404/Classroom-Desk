@@ -465,7 +465,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   app.get("/app/subscription", async (_req, res) => res.type("html").send(renderSubscription(await options.store.accountOverview(res.locals.accountUser), options.billingEnabled === true)));
   app.get("/app/referrals", async (req, res) => {
     const user = res.locals.accountUser;
-    const summary = await options.store.referrals.summary(user.id);
+    const summary = await options.store.referrals.summary(user.id, { createCode: options.referralRewardsEnabled === true });
     return res.type("html").send(renderReferrals(user, summary, options.referralRewardsEnabled === true, options.oauth?.origin ?? `${req.protocol}://${req.get("host")}`));
   });
   app.get("/app/connection", (_req, res) => res.type("html").send(renderConnection(res.locals.accountUser)));

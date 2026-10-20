@@ -110,7 +110,10 @@ describe("Account portal with isolated PostgreSQL persistence", () => {
           const response=await fetch(origin+path,{headers,redirect:"manual"});
           expect(response.status).toBe(200);expect(response.headers.get("cache-control")).toBe("no-store");
           const content=await response.text();expect(content).toContain(user.email);expect(content).not.toContain('href="/app/courses"');
+          if (path === "/app/referrals") expect(content).toContain("Unavailable while rewards are paused");
         }
+        const referralCode = await pg.query("SELECT code FROM classroom_desk_referral_codes WHERE user_id=$1", [user.id]);
+        expect(referralCode.rows).toHaveLength(0);
         expect((await fetch(origin+route,{method:"POST",headers:{...headers,origin:"https://attacker.invalid"},redirect:"manual"})).status).toBe(403);
         expect(await store.sessions.find(token)).not.toBeNull();
         expect((await fetch(origin+"/api/account/deletion-request",{method:"POST",headers,redirect:"manual"})).status).toBe(400);

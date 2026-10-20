@@ -31,6 +31,7 @@ describe("referral account activation messaging", () => {
     expect(html).toContain("Your code");
     expect(html).toContain("CD-A1B2C3D4E5");
     expect(html).toContain("Copy referral link");
+    expect(html).toContain("partial refunds do not currently reverse referral qualification");
     expect(html).not.toContain("pending billing acceptance");
     expect(html).not.toContain("once rewards are enabled");
   });
@@ -40,6 +41,7 @@ describe("referral account activation messaging", () => {
     expect(html).toContain("Referral rewards are paused.");
     expect(html).toContain("Unavailable while rewards are paused");
     expect(html).toContain("Personal referral link sharing is paused");
+    expect(html).toContain("partial refunds do not currently reverse referral qualification");
     expect(html).not.toContain("CD-A1B2C3D4E5");
     expect(html).not.toContain("Copy referral link");
     expect(html).not.toContain("pending billing acceptance");

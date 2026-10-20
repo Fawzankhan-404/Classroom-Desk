@@ -50,9 +50,9 @@ export class ReferralService {
     });
   }
 
-  async summary(userId: string): Promise<ReferralSummary> {
+  async summary(userId: string, options: { createCode?: boolean } = {}): Promise<ReferralSummary> {
     const [code, counts, rewards] = await Promise.all([
-      this.ensureCode(userId),
+      options.createCode === false ? Promise.resolve("") : this.ensureCode(userId),
       this.db.query<{ total: string; pending: string; qualified: string }>(`SELECT count(*) total, count(*) FILTER (WHERE qualified_at IS NULL) pending, count(*) FILTER (WHERE counted_at IS NOT NULL) qualified FROM classroom_desk_referrals WHERE referrer_user_id=$1`, [userId]),
       this.db.query<{created_at:Date;starts_at:Date;expires_at:Date;revoked_at:Date|null}>(`SELECT r.created_at,g.starts_at,g.expires_at,g.revoked_at FROM classroom_desk_referral_rewards r JOIN classroom_desk_entitlement_grants g ON g.id=r.grant_id WHERE r.user_id=$1 ORDER BY r.created_at DESC`, [userId]),
     ]);
