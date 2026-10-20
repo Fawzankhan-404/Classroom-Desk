@@ -11,6 +11,7 @@ import { reconcileRecentPayments } from "./reconciliation.js";
 import { invoicePaidThrough, RazorpayClient, trialOrderReceipt, type RazorpayPayment, type RazorpaySubscription } from "./razorpay-client.js";
 import { verifyCheckoutSignature, verifySubscriptionSignature } from "./razorpay.js";
 import { renderSubscription } from "./account-portal.js";
+import { CAMPAIGN_END_ISO } from "./campaign.js";
 
 const secret = "synthetic-billing-secret";
 const now = new Date();
@@ -256,13 +257,14 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
 
   it("resumes an owned open order and expires a provider-closed attempt without granting access", async () => {
     const owner = await user("resume-owner");
-    await store.beginTrialPurchase(owner.id, now);
+    const attemptStartedAt = new Date(Date.parse(CAMPAIGN_END_ISO) - 32 * 60 * 1000);
+    await store.beginTrialPurchase(owner.id, attemptStartedAt);
     await store.recordPendingTrialOrder(owner.id,"order_owned",900,"INR");
     const send = await harness(owner.id,{getOrder:async()=>order(owner.id,"created"),getOrderPayments:async()=>({count:0,items:[]})});
     expect(await send("/api/billing/trial/resume")).toMatchObject({status:200,data:{orderId:"order_owned",resumed:true}});
     const closed = await harness(owner.id,{getOrder:async()=>order(owner.id,"closed"),getOrderPayments:async()=>({count:0,items:[]})});
     expect(await closed("/api/billing/trial/resume")).toMatchObject({status:409,data:{error:"trial_attempt_expired"}});
-    expect(await store.beginTrialPurchase(owner.id, new Date(now.getTime() + 31 * 60 * 1000))).toBe(true);
+    expect(await store.beginTrialPurchase(owner.id, new Date(attemptStartedAt.getTime() + 31 * 60 * 1000))).toBe(true);
     expect((await store.entitlement(owner.id)).allowed).toBe(false);
   });
 
