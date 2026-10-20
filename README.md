@@ -7,6 +7,7 @@
 
   <p>
     <a href="https://classroom.jarvis404.com"><strong>Open Classroom Desk</strong></a> &nbsp;·&nbsp;
+    <a href="https://github.com/Fawzankhan-404/Classroom-Desk"><strong>GitHub repository</strong></a> &nbsp;·&nbsp;
     <a href="docs/GETTING_STARTED.md">Get started</a> &nbsp;·&nbsp;
     <a href="docs/CHATGPT_CONNECTION_GUIDE.md">Connect ChatGPT</a> &nbsp;·&nbsp;
     <a href="docs/OPEN_SOURCE_ARCHITECTURE.md">Architecture</a>
