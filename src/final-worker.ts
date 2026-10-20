@@ -377,7 +377,7 @@ export default {
     try {
       const database = new D1SqlDatabase(bindings.DB);
       if (bindings.RAZORPAY_KEY_ID && bindings.RAZORPAY_KEY_SECRET && isSaaSReconciliationEnabled(bindings)) {
-        const billingStore = new SaaSStore(database, { referralRewardsEnabled: bindings.SAAS_REFERRAL_REWARDS_ENABLED === "true" });
+        const billingStore = new SaaSStore(database, { referralRewardsEnabled: loadSaaSFeatureFlags(bindings).referralRewards });
         const result = await reconcileRecentPayments(database, billingStore, new RazorpayClient(bindings.RAZORPAY_KEY_ID, bindings.RAZORPAY_KEY_SECRET),new Date(),{student:bindings.RAZORPAY_STUDENT_PLAN_ID,teacher:bindings.RAZORPAY_TEACHER_PLAN_ID});
         console[result.failed > 0 ? "warn" : "log"](JSON.stringify({ event: "billing_reconciliation", ...result }));
       }

@@ -17,3 +17,10 @@ describe("teacher coursework write kill switch", () => {
     expect(loadSaaSFeatureFlags({ SAAS_TEACHER_DRAFT_WRITES_ENABLED: " true " }).teacherDraftWrites).toBe(true);
   });
 });
+
+describe("referral reward feature flag", () => {
+  it("normalizes the same flag for request and scheduled billing paths", () => {
+    expect(loadSaaSFeatureFlags({ SAAS_REFERRAL_REWARDS_ENABLED: " TRUE " }).referralRewards).toBe(true);
+    expect(loadSaaSFeatureFlags({ SAAS_REFERRAL_REWARDS_ENABLED: "False" }).referralRewards).toBe(false);
+  });
+});
