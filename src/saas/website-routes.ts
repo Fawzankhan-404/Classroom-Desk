@@ -69,14 +69,21 @@ function browserStartedLogin(header: string | undefined, state: string, secure: 
 }
 
 export function safeWebsiteReturnPath(value: unknown): string {
-  if (typeof value !== "string" || !/^\/app(?:\/|$)/.test(value) || /[\\\r\n]/.test(value)) return "/app";
-  const url=new URL(value,"https://return.invalid");
-  if(url.origin!=="https://return.invalid"||!/^\/app(?:\/|$)/.test(url.pathname))return "/app";
-  return url.pathname+url.search;
+  if (typeof value !== "string" || /[\\\u0000-\u001f\u007f]/.test(value)) return "/app";
+  let url: URL;
+  try { url = new URL(value, "https://return.invalid"); } catch { return "/app"; }
+  if (url.origin !== "https://return.invalid") return "/app";
+  if (/^\/app(?:\/|$)/.test(url.pathname)) return url.pathname + url.search;
+  if (url.pathname !== "/pricing") return "/app";
+  if (url.hash && url.hash !== "#refer-and-earn") return "/app";
+  const params = [...url.searchParams.entries()];
+  if (params.length === 0) return `/pricing${url.hash}`;
+  if (params.length !== 1 || params[0]?.[0] !== "ref" || !/^CD-[0-9A-F]{10}$/i.test(params[0]?.[1] ?? "")) return "/app";
+  return `/pricing?ref=${encodeURIComponent(params[0]![1]!.toUpperCase())}${url.hash}`;
 }
 
 export function registerWebsiteRoutes(app: express.Express, options: WebsiteRouteOptions): void {
-  const pending = new Map<string, ReturnType<typeof createLoginState>>();
+  const pending = new Map<string, ReturnType<typeof createLoginState> & { returnTo: string }>();
   app.use("/api", requireSameOrigin);
   const requireTeacherMutationAccount = async (req: express.Request, res: express.Response): Promise<string | undefined> => {
     if (options.teacherDraftWritesEnabled !== true) { res.status(503).type("html").send(message("Teacher draft creation is unavailable", "This feature is not available right now.")); return undefined; }
@@ -94,9 +101,9 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   app.get("/login", async (req, res) => {
     if (!options.oauth) return res.status(503).type("html").send(message("Google sign-in is unavailable", "Try again later or contact support."));
     const login = createLoginState();
-    if (!options.oauthStateStore) pending.set(login.state, login);
-    for (const [key, value] of pending) if (Date.now() - value.createdAt > 10 * 60 * 1000) pending.delete(key);
     const returnTo = safeWebsiteReturnPath(req.query.next);
+    if (!options.oauthStateStore) pending.set(login.state, { ...login, returnTo });
+    for (const [key, value] of pending) if (Date.now() - value.createdAt > 10 * 60 * 1000) pending.delete(key);
     if (options.oauthStateStore) {
       try {
         await options.oauthStateStore.putEphemeral(WEBSITE_LOGIN_STATE_KIND, login.state, { verifier: login.verifier, nonce: login.nonce, returnTo }, WEBSITE_LOGIN_STATE_OWNER, login.createdAt + WEBSITE_LOGIN_STATE_TTL_MS);
@@ -155,7 +162,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
     try { stored = options.oauthStateStore ? await options.oauthStateStore.takeEphemeral<{ verifier: string; nonce: string; returnTo: string }>(WEBSITE_LOGIN_STATE_KIND, state) : undefined; }
     catch { return res.status(400).type("html").send(message("Sign-in could not be completed.", "Return to Classroom Desk and start again.")); }
     const local = options.oauthStateStore ? undefined : pending.get(state); pending.delete(state);
-    const login = stored ? { verifier: stored.verifier, nonce: stored.nonce, returnTo: safeWebsiteReturnPath(stored.returnTo) } : local ? { verifier: local.verifier, nonce: local.nonce, returnTo: "/app" } : undefined;
+    const login = stored ? { verifier: stored.verifier, nonce: stored.nonce, returnTo: safeWebsiteReturnPath(stored.returnTo) } : local ? { verifier: local.verifier, nonce: local.nonce, returnTo: safeWebsiteReturnPath(local.returnTo) } : undefined;
     if (!login || !code || !options.oauth) return res.status(400).type("html").send(message("Sign-in could not be completed.", "Return to Classroom Desk and start again."));
     try {
       const user = await completeWebsiteGoogleLogin(options.oauth, options.store, code, login.verifier, login.nonce);
@@ -458,7 +465,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   app.get("/app/subscription", async (_req, res) => res.type("html").send(renderSubscription(await options.store.accountOverview(res.locals.accountUser), options.billingEnabled === true, options.teacherFeaturesEnabled === true)));
   app.get("/app/referrals", async (req, res) => {
     const user = res.locals.accountUser;
-    const summary = await options.store.referrals.summary(user.id);
+    const summary = await options.store.referrals.summary(user.id, { createCode: options.referralRewardsEnabled === true });
     return res.type("html").send(renderReferrals(user, summary, options.referralRewardsEnabled === true, options.oauth?.origin ?? `${req.protocol}://${req.get("host")}`));
   });
   app.get("/app/connection", (_req, res) => res.type("html").send(renderConnection(res.locals.accountUser)));

@@ -45,7 +45,9 @@ describe("self-hosted Worker configuration", () => {
   it("keeps scheduled billing reconciliation behind its own kill switch", () => {
     const source = fs.readFileSync(new URL("./final-worker.ts", import.meta.url), "utf8");
     expect(source).toContain("isSaaSReconciliationEnabled(bindings)");
+    expect(source).toContain("referralRewardsEnabled: loadSaaSFeatureFlags(bindings).referralRewards");
     expect(source).not.toContain('bindings.SAAS_BILLING_UI_ENABLED === "true" || bindings.SAAS_RECONCILIATION_ENABLED === "true"');
+    expect(source).not.toContain('bindings.SAAS_REFERRAL_REWARDS_ENABLED === "true"');
   });
 
   it("keeps teacher draft operations behind the feature flag and explicit expanded scope", () => {
