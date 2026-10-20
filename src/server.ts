@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { classroom_v1 } from "@googleapis/classroom";
-import { createClients, driveIdsFromMaterials, dueAt, listAnnouncements, listCourses, listCoursesPage, listCourseWork, listMaterials, listMySubmissions, listTopics, type ClassroomClients } from "./classroom.js";
+import { createClients, deadlineInWindow, driveIdsFromMaterials, dueAt, listAnnouncements, listCourses, listCoursesPage, listCourseWork, listMaterials, listMySubmissions, listTopics, type ClassroomClients } from "./classroom.js";
 import { mapAnnouncement, mapCourse, mapCoursework, mapMaterial, mapSubmission, mapTopic, publicError } from "./public/mappers.js";
 
 const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
@@ -62,7 +62,7 @@ async function publicResult<T>(action: () => Promise<T>) {
 }
 const publicFailure = (error: unknown) => ({ isError: true, content: [{ type: "text" as const, text: publicError(error) }] });
 
-export async function createServer(clients: ClassroomClients, options: { publicV1?: boolean; existingServer?: McpServer } = {}): Promise<McpServer> {
+export async function createServer(clients: ClassroomClients, options: { publicV1?: boolean; existingServer?: McpServer; linkWebsiteAccount?: (code:string)=>Promise<boolean> } = {}): Promise<McpServer> {
   const publicV1 = options.publicV1 === true;
   if (publicV1) clients.publicPageLimit = 1;
   const server = options.existingServer ?? new McpServer({ name: "gpt-google-classroom", version: "1.0.0" }, {
@@ -71,6 +71,7 @@ export async function createServer(clients: ClassroomClients, options: { publicV
       : "Read-only access to the user's Google Classroom and Classroom-linked Drive files. Never claim a mutation is possible; this server exposes no write tools. Prefer specific course IDs returned by list_courses.",
   });
 
+  if(options.linkWebsiteAccount) server.registerTool("link_website_account", { description:"Explicitly pair this authenticated MCP connection to the website account that issued a ten-minute one-time pairing code. This does not sign into Google or grant new Classroom permissions. Pair only accounts you intend to connect.",inputSchema:{code:z.string().min(20).max(100)},_meta:publicAuthMeta,annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false}},async({code})=>json({linked:await options.linkWebsiteAccount!(code)}));
   server.registerTool("list_courses", { description: publicV1 ? "List up to 100 active or archived Google Classroom courses visible to the connected student; pass nextPageToken to continue." : "List the student's active (or archived) Google Classroom courses.", inputSchema: { includeArchived: z.boolean().describe("Include archived courses when true.").default(false), pageToken: z.string().describe("Continuation token from a previous list_courses result.").optional() }, _meta: publicV1 ? publicAuthMeta : undefined, annotations: readOnlyAnnotations },
     async ({ includeArchived, pageToken }) => publicV1
       ? publicResult(async () => { const page = await listCoursesPage(clients, includeArchived, pageToken); return { courses: page.courses.map(mapCourse), nextPageToken: page.nextPageToken }; })
@@ -145,13 +146,13 @@ export async function createServer(clients: ClassroomClients, options: { publicV
   server.registerTool("upcoming_deadlines", { description: "Show future coursework deadlines across five active courses per page; pass nextCoursePageToken to continue. Older coursework may be omitted.", inputSchema: { days: z.number().int().min(1).max(365).describe("Lookahead window in days, from 1 to 365.").default(30), coursePageToken: z.string().describe("Continuation token for scanning additional active courses.").optional() }, _meta: publicV1 ? publicAuthMeta : undefined, annotations: readOnlyAnnotations },
     async ({ days, coursePageToken }) => {
       try {
-      const now = Date.now(); const until = now + days * 86400000; const result: unknown[] = [];
+      const now = new Date(); const result: unknown[] = [];
        const coursePage = publicV1 ? await listCoursesPage(clients, false, coursePageToken, 5) : { courses: await listCourses(clients), nextPageToken: undefined };
        for (const course of coursePage.courses) {
         if (!course.id) continue;
         for (const work of await listCourseWork(clients, course.id)) {
-          const due = dueAt(work); const time = due ? Date.parse(due) : NaN;
-          if (time >= now && time <= until) result.push({ courseId: course.id, courseName: publicV1 ? mapCourse(course).name : course.name, due, coursework: publicV1 ? mapCoursework(work) : work });
+          const due = dueAt(work);
+          if (deadlineInWindow(due, now, days)) result.push({ courseId: course.id, courseName: publicV1 ? mapCourse(course).name : course.name, due, coursework: publicV1 ? mapCoursework(work) : work });
         }
       }
       result.sort((a, b) => String((a as { due: string }).due).localeCompare(String((b as { due: string }).due)));

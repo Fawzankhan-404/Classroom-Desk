@@ -2,6 +2,7 @@ export type PlatformRole = "SUPER_ADMIN" | "SUPPORT_ADMIN" | "STUDENT" | "TEACHE
 export type Plan = "student" | "teacher";
 export type AccountStatus = "active" | "suspended" | "deleted";
 export type SubscriptionStatus = "pending" | "active" | "cancelled" | "past_due" | "expired" | "refunded";
+export type DashboardExperience = "student" | "teacher";
 
 export interface SaaSUser {
   id: string;
@@ -53,7 +54,7 @@ export interface EntitlementInput {
 
 export interface EffectiveEntitlement {
   allowed: boolean;
-  reason: "free_access" | "active_subscription" | "active_trial" | "active_grant" | "suspended" | "deleted" | "expired" | "none";
+  reason: "active_subscription" | "active_trial" | "active_grant" | "suspended" | "deleted" | "expired" | "none";
   plan: Plan | null;
   expiresAt: Date | null;
 }

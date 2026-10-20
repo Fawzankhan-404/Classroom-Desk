@@ -1,18 +1,78 @@
 import type { classroom_v1 } from "@googleapis/classroom";
-import { dueAt, listAnnouncements, listCourses, listCourseWork, listMaterials, listMySubmissions, listTopics } from "../classroom.js";
+import { dueAt, listCourses, listCourseWork, listMySubmissions } from "../classroom.js";
 import { publicAttachmentMetadata, type PublicAttachmentMetadata } from "./attachments.js";
 import type { V2Clients } from "./workflow.js";
-import { V2WorkflowError } from "./workflow.js";
+import { isGoogleReauthorizationFailure, V2WorkflowError } from "./workflow.js";
 
 const MAX_TEXT = 4_000;
 const DEFAULT_LIMIT = 50;
+const STUDENT_PAGE_SIZE = 100;
+const STUDENT_MAX_PAGES = 3;
+const MAX_STUDENT_DETAIL_COURSES = 25;
+
+type StudentPage<T> = { items: T[]; nextPageToken?: string | null };
+type BoundedStudentRead<T> = { items: T[]; complete: boolean; moreAvailable: boolean; pagesRead: number };
+
+async function readBoundedStudentPages<T>(fetchPage: (pageToken?: string) => Promise<StudentPage<T>>): Promise<BoundedStudentRead<T>> {
+  const items: T[] = [];
+  let pageToken: string | undefined;
+  let pagesRead = 0;
+  do {
+    const page = await fetchPage(pageToken);
+    items.push(...page.items);
+    pagesRead++;
+    pageToken = page.nextPageToken ?? undefined;
+  } while (pageToken && pagesRead < STUDENT_MAX_PAGES);
+  return { items, complete: !pageToken, moreAvailable: Boolean(pageToken), pagesRead };
+}
+
+function readStudentCourses(clients: V2Clients): Promise<BoundedStudentRead<classroom_v1.Schema$Course>> {
+  return readBoundedStudentPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.list({ courseStates: ["ACTIVE"], pageSize: STUDENT_PAGE_SIZE, pageToken });
+    return { items: data.courses ?? [], nextPageToken: data.nextPageToken };
+  });
+}
+
+function readStudentCoursework(clients: V2Clients, courseId: string): Promise<BoundedStudentRead<classroom_v1.Schema$CourseWork>> {
+  return readBoundedStudentPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.courseWork.list({ courseId, pageSize: STUDENT_PAGE_SIZE, pageToken, courseWorkStates: ["PUBLISHED"], orderBy: "updateTime desc" });
+    return { items: data.courseWork ?? [], nextPageToken: data.nextPageToken };
+  });
+}
+
+function readStudentSubmissions(clients: V2Clients, courseId: string): Promise<BoundedStudentRead<classroom_v1.Schema$StudentSubmission>> {
+  return readBoundedStudentPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.courseWork.studentSubmissions.list({ courseId, courseWorkId: "-", userId: "me", pageSize: STUDENT_PAGE_SIZE, pageToken });
+    return { items: data.studentSubmissions ?? [], nextPageToken: data.nextPageToken };
+  });
+}
+
+function readStudentAnnouncements(clients: V2Clients, courseId: string): Promise<BoundedStudentRead<classroom_v1.Schema$Announcement>> {
+  return readBoundedStudentPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.announcements.list({ courseId, pageSize: STUDENT_PAGE_SIZE, pageToken, announcementStates: ["PUBLISHED"] });
+    return { items: data.announcements ?? [], nextPageToken: data.nextPageToken };
+  });
+}
+
+function readStudentMaterials(clients: V2Clients, courseId: string): Promise<BoundedStudentRead<classroom_v1.Schema$CourseWorkMaterial>> {
+  return readBoundedStudentPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.courseWorkMaterials.list({ courseId, pageSize: STUDENT_PAGE_SIZE, pageToken, courseWorkMaterialStates: ["PUBLISHED"], orderBy: "updateTime desc" });
+    return { items: data.courseWorkMaterial ?? [], nextPageToken: data.nextPageToken };
+  });
+}
+
+function readStudentTopics(clients: V2Clients, courseId: string): Promise<BoundedStudentRead<classroom_v1.Schema$Topic>> {
+  return readBoundedStudentPages(async (pageToken) => {
+    const { data } = await clients.classroom.courses.topics.list({ courseId, pageSize: STUDENT_PAGE_SIZE, pageToken });
+    return { items: data.topic ?? [], nextPageToken: data.nextPageToken };
+  });
+}
 
 const cleanText = (value: unknown, max = MAX_TEXT): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined;
 const normalized = (value: unknown): string =>
   typeof value === "string" ? value.normalize("NFKC").toLocaleLowerCase().trim() : "";
 const contains = (value: unknown, query: string): boolean => normalized(value).includes(normalized(query));
-
 export type StudentView = "all" | "due_soon" | "today" | "tomorrow" | "missing" | "assigned" | "submitted" | "returned" | "reclaimed" | "recent";
 export type AssignmentSelector = { courseId?: string; courseQuery?: string; courseWorkId?: string; assignmentQuery?: string };
 export type ResolvedAssignment = { course: classroom_v1.Schema$Course; coursework: classroom_v1.Schema$CourseWork };
@@ -33,15 +93,18 @@ function assignmentFlags(work: classroom_v1.Schema$CourseWork, submission: class
     state,
     dueAt: due,
     late: submission?.late === true,
-    missing: Number.isFinite(dueMs) && dueMs < now.getTime() && !submitted,
+    missing: !due || submitted ? false : !work.dueTime ? null : Number.isFinite(dueMs) && dueMs < now.getTime(),
     submitted,
     returned: state === "RETURNED",
     reclaimed: state === "RECLAIMED" || state === "RECLAIMED_BY_STUDENT",
   };
 }
 
-function assignmentSummary(course: classroom_v1.Schema$Course, work: classroom_v1.Schema$CourseWork, submission: classroom_v1.Schema$StudentSubmission | undefined, now: Date) {
-  const flags = assignmentFlags(work, submission, now);
+function assignmentSummary(course: classroom_v1.Schema$Course, work: classroom_v1.Schema$CourseWork, submission: classroom_v1.Schema$StudentSubmission | undefined, now: Date, submissionAvailable = true) {
+  const flags = submissionAvailable ? assignmentFlags(work, submission, now) : {
+    state: "UNKNOWN", dueAt: dueAt(work), late: null, missing: null,
+    submitted: false, returned: false, reclaimed: false,
+  };
   return {
     courseId: course.id,
     courseName: cleanText(course.name, 300) ?? "Unnamed course",
@@ -58,10 +121,10 @@ function assignmentSummary(course: classroom_v1.Schema$Course, work: classroom_v
   };
 }
 
-function matchesWindow(view: StudentView, due: string | null, flags: ReturnType<typeof assignmentFlags>, now: Date, days: number): boolean {
+function matchesWindow(view: StudentView, due: string | null, flags: ReturnType<typeof assignmentFlags> | { state: string; dueAt: string | null; late: null; missing: null; submitted: boolean; returned: boolean; reclaimed: boolean }, now: Date, days: number): boolean {
   if (["all", "recent"].includes(view)) return true;
-  if (view === "missing") return flags.missing;
-  if (view === "assigned") return !flags.submitted && !flags.returned && !flags.reclaimed;
+  if (view === "missing") return flags.missing === true;
+  if (view === "assigned") return flags.state !== "UNKNOWN" && !flags.submitted && !flags.returned && !flags.reclaimed;
   if (view === "submitted") return flags.state === "TURNED_IN";
   if (view === "returned") return flags.returned;
   if (view === "reclaimed") return flags.reclaimed;
@@ -85,62 +148,119 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
   const view = input.view ?? "all";
   const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), 100);
   const days = Math.min(Math.max(input.days ?? 7, 1), 31);
-  const allCourses = await listCourses(clients);
+  const courseRead = await readStudentCourses(clients);
+  const allCourses = courseRead.items;
   const selectedCourses = input.courseQuery?.trim()
     ? allCourses.filter((course) => course.id === input.courseQuery || contains(course.name, input.courseQuery!))
     : allCourses;
-  if (input.courseQuery && selectedCourses.length === 0) throw new V2WorkflowError("course_not_found", "No accessible course matched that name.");
+  if (input.courseQuery && selectedCourses.length === 0) {
+    if (!courseRead.complete) throw new V2WorkflowError("incomplete_data", "The course list reached its page limit before that search could be completed. Refine the course name and try again.");
+    throw new V2WorkflowError("course_not_found", "No accessible course matched that name.");
+  }
 
-  const bundles = await Promise.all(selectedCourses.slice(0, 25).map(async (course) => {
-    if (!course.id) return { course, coursework: [], submissions: [], announcements: [], materials: [], topics: [] };
+  const bundles = await Promise.all(selectedCourses.slice(0, MAX_STUDENT_DETAIL_COURSES).map(async (course) => {
+    if (!course.id) return {
+      course, coursework: [], submissions: [], announcements: [], materials: [], topics: [],
+      courseworkComplete: false, submissionsComplete: false, announcementsComplete: false, materialsComplete: false, topicsComplete: false,
+      pageCapReached: false,
+    };
     // A Classroom account can be both a teacher and a student. Google may
     // reject one student-only collection (for example submissions on a
     // teacher-owned course) while allowing the rest. Keep the overview
     // useful by isolating each bounded read instead of failing the entire
     // request on one inaccessible collection.
     const settled = await Promise.allSettled([
-      listCourseWork(clients, course.id), listMySubmissions(clients, course.id), listAnnouncements(clients, course.id), listMaterials(clients, course.id), listTopics(clients, course.id),
+      readStudentCoursework(clients, course.id), readStudentSubmissions(clients, course.id), readStudentAnnouncements(clients, course.id), readStudentMaterials(clients, course.id), readStudentTopics(clients, course.id),
     ]);
-    const value = <T>(index: number): T[] => settled[index]?.status === "fulfilled" ? settled[index].value as T[] : [];
-    const coursework = value<classroom_v1.Schema$CourseWork>(0);
-    const submissions = value<classroom_v1.Schema$StudentSubmission>(1);
-    const announcements = value<classroom_v1.Schema$Announcement>(2);
-    const materials = value<classroom_v1.Schema$CourseWorkMaterial>(3);
-    const topics = value<classroom_v1.Schema$Topic>(4);
-    return { course, coursework, submissions, announcements, materials, topics };
+    // Partial reads are useful when a scope is denied or Google is temporarily
+    // unavailable, but an expired credential must produce a reconnect state.
+    // Do not turn a 401 into an apparently connected dashboard with empty data.
+    if (settled.some((item) => item.status === "rejected" && isGoogleReauthorizationFailure(item.reason))) {
+      throw new V2WorkflowError("authorization", "Reconnect Google Classroom and try again.");
+    }
+    const value = <T>(index: number): BoundedStudentRead<T> => settled[index]?.status === "fulfilled"
+      ? settled[index].value as BoundedStudentRead<T>
+      : { items: [], complete: false, moreAvailable: false, pagesRead: 0 };
+    const courseworkRead = value<classroom_v1.Schema$CourseWork>(0);
+    const submissionsRead = value<classroom_v1.Schema$StudentSubmission>(1);
+    const announcementsRead = value<classroom_v1.Schema$Announcement>(2);
+    const materialsRead = value<classroom_v1.Schema$CourseWorkMaterial>(3);
+    const topicsRead = value<classroom_v1.Schema$Topic>(4);
+    const coursework = courseworkRead.items;
+    const submissions = submissionsRead.items;
+    const announcements = announcementsRead.items;
+    const materials = materialsRead.items;
+    const topics = topicsRead.items;
+    return {
+      course, coursework, submissions, announcements, materials, topics,
+      courseworkComplete: settled[0]?.status === "fulfilled" && courseworkRead.complete,
+      submissionsComplete: settled[1]?.status === "fulfilled" && submissionsRead.complete,
+      announcementsComplete: settled[2]?.status === "fulfilled" && announcementsRead.complete,
+      materialsComplete: settled[3]?.status === "fulfilled" && materialsRead.complete,
+      topicsComplete: settled[4]?.status === "fulfilled" && topicsRead.complete,
+      pageCapReached: courseworkRead.moreAvailable || submissionsRead.moreAvailable || announcementsRead.moreAvailable || materialsRead.moreAvailable || topicsRead.moreAvailable,
+    };
   }));
 
-  const assignments = bundles.flatMap(({ course, coursework, submissions }) => {
+  const allAssignments = bundles.flatMap(({ course, coursework, submissions, submissionsComplete }) => {
     const byWork = new Map(submissions.map((submission) => [submission.courseWorkId, submission]));
     return coursework.filter((work) => work.workType === "ASSIGNMENT" || !work.workType).filter((work) => queryMatches(work, course.name, input.searchQuery)).filter((work) => {
-      const flags = assignmentFlags(work, byWork.get(work.id ?? ""), now);
+      const flags = submissionsComplete ? assignmentFlags(work, byWork.get(work.id ?? ""), now) : { state: "UNKNOWN", dueAt: dueAt(work), late: null, missing: null, submitted: false, returned: false, reclaimed: false };
       return matchesWindow(view, dueAt(work), flags, now, days);
-    }).map((work) => assignmentSummary(course, work, byWork.get(work.id ?? ""), now));
+    }).map((work) => assignmentSummary(course, work, byWork.get(work.id ?? ""), now, submissionsComplete));
   }).sort((a, b) => {
     if (a.dueAt && b.dueAt) return a.dueAt.localeCompare(b.dueAt);
     if (a.dueAt) return -1;
     if (b.dueAt) return 1;
     return String(b.updatedAt).localeCompare(String(a.updatedAt));
-  }).slice(0, limit);
+  });
+  const assignments = allAssignments.slice(0, limit);
 
-  const announcements = bundles.flatMap(({ course, announcements: items }) => items.filter((item) => queryMatches({ description: item.text }, course.name, input.searchQuery)).map((item) => ({ courseId: course.id, courseName: cleanText(course.name, 300), announcementId: item.id, text: cleanText(item.text), updatedAt: item.updateTime ?? item.creationTime ?? null, attachments: attachmentMetadata(item.materials) }))).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, limit);
-  const courseMaterials = bundles.flatMap(({ course, materials }) => materials.filter((item) => queryMatches(item, course.name, input.searchQuery)).map((item) => ({ courseId: course.id, courseName: cleanText(course.name, 300), materialId: item.id, title: cleanText(item.title, 500), description: cleanText(item.description), updatedAt: item.updateTime ?? item.creationTime ?? null, attachments: attachmentMetadata(item.materials) }))).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, limit);
-  const topics = bundles.flatMap(({ course, topics }) => topics.filter((topic) => !input.searchQuery || contains(topic.name, input.searchQuery) || contains(course.name, input.searchQuery)).map((topic) => ({ courseId: course.id, courseName: cleanText(course.name, 300), topicId: topic.topicId, name: cleanText(topic.name, 300) }))).slice(0, limit);
+  const allAnnouncements = bundles.flatMap(({ course, announcements: items }) => items.filter((item) => queryMatches({ description: item.text }, course.name, input.searchQuery)).map((item) => ({ courseId: course.id, courseName: cleanText(course.name, 300), announcementId: item.id, text: cleanText(item.text), updatedAt: item.updateTime ?? item.creationTime ?? null, attachments: attachmentMetadata(item.materials) }))).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  const announcements = allAnnouncements.slice(0, limit);
+  const allCourseMaterials = bundles.flatMap(({ course, materials }) => materials.filter((item) => queryMatches(item, course.name, input.searchQuery)).map((item) => ({ courseId: course.id, courseName: cleanText(course.name, 300), materialId: item.id, title: cleanText(item.title, 500), description: cleanText(item.description), updatedAt: item.updateTime ?? item.creationTime ?? null, attachments: attachmentMetadata(item.materials) }))).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  const courseMaterials = allCourseMaterials.slice(0, limit);
+  const allTopics = bundles.flatMap(({ course, topics }) => topics.filter((topic) => !input.searchQuery || contains(topic.name, input.searchQuery) || contains(course.name, input.searchQuery)).map((topic) => ({ courseId: course.id, courseName: cleanText(course.name, 300), topicId: topic.topicId, name: cleanText(topic.name, 300) })));
+  const topics = allTopics.slice(0, limit);
   const recentActivity = [
     ...assignments.map((item) => ({ type: "assignment", courseName: item.courseName, title: item.title, updatedAt: item.updatedAt })),
     ...announcements.map((item) => ({ type: "announcement", courseName: item.courseName, title: item.text?.slice(0, 180), updatedAt: item.updatedAt })),
     ...courseMaterials.map((item) => ({ type: "course_material", courseName: item.courseName, title: item.title, updatedAt: item.updatedAt })),
   ].filter((item) => item.updatedAt).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, limit);
 
+  const withinCourseDetailLimit = selectedCourses.length <= MAX_STUDENT_DETAIL_COURSES;
+  const courseworkComplete = courseRead.complete && withinCourseDetailLimit && bundles.every(bundle => bundle.courseworkComplete);
+  const submissionsComplete = courseRead.complete && withinCourseDetailLimit && bundles.every(bundle => bundle.submissionsComplete);
+  const announcementsComplete = courseRead.complete && withinCourseDetailLimit && bundles.every(bundle => bundle.announcementsComplete);
+  const materialsComplete = courseRead.complete && withinCourseDetailLimit && bundles.every(bundle => bundle.materialsComplete);
+  const topicsComplete = courseRead.complete && withinCourseDetailLimit && bundles.every(bundle => bundle.topicsComplete);
+  const courseResultsComplete = courseRead.complete && selectedCourses.length <= limit;
+  const assignmentResultsComplete = courseworkComplete && allAssignments.length <= limit;
+  const announcementResultsComplete = announcementsComplete && allAnnouncements.length <= limit;
+  const materialResultsComplete = materialsComplete && allCourseMaterials.length <= limit;
+  const topicResultsComplete = topicsComplete && allTopics.length <= limit;
+  const resultStatus = (returned: number, observed: number, complete: boolean) => ({ returned, observed, complete });
   return {
     view,
     generatedAt: now.toISOString(),
     summary: {
       courses: selectedCourses.length,
-      assignments: assignments.length,
-      missing: assignments.filter((item) => item.missing).length,
-      turnedIn: assignments.filter((item) => item.submissionState === "TURNED_IN").length,
-      returned: assignments.filter((item) => item.submissionState === "RETURNED").length,
+      assignments: courseworkComplete ? allAssignments.length : null,
+      missing: submissionsComplete && allAssignments.every((item) => typeof item.missing === "boolean") ? allAssignments.filter((item) => item.missing).length : null,
+      turnedIn: submissionsComplete ? allAssignments.filter((item) => item.submissionState === "TURNED_IN").length : null,
+      returned: submissionsComplete ? allAssignments.filter((item) => item.submissionState === "RETURNED").length : null,
+    },
+    availability: {
+      coursesComplete: courseResultsComplete,
+      courseworkComplete,
+      submissionsComplete,
+      announcementsComplete,
+      materialsComplete,
+      topicsComplete,
+      assignmentResultsComplete,
+      announcementResultsComplete,
+      materialResultsComplete,
+      topicResultsComplete,
     },
     courses: selectedCourses.slice(0, limit).map((course) => ({ id: course.id, name: cleanText(course.name, 300), section: cleanText(course.section, 300), state: course.courseState })),
     assignments,
@@ -148,6 +268,17 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
     courseMaterials,
     topics,
     recentActivity,
+    pagination: {
+      maxPagesPerCollection: STUDENT_MAX_PAGES,
+      maxCoursesWithDetails: MAX_STUDENT_DETAIL_COURSES,
+      resultLimit: limit,
+      courses: resultStatus(Math.min(selectedCourses.length, limit), selectedCourses.length, courseResultsComplete),
+      assignments: resultStatus(assignments.length, allAssignments.length, assignmentResultsComplete),
+      announcements: resultStatus(announcements.length, allAnnouncements.length, announcementResultsComplete),
+      courseMaterials: resultStatus(courseMaterials.length, allCourseMaterials.length, materialResultsComplete),
+      topics: resultStatus(topics.length, allTopics.length, topicResultsComplete),
+      pageCapReached: courseRead.moreAvailable || bundles.some(bundle => bundle.pageCapReached),
+    },
   };
 }
 
@@ -205,6 +336,6 @@ export async function getAssignmentWorkspace(clients: V2Clients, selector: Assig
       arbitraryTeacherFileContentAvailable: false,
       reason: "Teacher-provided file content is available after you allow access to that exact file. Classroom Desk does not browse your Drive.",
     },
-    nextStep: flags.state === "TURNED_IN" ? "Google Classroom shows this assignment as turned in." : flags.state === "RETURNED" ? "The teacher returned this assignment. Review the feedback in Classroom before resubmitting." : "Use ChatGPT to prepare the work. When the final PDF is ready, explicitly ask Classroom Desk to save it to Drive.",
+    nextStep: flags.state === "TURNED_IN" ? "Google Classroom shows this assignment as turned in." : flags.state === "RETURNED" ? "The teacher returned this assignment. Review the feedback in Classroom before resubmitting." : "Use ChatGPT to prepare the work. Generated PDF transfer is temporarily unavailable, so download the file and attach it yourself in Google Classroom.",
   };
 }

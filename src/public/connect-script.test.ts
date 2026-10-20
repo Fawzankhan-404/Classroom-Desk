@@ -166,7 +166,7 @@ it("serves the updated script over local HTTP with the existing tab and modal ma
     expect(() => new Script(delivered)).not.toThrow();
     const html = await (await fetch(`${base}/`)).text();
     expect(html).toContain('data-copy-prompt="What assignments do I have?">What assignments do I have?<span>Copy</span>');
-    expect(html).toContain(`data-copy-mcp="${origin.href}mcp">Copy</button>`);
+    expect(html).toContain('data-copy-mcp="https://classroom.jarvis404.com/mcp">Copy</button>');
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }

@@ -1,21 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { billingUserAllowed, loadSaaSFeatureFlags } from "./flags.js";
+import { isSaaSReconciliationEnabled, loadSaaSFeatureFlags } from "./flags.js";
 
-const owner = "10000000-0000-4000-8000-000000000001";
-
-describe("billing rollout configuration", () => {
-  it("fails closed when the allowlist is missing, empty, or malformed", () => {
-    for (const value of [undefined, "", "not-a-uuid", `${owner},bad`]) {
-      const flags = loadSaaSFeatureFlags({ SAAS_BILLING_UI_ENABLED: "true", SAAS_BILLING_ALLOWLIST_UUIDS: value });
-      expect(billingUserAllowed(owner, flags.billingAllowlistUuids)).toBe(false);
-    }
-    expect(billingUserAllowed(owner, undefined)).toBe(false);
-    expect(billingUserAllowed(owner, new Set())).toBe(false);
+describe("billing reconciliation kill switch", () => {
+  it("requires the explicit reconciliation flag even when billing UI is enabled", () => {
+    expect(isSaaSReconciliationEnabled({ SAAS_BILLING_UI_ENABLED: "true", SAAS_RECONCILIATION_ENABLED: "false" })).toBe(false);
+    expect(isSaaSReconciliationEnabled({ SAAS_BILLING_UI_ENABLED: "true" })).toBe(false);
+    expect(isSaaSReconciliationEnabled({ SAAS_BILLING_UI_ENABLED: "false", SAAS_RECONCILIATION_ENABLED: "true" })).toBe(true);
+    expect(isSaaSReconciliationEnabled({ SAAS_RECONCILIATION_ENABLED: " TRUE " })).toBe(true);
   });
+});
 
-  it("allows only an exact configured UUID, case-insensitively", () => {
-    const flags = loadSaaSFeatureFlags({ SAAS_BILLING_ALLOWLIST_UUIDS: ` ${owner.toUpperCase()} ` });
-    expect(billingUserAllowed(owner, flags.billingAllowlistUuids)).toBe(true);
-    expect(billingUserAllowed("10000000-0000-4000-8000-000000000002", flags.billingAllowlistUuids)).toBe(false);
+describe("teacher coursework write kill switch", () => {
+  it("stays disabled unless its own exact flag is explicitly true", () => {
+    expect(loadSaaSFeatureFlags({ SAAS_TEACHER_FEATURES_ENABLED: "true" }).teacherDraftWrites).toBe(false);
+    expect(loadSaaSFeatureFlags({ SAAS_TEACHER_DRAFT_WRITES_ENABLED: "false" }).teacherDraftWrites).toBe(false);
+    expect(loadSaaSFeatureFlags({ SAAS_TEACHER_DRAFT_WRITES_ENABLED: " true " }).teacherDraftWrites).toBe(true);
   });
 });

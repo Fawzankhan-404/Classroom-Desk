@@ -5,12 +5,14 @@ import { V2_BETA_SCOPES } from "./v2/scopes.js";
 
 const root = process.cwd();
 
-describe("V2 beta deployment isolation", () => {
-  it("keeps the published Worker example unrouted and workers.dev-disabled", () => {
-    const config = JSON.parse(fs.readFileSync(path.join(root, "wrangler.example.jsonc"), "utf8")) as { workers_dev?: boolean; routes?: unknown[]; d1_databases?: Array<{ database_id?: string }> };
+describe("V2 feature boundaries", () => {
+  it("does not ship a separate beta Worker route or storage binding", () => {
+    const config = JSON.parse(fs.readFileSync(path.join(root, "wrangler.example.jsonc"), "utf8")) as { name: string; main: string; routes?: Array<{ pattern: string }>; workers_dev?: boolean; d1_databases: Array<{ database_id: string }> };
+    expect(config.name).toBe("classroom-desk-selfhosted");
+    expect(config.main).toBe("src/final-worker.ts");
+    expect(config.routes ?? []).toEqual([]);
     expect(config.workers_dev).toBe(false);
-    expect(config.routes).toEqual([]);
-    expect(config.d1_databases?.[0]?.database_id).toBe("00000000-0000-0000-0000-000000000000");
+    expect(config.d1_databases[0]?.database_id).toBe("00000000-0000-0000-0000-000000000000");
   });
 
   it("keeps the beta Google grant limited to approved scopes", () => {
@@ -26,10 +28,9 @@ describe("V2 beta deployment isolation", () => {
     expect(v1).not.toContain("createV2BetaServer");
   });
 
-  it("uses the configured Picker callback binding without a beta hostname", () => {
-    const source = fs.readFileSync(path.join(root, "src/v2-worker.ts"), "utf8");
-    expect(source).toContain("bindings.V2_PICKER_CALLBACK_URL");
-    expect(source).not.toContain("beta.classroom.jarvis404.com");
-    expect(source).not.toContain("picker_runtime_pending");
+  it("has a beta-origin Picker callback and no fail-closed placeholder route", () => {
+    const config = JSON.parse(fs.readFileSync(path.join(root, "wrangler.example.jsonc"), "utf8")) as { vars: { V2_PICKER_CALLBACK_URL?: string } };
+    expect(config.vars.V2_PICKER_CALLBACK_URL).toBe("https://your-domain.example/picker/callback");
+    expect(fs.readFileSync(path.join(root, "src/v2-worker.ts"), "utf8")).not.toContain("picker_runtime_pending");
   });
 });

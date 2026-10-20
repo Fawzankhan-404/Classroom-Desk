@@ -76,6 +76,7 @@ describe("Classroom Desk SaaS rules", () => {
     expect(url.searchParams.get("scope")?.split(" ")).toEqual([...WEBSITE_IDENTITY_SCOPES]);
     expect(url.searchParams.get("code_challenge")).toBe(pkceChallenge(login.verifier));
     expect(url.searchParams.get("state")).toBe(login.state);
+    expect(url.searchParams.get("nonce")).toBe(login.nonce);
   });
   it("keeps website OAuth return paths same-origin and inside the authenticated app", () => {
     expect(safeWebsiteReturnPath("/app/settings")).toBe("/app/settings");
@@ -99,7 +100,7 @@ describe("Classroom Desk SaaS rules", () => {
     expect(parseRazorpayEvent({ event: "payment.captured", payload: { payment: { entity: { id: "pay_2", amount: 900, notes: {} } } } }, now)).toBeNull();
     expect(parseRazorpayEvent({ event: "payment.captured", payload: { payment: { entity: { id: "pay_wrong", amount: 100, notes: { user_id: "u", kind: "trial" } } } } }, now)).toBeNull();
     expect(parseRazorpayEvent({ event: "subscription.pending", payload: { subscription: { entity: { id: "sub_1", notes: { user_id: "u", plan: "student" } } } } }, now)).toMatchObject({ kind: "subscription_failed", subscriptionId: "sub_1" });
-    expect(parseRazorpayEvent({ event: "payment.refunded", payload: { payment: { entity: { id: "pay_3",currency:"INR",refund_status:"full", notes: { user_id: "u" } } } } }, now)).toMatchObject({ kind: "payment_refunded", paymentId: "pay_3" });
+    expect(parseRazorpayEvent({ event: "payment.refunded", payload: { payment: { entity: { id: "pay_3",amount:900,amount_refunded:900,currency:"INR",status:"refunded",refund_status:"full", notes: { user_id: "u" } } } } }, now)).toMatchObject({ kind: "payment_refunded", paymentId: "pay_3" });
     expect(parseRazorpayEvent({ event: "subscription.charged", payload: { payment: { entity: { id: "pay_4", amount: 9900,currency:"INR",status:"captured", notes: { user_id: "u" } } }, subscription: { entity: { id: "sub_2",current_end:1793481600, notes: { user_id: "u", plan: "student" } } } } }, now)).toMatchObject({ kind: "subscription_paid", plan: "student", amountPaise: 9900,paidThrough:new Date(1793481600000) });
     expect(parseRazorpayEvent({ event: "subscription.charged", payload: { payment: { entity: { id: "pay_wrong_sub", amount: 900, notes: { user_id: "u" } } }, subscription: { entity: { id: "sub_wrong", notes: { user_id: "u", plan: "student" } } } } }, now)).toBeNull();
   });
@@ -107,9 +108,18 @@ describe("Classroom Desk SaaS rules", () => {
     const payment={id:"pay_test",amount:900,currency:"INR",status:"captured",notes:{user_id:"u",kind:"trial"}};
     expect(parseRazorpayEvent({event:"payment.captured",payload:{payment:{entity:{...payment,currency:"USD"}}}})).toBeNull();
     expect(parseRazorpayEvent({event:"payment.captured",payload:{payment:{entity:{...payment,status:"authorized"}}}})).toBeNull();
-    const payload={payment:{entity:{...payment,notes:{},refund_status:"full"}},refund:{entity:{payment_id:payment.id,status:"processed"}}};
+    const payload={payment:{entity:{...payment,notes:{},amount_refunded:900,refund_status:"full"}},refund:{entity:{payment_id:payment.id,status:"processed",amount:900,currency:"INR"}}};
     expect(parseRazorpayEvent({event:"refund.processed",payload},now,"u")).toMatchObject({kind:"payment_refunded",userId:"u"});
     expect(parseRazorpayEvent({event:"refund.processed",payload:{...payload,refund:{entity:{payment_id:"other",status:"processed"}}}},now,"u")).toBeNull();
+  });
+  it("accepts partial refunds only with a stored owner and a consistent cumulative amount",()=>{
+    const payment={id:"pay_partial",amount:9900,amount_refunded:2500,currency:"INR",status:"captured",refund_status:"partial",subscription_id:"sub_partial",notes:{user_id:"untrusted-note-owner"}};
+    const body={event:"payment.refunded",payload:{payment:{entity:payment}}};
+    expect(parseRazorpayEvent(body,now,"canonical-owner")).toEqual({kind:"payment_partially_refunded",userId:"canonical-owner",paymentId:"pay_partial",amountPaise:9900,amountRefundedPaise:2500,orderId:undefined,subscriptionId:"sub_partial"});
+    expect(parseRazorpayEvent(body,now)).toBeNull();
+    expect(parseRazorpayEvent({event:"payment.refunded",payload:{payment:{entity:{...payment,amount_refunded:9900}}}},now,"canonical-owner")).toBeNull();
+    expect(parseRazorpayEvent({event:"payment.refunded",payload:{payment:{entity:{...payment,status:"authorized"}}}},now,"canonical-owner")).toBeNull();
+    expect(parseRazorpayEvent({event:"payment.refunded",payload:{payment:{entity:{...payment,amount_refunded:10000}}}},now,"canonical-owner")).toBeNull();
   });
   it("creates non-guessable referral codes", () => {
     const code = newReferralCode();
@@ -154,7 +164,7 @@ describe("Classroom Desk SaaS rules", () => {
     const server = createHttpServer(app); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as { port: number };
     try {
-      expect((await fetch(`http://127.0.0.1:${address.port}/api/referrals`)).status).toBe(410);
+      expect((await fetch(`http://127.0.0.1:${address.port}/api/referrals`)).status).toBe(503);
       expect((await fetch(`http://127.0.0.1:${address.port}/app/referrals`, {redirect:"manual"})).status).toBe(303);
     } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
   });

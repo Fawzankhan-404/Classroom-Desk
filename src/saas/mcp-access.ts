@@ -1,9 +1,28 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SaaSStore } from "./store.js";
 
 export type McpAccess = { allowed: boolean; reason: string; plan?: string | null; expiresAt?: Date | string | null };
-export const MCP_ONBOARDING_TOOLS = new Set(["classroom_desk_status", "classroom_desk_help"]);
+export const MCP_ONBOARDING_TOOLS = new Set(["classroom_desk_status", "classroom_desk_help", "link_website_account"]);
+export const STAGING_TEST_ORIGIN = "https://classroom-desk-unified-staging.jarvis404-dev.workers.dev";
+const MAX_STAGING_TEST_ACCESS_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type StagingTestEntitlementPolicy = {
+  enabled: boolean;
+  origin: string;
+  subjectHashes?: string;
+  expiresAt?: string;
+  now?: Date;
+};
+
+export function isStagingTestOrigin(origin: string): boolean {
+  try { return new URL(origin).origin === STAGING_TEST_ORIGIN; }
+  catch { return false; }
+}
+
+export function stagingSubjectFingerprint(subject: string): string {
+  return createHash("sha256").update(subject, "utf8").digest("hex");
+}
 
 export function accessGuidance(access: McpAccess, origin: string) {
   const restricted = access.reason === "suspended" || access.reason === "deleted";
@@ -11,38 +30,64 @@ export function accessGuidance(access: McpAccess, origin: string) {
   const google = access.reason === "google_authorization_required";
   const unavailable = access.reason === "temporarily_unavailable";
   const policy = access.reason.startsWith("policy_") || access.reason === "database_unavailable";
+  const stagingExpired = isStagingTestOrigin(origin) && access.reason === "expired";
   return {
     allowed: access.allowed,
     status: access.reason,
-    message: access.allowed ? "Classroom Desk access is active. Google permissions still apply to every operation."
+    message: access.reason === "staging_test" ? `Temporary staging-only student access is active until ${new Date(access.expiresAt ?? 0).toISOString()}. Google permissions still apply to every operation.`
+      : access.allowed ? "Classroom Desk access is active. Google permissions still apply to every operation."
       : restricted ? "This account is restricted. Contact Classroom Desk support."
       : google ? "Google Classroom authorization is missing or expired. Reconnect in ChatGPT and select the Google account containing your courses."
       : policy ? "Classroom Desk could not verify this connection's access policy. No Classroom data was accessed; retry shortly or contact support with the time of the error."
       : unavailable ? "Access could not be verified temporarily. No Classroom data was accessed. Try again shortly."
-      : setup ? "Sign in to Classroom Desk, choose Student or Teacher, and authorize Google Classroom. Product access is free."
-      : "Classroom Desk access could not be verified. Retry or contact support.",
-    actionUrl: new URL(restricted ? "/support" : setup ? "/start" : google ? "/connect" : "/app/connection", origin).toString(),
+      : setup ? "Sign in to Classroom Desk and use the Google account linked to your profile. New OAuth connections bind through a verified Google identity. Manual pairing is only for older MCP connections; an eligible trial or subscription may still be required."
+      : stagingExpired ? "This staging account is connected, but no temporary staging entitlement is active. Verify the Google account linked on the staging website. No Classroom data was accessed."
+      : "Classroom Desk is connected, but access is not active. Check your payment or choose a plan, then retry here.",
+    actionUrl: new URL(access.reason === "staging_test" ? "/app" : restricted ? "/support" : setup || stagingExpired ? "/app/connection" : google ? "/connect" : "/app/subscription", origin).toString(),
   };
 }
 
 /** Frozen pre-enforcement subjects only; never infer legacy status from a request or email. */
-export async function resolveMcpAccess(store: SaaSStore, subject: string, grandfatheredHashes = ""): Promise<McpAccess> {
+export async function resolveMcpAccess(store: SaaSStore, subject: string, grandfatheredHashes = "", stagingTest?: StagingTestEntitlementPolicy): Promise<McpAccess> {
   const entitlement = await store.entitlementForMcpUser(subject);
   if (entitlement.allowed || entitlement.reason === "suspended" || entitlement.reason === "deleted") return entitlement;
-  const digest = createHash("sha256").update(subject).digest("hex");
+  const digest = stagingSubjectFingerprint(subject);
   if (grandfatheredHashes.split(",").filter(value => /^[a-f0-9]{64}$/.test(value)).includes(digest)) {
     return { allowed: true, reason: "grandfathered", plan: null, expiresAt: null };
+  }
+  if (entitlement.reason === "expired" && stagingTest?.enabled === true && isStagingTestOrigin(stagingTest.origin)) {
+    const now = stagingTest.now ?? new Date();
+    const expiryText = stagingTest.expiresAt ?? "";
+    const expiry = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(expiryText) ? new Date(expiryText) : new Date(Number.NaN);
+    const validExpiry = Number.isFinite(expiry.getTime()) && expiry.getTime() > now.getTime() && expiry.getTime() <= now.getTime() + MAX_STAGING_TEST_ACCESS_MS;
+    const digestBytes = new TextEncoder().encode(digest);
+    const matches = (stagingTest.subjectHashes ?? "").split(",").some(candidate => {
+      if (!/^[a-f0-9]{64}$/.test(candidate)) return false;
+      return timingSafeEqual(digestBytes, new TextEncoder().encode(candidate));
+    });
+    if (validExpiry && matches) return { allowed: true, reason: "staging_test", plan: "student", expiresAt: expiry };
   }
   return entitlement;
 }
 
-export function registerMcpOnboarding(server: McpServer, check: () => Promise<McpAccess>, origin: string, identity?: () => Promise<{ id: string; displayName: string } | null>) {
+/** Resolve the teacher plan through the canonical website account mapped to an MCP identity. */
+export async function hasTeacherMcpEntitlement(
+  store: Pick<SaaSStore, "entitlementForMcpUser">,
+  mcpUserId: string,
+  teacherFeaturesEnabled: boolean,
+): Promise<boolean> {
+  if (!teacherFeaturesEnabled) return false;
+  const entitlement = await store.entitlementForMcpUser(mcpUserId);
+  return entitlement.allowed && entitlement.plan === "teacher";
+}
+
+export function registerMcpOnboarding(server: McpServer, check: () => Promise<McpAccess>, origin: string, stagingSubject?: string) {
   const meta = { securitySchemes: [{ type: "oauth2", scopes: ["mcp:tools"] }] };
   const annotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
-  server.registerTool("classroom_desk_status", { description: "Check this authenticated connection's server-verified account authorization and Google grant status. Classroom Desk is free. Does not read Classroom or expose identity/payment details.", inputSchema: {}, _meta: meta, annotations }, async () => {
-    const account = await identity?.().catch(() => null);
-    const result = { ...accessGuidance(await check().catch(() => ({ allowed: false, reason: "temporarily_unavailable" })), origin), ...(identity ? { account: account ?? null } : {}) };
+  server.registerTool("classroom_desk_status", { description: "Check this authenticated connection's server-verified access and setup instructions. Does not read Classroom or expose account/payment details. An isolated staging diagnostic may add a one-way subject fingerprint for a temporary test entitlement.", inputSchema: {}, _meta: meta, annotations }, async () => {
+    const guidance = accessGuidance(await check().catch(() => ({ allowed: false, reason: "temporarily_unavailable" })), origin);
+    const result = stagingSubject ? { ...guidance, stagingSubjectFingerprint: stagingSubjectFingerprint(stagingSubject) } : guidance;
     return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
   });
-  server.registerTool("classroom_desk_help", { description: "Explain supported Classroom Desk features and safe setup. No Classroom data is read.", inputSchema: {}, _meta: meta, annotations }, async () => ({ content: [{ type: "text", text: JSON.stringify({ features: ["Authorized courses", "Assignments and deadlines", "Announcements", "Your own submission status"], setupUrl: new URL("/start", origin).toString(), accountUrl: new URL("/app/connection", origin).toString(), supportUrl: new URL("/support", origin).toString(), message: "Classroom Desk is free. Sign in, choose Student or Teacher, then authorize Google Classroom. Returning users reuse valid Google access. Refresh preserves the authenticated identity. Use another Google account during authorization to explicitly select a different account. File tools require explicit authorization." }) }] }));
+  server.registerTool("classroom_desk_help", { description: "Explain supported Classroom Desk features and safe setup. No Classroom data is read.", inputSchema: {}, _meta: meta, annotations }, async () => ({ content: [{ type: "text", text: JSON.stringify({ features: ["Authorized courses", "Assignments and deadlines", "Announcements", "Your own submission status"], setupUrl: new URL("/connect", origin).toString(), accountUrl: new URL("/app/connection", origin).toString(), supportUrl: new URL("/support", origin).toString(), message: "Sign in with the Google account linked to your Classroom Desk profile, then authorize Classroom through ChatGPT. New OAuth connections bind with a verified Google identity. Manual pairing is only for older connections. Never share Google passwords. File tools are available only when advertised and explicitly authorized." }) }] }));
 }

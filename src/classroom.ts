@@ -84,14 +84,33 @@ export function dueAt(item: classroom_v1.Schema$CourseWork): string | null {
   const d = item.dueDate;
   if (!d?.year || !d.month || !d.day) return null;
   const t = item.dueTime;
+  if (!t) {
+    const date = new Date(Date.UTC(d.year, d.month - 1, d.day));
+    if (date.getUTCFullYear() !== d.year || date.getUTCMonth() !== d.month - 1 || date.getUTCDate() !== d.day) return null;
+    return date.toISOString().slice(0, 10);
+  }
   return new Date(Date.UTC(
     d.year,
     d.month - 1,
     d.day,
-    t?.hours ?? 23,
-    t?.minutes ?? 59,
-    t ? (t.seconds ?? 0) : 59,
+    t.hours ?? 0,
+    t.minutes ?? 0,
+    t.seconds ?? 0,
   )).toISOString();
+}
+
+/** Date-only Classroom due dates are UTC calendar dates, not an implied midnight or 23:59 deadline. */
+export function deadlineInWindow(due: string | null, now: Date, days: number): boolean {
+  if (!due) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+    const dueDay = Date.parse(`${due}T00:00:00.000Z`);
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    if (!Number.isFinite(dueDay)) return false;
+    const dayOffset = Math.floor((dueDay - today) / 86_400_000);
+    return dayOffset >= 0 && dayOffset <= days;
+  }
+  const timestamp = Date.parse(due);
+  return Number.isFinite(timestamp) && timestamp >= now.getTime() && timestamp <= now.getTime() + days * 86_400_000;
 }
 
 export function driveIdsFromMaterials(materials: classroom_v1.Schema$Material[] | null | undefined): string[] {

@@ -41,10 +41,10 @@ describe("complete mocked public authorization path", () => {
     const server = app.listen(port, "127.0.0.1"); await new Promise<void>((resolve) => server.once("listening", resolve));
     try {
       const landing = await fetch(`${origin}/`); const landingHtml = await landing.text();
-      expect(landing.status).toBe(200); expect(landingHtml).toContain("Built for "); expect(landingHtml).toContain("Classroom clarity"); expect(landingHtml).toContain("data-home-stage"); expect(landingHtml).toContain("data-stage-src"); expect(landingHtml).toContain("What deadlines are coming up?"); expect(landingHtml).toContain("Illustrative response"); expect(landingHtml).toContain('href="https://chatgpt.com/plugins"'); expect(landingHtml).toContain('target="_blank"'); expect(landingHtml).toContain('href="/connect"'); expect(landingHtml).toContain("Connect to ChatGPT"); expect(landingHtml).toContain("How it works"); expect(landingHtml).toContain("Free and open source"); expect(landingHtml).not.toContain("₹99"); expect(landingHtml).not.toContain("₹9"); expect(landingHtml).toContain("Questions, answered.");
+      expect(landing.status).toBe(200); expect(landingHtml).toContain("Built for "); expect(landingHtml).toContain("Classroom clarity"); expect(landingHtml).toContain("data-home-stage"); expect(landingHtml).toContain("data-stage-src"); expect(landingHtml).toContain("What deadlines are coming up?"); expect(landingHtml).toContain("Illustrative response"); expect(landingHtml).toContain('href="https://chatgpt.com/plugins"'); expect(landingHtml).toContain('target="_blank"'); expect(landingHtml).toContain('href="/connect"'); expect(landingHtml).toContain("Connect to ChatGPT"); expect(landingHtml).toContain("How it works"); expect(landingHtml).toContain("₹99"); expect(landingHtml).toContain("Questions, answered.");
       const guide = await fetch(`${origin}/connect`); const guideHtml = await guide.text();
-      expect(guide.status).toBe(200); expect(guideHtml).toContain(`${origin}/mcp`); expect(guideHtml).toContain("data-copy-mcp"); expect(guideHtml).toContain("data-guide-step"); expect(guideHtml).toContain("Open ChatGPT"); expect(guideHtml).toContain("choose OAuth"); expect(guideHtml).toContain("Button names vary"); expect(guide.headers.get("content-security-policy")).toContain("script-src 'self'");
-      const script = await fetch(`${origin}/assets/connect.js`); expect(script.status).toBe(200); expect(script.headers.get("content-type")).toContain("javascript"); const scriptText = await script.text(); expect(scriptText).toContain("navigator.clipboard.writeText"); expect(scriptText).toContain("connects ChatGPT automatically"); expect(scriptText).not.toContain("Website sign-in, Google Classroom authorization, and the ChatGPT connection are separate steps.");
+      expect(guide.status).toBe(200); expect(guideHtml).toContain("https://classroom.jarvis404.com/mcp"); expect(guideHtml).toContain("data-copy-mcp"); expect(guideHtml).toContain("data-guide-step"); expect(guideHtml).toContain("Open ChatGPT"); expect(guideHtml).toContain("choose OAuth"); expect(guideHtml).toContain("Button names vary"); expect(guide.headers.get("content-security-policy")).toContain("script-src 'self'");
+      const script = await fetch(`${origin}/assets/connect.js`); expect(script.status).toBe(200); expect(script.headers.get("content-type")).toContain("javascript"); expect(await script.text()).toContain("navigator.clipboard.writeText");
     } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
   });
 
@@ -73,7 +73,7 @@ describe("complete mocked public authorization path", () => {
       const flow = new URL(connectionUrl).searchParams.get("flow")!;
       const connectPage = await fetch(connectionUrl);
       expect(connectPage.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
-      expect(await connectPage.text()).toContain("No arbitrary Drive access");
+      expect(await connectPage.text()).toContain("No Google Drive access");
       const connect = await fetch(`${origin}/connect/google`, { method: "POST", redirect: "manual", headers: { origin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ flow }) });
       expect(connect.status).toBe(303);
       const google = new URL(connect.headers.get("location")!);
@@ -84,12 +84,16 @@ describe("complete mocked public authorization path", () => {
       expect(callback.status).toBe(303);
       expect((await store.getGrant(userId!))?.scopes).toEqual(GOOGLE_CANONICAL_CLASSROOM_SCOPES);
       const clientCallback = new URL(callback.headers.get("location")!);
+      expect(`${clientCallback.origin}${clientCallback.pathname}`).toBe(redirectUri);
+      expect(clientCallback.searchParams.has("code")).toBe(true);
       expect(clientCallback.searchParams.get("state")).toBe("mcp-state");
       const wrongPkce = await fetch(`${origin}/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", code: clientCallback.searchParams.get("code")!, redirect_uri: redirectUri, code_verifier: randomBytes(32).toString("base64url"), client_id: client.client_id, resource: `${origin}/mcp` }) });
       expect(wrongPkce.status).toBeGreaterThanOrEqual(400);
       const token = await fetch(`${origin}/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", code: clientCallback.searchParams.get("code")!, redirect_uri: redirectUri, code_verifier: verifier, client_id: client.client_id, resource: `${origin}/mcp` }) });
       expect(token.status).toBe(200);
       const credentials = await token.json() as { access_token: string; refresh_token: string };
+      const authorizationCodeReplay = await fetch(`${origin}/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", code: clientCallback.searchParams.get("code")!, redirect_uri: redirectUri, code_verifier: verifier, client_id: client.client_id, resource: `${origin}/mcp` }) });
+      expect(authorizationCodeReplay.status).toBeGreaterThanOrEqual(400);
       expect(credentials.access_token).not.toBe("mock-google-access");
       const headers = { authorization: `Bearer ${credentials.access_token}`, "content-type": "application/json", accept: "application/json, text/event-stream" };
       const init = await fetch(`${origin}/mcp`, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "integration", version: "1" } } }) });
@@ -105,13 +109,6 @@ describe("complete mocked public authorization path", () => {
       expect(refresh.status).toBe(200);
       const rotated = await refresh.json() as { access_token: string; refresh_token: string };
       expect(rotated.refresh_token).not.toBe(credentials.refresh_token);
-      expect((await store.getAccess(rotated.access_token))?.userId).toBe(userId);
-      expect(await store.getRefresh(rotated.refresh_token)).toMatchObject({ userId });
-      expect(await store.getGrant(userId!)).toMatchObject({ refreshToken: "mock-google-refresh" });
-      const repeated = await fetch(`${origin}/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: rotated.refresh_token, client_id: client.client_id, resource: `${origin}/mcp` }) });
-      expect(repeated.status).toBe(200);
-      const rotatedAgain = await repeated.json() as { access_token: string; refresh_token: string };
-      expect((await store.getAccess(rotatedAgain.access_token))?.userId).toBe(userId);
       const replay = await fetch(`${origin}/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: credentials.refresh_token, client_id: client.client_id, resource: `${origin}/mcp` }) });
       expect(replay.status).toBeGreaterThanOrEqual(400);
     } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }

@@ -30,7 +30,7 @@ export class D1SqlDatabase implements SqlDatabase {
 
   async query<T extends QueryResultRow = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<QueryResult<T>> {
     const result = await this.prepare(sql, values).all<T>();
-    if (!result.success) throw new Error("d1_query_failed");
+    if (!result.success) throw new Error("d1_query_failed", { cause: result.error });
     return { rows: result.results ?? [] };
   }
 
@@ -38,7 +38,7 @@ export class D1SqlDatabase implements SqlDatabase {
     if (queries.length === 0) return [];
     const results = await this.binding.batch<T>(queries.map(({ sql, values }) => this.prepare(sql, values)));
     return results.map((result) => {
-      if (!result.success) throw new Error("d1_batch_failed");
+      if (!result.success) throw new Error("d1_batch_failed", { cause: result.error });
       return { rows: result.results ?? [] };
     });
   }

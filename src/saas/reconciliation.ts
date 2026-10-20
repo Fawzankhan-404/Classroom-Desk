@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { SqlDatabase } from "../public/postgres.js";
 import type { RazorpayClient, RazorpayCollection } from "./razorpay-client.js";
-import { paymentHasRefund, paymentMatchesSubscriptionCycle, validProviderPayment, withProviderTimeout } from "./razorpay-client.js";
+import { invoicePaidThrough, paymentIsFullyRefunded, paymentMatchesSubscriptionCycle, validProviderPayment, withProviderTimeout } from "./razorpay-client.js";
 import { SaaSStore } from "./store.js";
 import { parseRazorpayEvent } from "./billing-events.js";
 import { planPricePaise, TRIAL_PRICE_PAISE } from "./campaign.js";
@@ -31,7 +31,7 @@ async function claimPayments(db: SqlDatabase, since: Date, category: "recent" | 
       && typeof candidate.id === "string" && /^[0-9a-f-]{36}$/i.test(candidate.id) ? candidate as Cursor : undefined;
     const limit = category === "recent" || category === "stale" ? BATCH_SIZE : RECOVERY_BATCH_SIZE;
     const predicate = category === "recent" ? "provider_payment_id IS NOT NULL AND created_at >= $1"
-      : category === "stale" ? "provider_payment_id IS NOT NULL AND created_at < $1 AND status IN ('pending','authorized','captured','paid')"
+      : category === "stale" ? "provider_payment_id IS NOT NULL AND created_at < $1 AND status IN ('pending','authorized','captured','paid','partially_refunded')"
         : category === "orders" ? "provider_order_id IS NOT NULL AND provider_payment_id IS NULL AND kind='trial' AND status='pending' AND created_at <= $1"
           : "provider_subscription_id IS NOT NULL AND status IN ('pending','active','past_due') AND created_at <= $1";
     const source = category === "subscriptions"
@@ -56,7 +56,7 @@ async function claimPaymentsD1(db: SqlDatabase, since: Date, category: "recent" 
   await db.query(`INSERT INTO classroom_desk_webhook_events (event_id,event_type,payload_hash,status) VALUES ($1,'internal.reconciliation.cursor','{}','cursor') ON CONFLICT (event_id) DO NOTHING`, [key]);
   const limit = category === "recent" || category === "stale" ? BATCH_SIZE : RECOVERY_BATCH_SIZE;
   const predicate = category === "recent" ? "provider_payment_id IS NOT NULL AND created_at >= $1"
-    : category === "stale" ? "provider_payment_id IS NOT NULL AND created_at < $1 AND status IN ('pending','authorized','captured','paid')"
+    : category === "stale" ? "provider_payment_id IS NOT NULL AND created_at < $1 AND status IN ('pending','authorized','captured','paid','partially_refunded')"
       : category === "orders" ? "provider_order_id IS NOT NULL AND provider_payment_id IS NULL AND kind='trial' AND status='pending' AND created_at <= $1"
         : "provider_subscription_id IS NOT NULL AND status IN ('pending','active','past_due') AND created_at <= $1";
   const source = category === "subscriptions"
@@ -139,12 +139,12 @@ function providerPaidAt(createdAt: unknown, now: Date): Date {
   return paidAt;
 }
 
-export async function reconcileRecentPayments(db: SqlDatabase, store: SaaSStore, razorpay: RazorpayClient, now = new Date(), planIds?: { student?: string; teacher?: string }): Promise<{ checked: number; refunded: number; failed: number; recovered: number }> {
+export async function reconcileRecentPayments(db: SqlDatabase, store: SaaSStore, razorpay: RazorpayClient, now = new Date(), planIds?: { student?: string; teacher?: string }): Promise<{ checked: number; refunded: number; partiallyRefunded: number; failed: number; recovered: number }> {
   const since = new Date(now.getTime() - 48 * 60 * 60 * 1000);
   const recent = await claimPayments(db, since, "recent", now);
   const stale = await claimPayments(db, since, "stale", now);
   const rows = [...new Map([...recent, ...stale].map(row => [row.provider_payment_id, row])).values()];
-  let checked = 0; let refunded = 0; let failed = 0; let recovered = 0; let requests = 0;
+  let checked = 0; let refunded = 0; let partiallyRefunded = 0; let failed = 0; let recovered = 0; let requests = 0;
   const provider = <T>(run: () => Promise<T>) => {
     if (++requests > MAX_PROVIDER_CHECKS) throw new Error("reconciliation_budget_exhausted");
     return withProviderTimeout(run);
@@ -172,6 +172,12 @@ export async function reconcileRecentPayments(db: SqlDatabase, store: SaaSStore,
           const owner = await store.paymentOwner(payment.id);
           if (owner !== row.user_id) throw new Error("reconciliation_owner_mismatch");
           if (await store.processBillingEvent({ kind: "payment_refunded", userId: row.user_id, paymentId: payment.id })) refunded += 1;
+          return;
+        }
+        if (payment.refund_status === "partial") {
+          const event = parseRazorpayEvent({ event: "payment.refunded", payload: { payment: { entity: payment } } }, now, row.user_id);
+          if (!event || event.kind !== "payment_partially_refunded") throw new Error("reconciliation_partial_refund_mismatch");
+          if (await store.processBillingEvent(event)) partiallyRefunded += 1;
         }
   });
   const orders = await claimPayments(db, since, "orders", now);
@@ -202,10 +208,15 @@ export async function reconcileRecentPayments(db: SqlDatabase, store: SaaSStore,
         await store.processBillingEvent({ kind: "trial_captured", userId: row.user_id, paymentId: payment.id, orderId, amountPaise: payment.amount, paidAt });
         continue;
       }
-      if (payment.status !== "captured" || paymentHasRefund(payment)) continue;
+      if (payment.status !== "captured" || paymentIsFullyRefunded(payment)) continue;
       const event = parseRazorpayEvent({event:"payment.captured",payload:{payment:{entity:payment},order:{entity:order}}},now,row.user_id);
       if (!event) throw new Error("reconciliation_event_mismatch");
       if (await store.processBillingEvent(event)) recovered += 1;
+      if (payment.refund_status === "partial") {
+        const partial = parseRazorpayEvent({event:"payment.refunded",payload:{payment:{entity:payment}}},now,row.user_id);
+        if(!partial||partial.kind!=="payment_partially_refunded")throw new Error("reconciliation_partial_refund_mismatch");
+        if(await store.processBillingEvent(partial))partiallyRefunded+=1;
+      }
       } catch { failed += 1; }
     }
     await pageState.finish(page.items.length);
@@ -242,17 +253,25 @@ export async function reconcileRecentPayments(db: SqlDatabase, store: SaaSStore,
         checked += 1;
         if (!validProviderPayment(payment, invoice.payment_id) || payment.invoice_id !== invoice.id || payment.amount !== invoice.amount || payment.currency !== invoice.currency
           || (payment.subscription_id && payment.subscription_id !== subscriptionId) || (payment.order_id && payment.order_id !== invoice.order_id)) throw new Error("reconciliation_payment_mismatch");
-        if (payment.status !== "captured" || paymentHasRefund(payment)) continue;
-        // A fresh subscription snapshot must never lend its current_end to a
-        // historical invoice from a different, possibly refunded billing term.
-        if (!paymentMatchesSubscriptionCycle(payment, subscription, now)) continue;
+        if (payment.status !== "captured" || paymentIsFullyRefunded(payment)) continue;
+        // Prefer the paid invoice's verified billing period. Older provider
+        // invoice payloads may omit it; then recover only a payment proven to
+        // belong to the current cycle.
+        const hasInvoicePeriod = invoice.billing_start != null || invoice.billing_end != null;
+        const invoiceEnd = hasInvoicePeriod ? invoicePaidThrough(invoice, subscription) : undefined;
+        if (hasInvoicePeriod ? !invoiceEnd : !paymentMatchesSubscriptionCycle(payment, subscription, now)) continue;
         const event = parseRazorpayEvent({event:"subscription.charged",payload:{payment:{entity:payment},subscription:{entity:subscription}}},now,row.user_id,planIds);
-        if (!event) throw new Error("reconciliation_event_mismatch");
-        if (await store.processBillingEvent(event)) recovered += 1;
+        if (!event || event.kind !== "subscription_paid") throw new Error("reconciliation_event_mismatch");
+        if (await store.processBillingEvent({ ...event, paidThrough: invoiceEnd ?? event.paidThrough })) recovered += 1;
+        if(payment.refund_status==="partial"){
+          const partial=parseRazorpayEvent({event:"payment.refunded",payload:{payment:{entity:payment}}},now,row.user_id);
+          if(!partial||partial.kind!=="payment_partially_refunded")throw new Error("reconciliation_partial_refund_mismatch");
+          if(await store.processBillingEvent(partial))partiallyRefunded+=1;
+        }
         } catch { failed += 1; }
       }
       await pageState.finish(page.items.length);
     });
   }
-  return { checked, refunded, failed, recovered };
+  return { checked, refunded, partiallyRefunded, failed, recovered };
 }
