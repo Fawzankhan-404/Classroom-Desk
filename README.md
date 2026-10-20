@@ -3,7 +3,7 @@
 
   <h1>Classroom Desk</h1>
   <p><strong>Your Google Classroom. Smarter with ChatGPT.</strong></p>
-  <p>A free, open-source assistant that brings your authorized Google Classroom context into ChatGPT.</p>
+  <p>An open-source assistant that brings your authorized Google Classroom context into ChatGPT.</p>
 
   <p>
     <a href="https://classroom.jarvis404.com"><strong>Open Classroom Desk</strong></a> &nbsp;·&nbsp;
@@ -27,7 +27,7 @@
 
 Classroom Desk connects a Google account to ChatGPT through Google OAuth and the [Model Context Protocol](https://modelcontextprotocol.io/). It helps students find course information and stay oriented around classwork, while keeping access tied to the Google account and permissions they authorize.
 
-The repository contains a TypeScript application with a web experience, MCP tools, and local development support. The hosted service and this source repository are separate release artifacts; a local build does not establish which source revision is running on the hosted service.
+The repository contains a TypeScript application with a web experience, MCP tools, and local development support. The source code is open under Apache-2.0. The hosted service has its own plans and terms; see the [current hosted pricing](https://classroom.jarvis404.com/pricing). A local build does not establish which source revision is running on the hosted service.
 
 ## Product capabilities
 
