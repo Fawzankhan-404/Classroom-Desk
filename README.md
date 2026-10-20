@@ -1,55 +1,75 @@
 <div align="center">
-  <img src="assets/classroom-desk-main-logo.svg" width="370" alt="Classroom Desk">
+  <img src="assets/classroomdesk-main-logo.png" width="190" alt="Classroom Desk main logo: a green classroom desk and lesson board">
 
+  <h1>Classroom Desk</h1>
   <p><strong>Your Google Classroom. Smarter with ChatGPT.</strong></p>
-  <p>A free, open-source assistant for working with your own Google Classroom in ChatGPT.</p>
+  <p>An open-source assistant that brings your authorized Google Classroom context into ChatGPT.</p>
 
   <p>
-    <a href="https://classroom.jarvis404.com"><strong>Open Classroom Desk</strong></a> ·
-    <a href="docs/GETTING_STARTED.md">Get started</a> ·
-    <a href="docs/CHATGPT_CONNECTION_GUIDE.md">Connect ChatGPT</a> ·
-    <a href="CONTRIBUTING.md">Contribute</a>
+    <a href="https://classroom.jarvis404.com"><strong>Open Classroom Desk</strong></a> &nbsp;·&nbsp;
+    <a href="https://github.com/Fawzankhan-404/Classroom-Desk"><strong>GitHub repository</strong></a> &nbsp;·&nbsp;
+    <a href="docs/GETTING_STARTED.md">Get started</a> &nbsp;·&nbsp;
+    <a href="docs/CHATGPT_CONNECTION_GUIDE.md">Connect ChatGPT</a> &nbsp;·&nbsp;
+    <a href="docs/OPEN_SOURCE_ARCHITECTURE.md">Architecture</a>
   </p>
 
   <p>
-    <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/License-Apache--2.0-2f6f4e?style=flat-square"></a>
+    <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/License-Apache--2.0-176B4D?style=flat-square"></a>
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white">
     <img alt="Cloudflare Workers" src="https://img.shields.io/badge/Cloudflare-Workers-F38020?style=flat-square&logo=cloudflare&logoColor=white">
-    <img alt="Model Context Protocol" src="https://img.shields.io/badge/Model_Context_Protocol-MCP-635BFF?style=flat-square">
+    <img alt="Model Context Protocol" src="https://img.shields.io/badge/Protocol-MCP-635BFF?style=flat-square">
   </p>
 </div>
 
 ---
 
-## About
+## Overview
 
-Classroom Desk connects your Google account to ChatGPT through Google OAuth and the Model Context Protocol (MCP). It helps you find and review the Classroom information that your account is authorized to access.
+Classroom Desk connects a Google account to ChatGPT through Google OAuth and the [Model Context Protocol](https://modelcontextprotocol.io/). It helps students find course information and stay oriented around classwork, while keeping access tied to the Google account and permissions they authorize.
 
-The project includes **Student** and **Teacher** dashboard preferences. Student is the default. Teacher mode currently contains a synthetic assessment demo; choosing it does not grant Google teacher permissions or reveal real class submissions.
+The repository contains a TypeScript application with a web experience, MCP tools, and local development support. The source code is open under Apache-2.0. The hosted service has its own plans and terms; see the [current hosted pricing](https://classroom.jarvis404.com/pricing). A local build does not establish which source revision is running on the hosted service.
 
-Classroom Desk is open-source software. Running a self-hosted copy may incur charges from infrastructure or service providers. The hosted website has its own service terms.
+## Product capabilities
 
-## What you can do
-
-| Experience | Included | Access boundary |
+| Experience | What it includes | Data and action boundary |
 |---|---|---|
-| Student | View supported courses, coursework, deadlines, announcements, activity, and your submission status through authenticated tools. | Google permissions and course membership determine available data. Classroom changes are not made. |
-| Teacher | Explore a rubric and six sample responses with evidence-based draft marks, review flags, and demo approval. | All records are synthetic and labeled DEMO. Approval is local to the demo. |
-| Gradebook | No grade writeback is included. | Demo marks are never sent to Google Classroom. |
+| **Student** | Supported course, coursework, deadline, announcement, material, and personal submission information. | Results depend on the connected Google account, its permissions, and course membership. A Drive-file action requires an explicit request and does not submit work to Classroom. |
+| **Teacher dashboard** | A rubric and six sample responses with evidence-based draft marks, review flags, and local demo approval. | The assessment workspace uses synthetic records labeled **DEMO**. Demo approval never changes a real grade. |
+| **Teacher Classroom access** | Separate teacher operations are available only when the account has the required Google authorization and Google confirms the relevant course role. | Choosing Teacher changes the dashboard preference; it does not grant teacher access. Availability depends on deployment configuration and consent. |
+| **Gradebook** | No automatic grade publication. | Google Classroom gradebook writeback is disabled. |
 
-Teacher dashboard selection is a display preference only. Live teacher rosters and submissions require verified teacher authorization and are not part of the synthetic demo.
+The assessment model is a demonstration workflow. It does not claim that an AI model has graded real student submissions.
 
-## Use Classroom Desk
+## How it works
 
-1. Sign in at [classroom.jarvis404.com](https://classroom.jarvis404.com/) with Google.
-2. Choose Student or Teacher. Student is selected by default; you can switch later in the dashboard.
-3. Connect Classroom when prompted and review the permissions Google displays.
-4. Connect Classroom Desk to ChatGPT if custom MCP connections are available in your workspace.
-5. Ask ChatGPT for information available to your connected Google account.
+```mermaid
+flowchart LR
+  U[Student or teacher] --> W[Classroom Desk web app]
+  W -->|Google sign-in and consent| G[Google OAuth]
+  C[ChatGPT] -->|OAuth-protected MCP requests| M[Classroom Desk MCP service]
+  M -->|Authorized user requests| A[Google Classroom APIs]
+  G --> W
+  A --> M
+  W --> P[Account preferences and session]
+  W --> D[Synthetic teacher assessment demo]
+  D -. DEMO only; no grade writeback .-> A
+```
 
-See the [ChatGPT connection guide](docs/CHATGPT_CONNECTION_GUIDE.md) for details. ChatGPT workspace plan and administrator settings can affect custom MCP availability.
+Google authorization, Classroom permissions, and the Student/Teacher dashboard preference are separate controls. The preference is not an authorization boundary.
 
-## Run locally
+## Get started
+
+### Use the hosted service
+
+1. Visit [classroom.jarvis404.com](https://classroom.jarvis404.com/) and sign in with Google.
+2. Choose Student or Teacher. Student is the default; the choice can be changed later.
+3. Connect Google Classroom and review the permissions shown by Google.
+4. Connect the canonical MCP endpoint, `https://classroom.jarvis404.com/mcp`, to ChatGPT where custom MCP connections are available.
+5. Ask ChatGPT about courses and work available to the connected Google account.
+
+See the [ChatGPT connection guide](docs/CHATGPT_CONNECTION_GUIDE.md) for setup and troubleshooting.
+
+### Run locally
 
 **Requirements:** Node.js 20 or later and npm.
 
@@ -59,7 +79,7 @@ cd Classroom-Desk
 npm ci
 ```
 
-Copy `.env.example` to `.env`, then configure a dedicated development Google OAuth client and local data store. Keep credentials in the ignored `.env` file or a secret manager; never use production credentials for local development.
+Copy `.env.example` to `.env` and configure a dedicated development OAuth client and local data store. Keep credentials in the ignored `.env` file or a secret manager. Never use production credentials or production data for local development.
 
 ```bash
 npm run check
@@ -68,24 +88,37 @@ npm run build
 npm run start:http
 ```
 
-The automated suite uses synthetic data. `npm run build:worker` is a Wrangler dry run and does not deploy. Read [Getting started](docs/GETTING_STARTED.md) and [Self-hosting](docs/SELF_HOSTING.md) before configuring a live Google account or deployment.
+Automated tests use synthetic data and do not require Google credentials. `npm run build:worker` performs a Wrangler dry run; it does not deploy. Before self-hosting, review the [self-hosting guide](docs/SELF_HOSTING.md) and every binding in the sanitized [`wrangler.example.jsonc`](wrangler.example.jsonc).
 
-## Configuration and security
+## Technology
 
-Use [.env.example](.env.example) as a list of configuration names and placeholders. Supply your own OAuth client, database, and encryption settings for the environment you operate. Do not commit `.env`, `.dev.vars`, OAuth client files, database backups, tokens, or secret-manager exports.
+- **TypeScript** with Node.js 20+ for local development
+- **Model Context Protocol SDK** for authenticated ChatGPT tool access
+- **Google OAuth** and Google Classroom APIs for user-authorized data
+- **Cloudflare Workers and D1** for the Worker deployment path
+- **Express** and PostgreSQL-compatible storage for supported local/server configurations
+- **Vitest** for automated tests
 
-Google sign-in, Google Classroom authorization, and the dashboard preference are separate. Classroom access is limited by the authenticated account and Google permissions. Synthetic assessment approval is not a real grade, and Google Classroom gradebook writeback is disabled.
+Deployment options have different bindings and storage requirements. Use only the configuration intended for the environment you operate.
 
-To report a vulnerability, follow the private reporting instructions in [SECURITY.md](SECURITY.md).
+## Security and privacy
+
+- Google sign-in and Classroom authorization are explicit and separate.
+- Classroom data access is scoped to the connected account and the permissions Google grants.
+- Selecting Teacher does not grant a Google role, scope, or course membership.
+- Teacher-only requests require server-side authorization and Google-confirmed course access.
+- Synthetic assessment records stay separate from real submissions; approval is local to the demo.
+- No Google Classroom gradebook writeback is available.
+- Never commit `.env`, `.dev.vars`, OAuth client files, database backups, tokens, cookies, secret-manager exports, or student records.
+
+For vulnerability reports, follow the private process in [SECURITY.md](SECURITY.md). Review the [notice](NOTICE.md) for project-brand and third-party material boundaries.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Please include focused tests for behavior changes and use synthetic data in issues, pull requests, and test fixtures. Do not attach student records, credentials, OAuth tokens, or production database exports.
+Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), use synthetic fixtures, and include focused tests for behavior changes. Do not include private Classroom content, production database exports, credentials, or OAuth tokens in issues or pull requests.
 
-## License
+## License and attribution
 
-Classroom Desk source is available under the [Apache License 2.0](LICENSE). Third-party dependencies and assets remain subject to their respective licenses. See [NOTICE.md](NOTICE.md) for attribution details.
+Project source and documentation are available under the [Apache License 2.0](LICENSE). Third-party dependencies and materials retain their own licenses. The Classroom Desk name, logo, hosted service, and third-party marks are not granted under the source license; see [`NOTICE.md`](NOTICE.md).
 
----
-
-Built by **Mohammed Fawzan Khan**. Classroom Desk is an independent project and is not affiliated with or endorsed by Google or OpenAI.
+Created by **Mohammed Fawzan Khan**. Classroom Desk is an independent project and is not affiliated with or endorsed by Google or OpenAI.
