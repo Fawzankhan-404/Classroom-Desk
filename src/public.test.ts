@@ -9,6 +9,7 @@ import { MCP_OFFLINE_SCOPE, MCP_SCOPE, PublicOAuthProvider, type PublicOAuthConf
 import { MemoryPublicAuthStore } from "./public/store.js";
 import { OAuth2Client } from "googleapis-common";
 import { mapCourse, mapMaterial, publicError } from "./public/mappers.js";
+import type { RuntimeConfig } from "./public/config.js";
 
 const authConfig: PublicOAuthConfig = {
   origin: new URL("http://127.0.0.1"), mcpResource: new URL("http://127.0.0.1/mcp"),
@@ -16,11 +17,20 @@ const authConfig: PublicOAuthConfig = {
 };
 const runtimeConfig = { ...authConfig, port: 0, production: false };
 
-async function setup(config: PublicOAuthConfig = authConfig) {
+async function setup(
+  config: PublicOAuthConfig = authConfig,
+  options: Parameters<typeof createPublicApp>[5] = {},
+  referralRewards = false,
+) {
   const store = new MemoryPublicAuthStore();
   let revoked: string[] = [];
   const provider = new PublicOAuthProvider(store, config, async (token) => { revoked.push(token); });
-  const { app } = createPublicApp({ ...runtimeConfig, ...config }, store, provider);
+  const appConfig: RuntimeConfig = {
+    ...runtimeConfig,
+    ...config,
+    saasFlags: { billingUi: false, teacherFeatures: false, teacherDraftWrites: false, referralRewards, enforceEntitlements: false },
+  };
+  const { app } = createPublicApp(appConfig, store, provider, undefined, undefined, options);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -134,6 +144,74 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(Array.from(png.slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
       expect(new DataView(png.buffer, png.byteOffset, png.byteLength).getUint32(16)).toBe(1200);
       expect(new DataView(png.buffer, png.byteOffset, png.byteLength).getUint32(20)).toBe(630);
+    } finally { await close(ctx.server); }
+  });
+  it("keeps signed-out referral views public-only and does not load private referral data", async () => {
+    const loadPricingReferral = vi.fn(async () => ({ state: "ready" as const, summary: { code: "CD-A1B2C3D4E5", total: 2, pending: 1, qualified: 1, rewards: 0, extraDays: 0, history: [] } }));
+    const ctx = await setup(authConfig, { loadPricingReferral }, true);
+    try {
+      const response = await fetch(`${ctx.origin}/pricing?ref=CD-112233AABB`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toContain("no-store");
+      expect(loadPricingReferral).not.toHaveBeenCalled();
+      expect(html).toContain("Sign in to Refer");
+      expect(html).toContain("/login?next=%2Fpricing%3Fref%3DCD-112233AABB%23refer-and-earn");
+      expect(html).not.toContain("CD-A1B2C3D4E5");
+      expect(html).not.toContain("personal-referral-link");
+    } finally { await close(ctx.server); }
+  });
+  it("renders a server-provided account view with a copy action and same-origin apply flow (fixture is not authentication)", async () => {
+    const loadPricingReferral = vi.fn(async (cookie: string | undefined) => {
+      expect(cookie).toContain("cd_session=");
+      return { state: "ready" as const, summary: { code: "CD-A1B2C3D4E5", total: 3, pending: 1, qualified: 2, rewards: 1, extraDays: 30, history: [{ createdAt: new Date("2026-10-01T00:00:00Z"), startsAt: new Date("2026-10-01T00:00:00Z"), expiresAt: new Date("2026-10-31T00:00:00Z"), revoked: false }] } };
+    });
+    const ctx = await setup(authConfig, { loadPricingReferral }, true);
+    try {
+      const response = await fetch(`${ctx.origin}/pricing?ref=CD-112233AABB`, { headers: { cookie: `cd_session=${"s".repeat(48)}` } });
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toContain("no-store");
+      expect(loadPricingReferral).toHaveBeenCalledOnce();
+      expect(html).toContain("Your personal referral link");
+      expect(html).toContain("http://127.0.0.1/pricing?ref=CD-A1B2C3D4E5");
+      expect(html).toContain('data-copy-referral=');
+      expect(html).toContain('data-referral-attribute');
+      expect(html).toContain("30-day Student access");
+      const script = await (await fetch(`${ctx.origin}/assets/connect.js`)).text();
+      expect(script).toContain("/api/referrals/attribute");
+      expect(script).toContain('credentials: "same-origin"');
+      expect(script).toContain("navigator.clipboard.writeText(text)");
+      expect(script).toContain('document.execCommand("copy")');
+      expect(html).toContain("Eligibility and restrictions");
+      expect(html).toContain("partial refunds do not currently reverse referral qualification");
+      expect(html).toContain('id="refer-and-earn"');
+    } finally { await close(ctx.server); }
+  });
+  it("does not invoke the private referral loader when rewards are disabled", async () => {
+    const loadPricingReferral = vi.fn();
+    const ctx = await setup(authConfig, { loadPricingReferral }, false);
+    try {
+      const response = await fetch(`${ctx.origin}/pricing`, { headers: { cookie: `cd_session=${"s".repeat(48)}` } });
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(loadPricingReferral).not.toHaveBeenCalled();
+      expect(html).toContain("Referral rewards are paused in this environment");
+      expect(html).not.toContain("personal-referral-link");
+    } finally { await close(ctx.server); }
+  });
+  it("shows a paused sign-in message without loading private data when signed out and rewards are disabled", async () => {
+    const loadPricingReferral = vi.fn();
+    const ctx = await setup(authConfig, { loadPricingReferral }, false);
+    try {
+      const response = await fetch(`${ctx.origin}/pricing`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(loadPricingReferral).not.toHaveBeenCalled();
+      expect(html).toContain("Referral rewards are paused in this environment");
+      expect(html).toContain("Sign in to Refer");
+      expect(html).not.toContain("personal-referral-link");
+      expect(html).not.toContain("CD-A1B2C3D4E5");
     } finally { await close(ctx.server); }
   });
   it("keeps homepage SEO metadata inside a valid head without CSS leakage", async () => {
