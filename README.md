@@ -117,6 +117,12 @@ For vulnerability reports, follow the private process in [SECURITY.md](SECURITY.
 
 Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), use synthetic fixtures, and include focused tests for behavior changes. Do not include private Classroom content, production database exports, credentials, or OAuth tokens in issues or pull requests.
 
+## Support Classroom Desk
+
+Classroom Desk remains free and open source under Apache-2.0. Contributions are optional and help with maintenance, hosting, infrastructure, documentation, and future development. They do not unlock functionality, purchase a hosted plan, or change account permissions. They are not charitable donations and no tax deduction is promised.
+
+Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for project information. Razorpay payment eligibility and a hosted support page are still awaiting account verification and owner approval; no checkout link or GitHub funding button is active yet. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for the remaining steps.
+
 ## License and attribution
 
 Project source and documentation are available under the [Apache License 2.0](LICENSE). Third-party dependencies and materials retain their own licenses. The Classroom Desk name, logo, hosted service, and third-party marks are not granted under the source license; see [`NOTICE.md`](NOTICE.md).
