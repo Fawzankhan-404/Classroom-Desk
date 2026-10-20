@@ -137,20 +137,40 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
     </article>
   `)));
   app.get("/support", (_req, res) => res.type("html").send(page("Support", "support", operator, support, config.origin, `
-    <article class="doc support-card">
-      <h1>Support</h1>
-      <p class="updated">Last updated: 3 October 2026.</p>
+    <article class="doc support-card" id="project-support" aria-labelledby="project-support-title">
+      <h1 id="project-support-title">Support Classroom Desk</h1>
+      <p class="updated">Optional support for a free, open-source project.</p>
+      <p>Contributions can help with maintenance, hosting, infrastructure, documentation, and future development. Support is voluntary; it does not unlock features, change account permissions, or purchase a hosted plan.</p>
+
+      <h2 id="suggested-amounts">Suggested one-time amounts</h2>
+      <div class="price-strip support-amounts" aria-labelledby="suggested-amounts">
+        <article><strong>₹99</strong><p>A small contribution</p></article>
+        <article><strong>₹299</strong><p>Support ongoing upkeep</p></article>
+        <article><strong>₹999</strong><p>Support future development</p></article>
+      </div>
+      <div class="support-custom-amount">
+        <label for="support-custom-amount">Or enter a custom amount (₹)</label>
+        <input id="support-custom-amount" type="number" inputmode="decimal" placeholder="Available when checkout is approved" disabled aria-disabled="true" aria-describedby="support-custom-amount-status">
+      </div>
+      <p class="fine-print" id="support-custom-amount-status">Razorpay’s Donation Payment Button supports a supporter-chosen amount. Merchant eligibility and configuration are not verified, so this field stays disabled until an approved checkout is available.</p>
+      <p class="fine-print">These are suggested amounts only. A secure checkout is not available yet while payment eligibility and page details are verified and awaiting owner approval.</p>
+      <p><button class="button secondary" type="button" disabled aria-disabled="true" aria-describedby="support-checkout-status">Checkout is not available yet</button></p>
+      <p class="fine-print" id="support-checkout-status">No payment will be collected from this page. A verified Razorpay link will be added only after account eligibility is confirmed and the exact page is approved.</p>
+
+      <h2>Questions</h2>
+      <div class="faq-list">
+        <details><summary>Is support required to use Classroom Desk?</summary><p>No. Support is optional. The project remains free and open source without a contribution.</p></details>
+        <details><summary>Does a contribution unlock features?</summary><p>No. Contributions do not unlock functionality, change permissions, or purchase hosted-plan access.</p></details>
+        <details><summary>How will contributions help?</summary><p>They can support project maintenance, hosting, infrastructure, documentation, and future development.</p></details>
+      </div>
+
+      <h2>Need help?</h2>
       <p>For connection problems, privacy questions, or deletion requests, contact <a href="${mailto}">${support}</a>.</p>
-      <section class="panel" id="project-support" aria-labelledby="project-support-title">
-        <h2 id="project-support-title">Support Classroom Desk</h2>
-        <p>The open-source project remains free. Voluntary donations help with maintenance, hosting, infrastructure, documentation, and future development; they do not unlock functionality, purchase a hosted plan, or change account permissions.</p>
-        <p>Recurring GitHub Sponsors support and optional one-time Buy Me a Coffee contributions will be linked here when the owner's accounts are active and verified. No donation payment links are configured yet.</p>
-      </section>
-      <div class="panel">
-        <h2>Include</h2>
+      <div class="panel ok">
+        <h2>When contacting support</h2>
         <ul><li>What you were trying to do</li><li>The page or ChatGPT step where the problem appeared</li><li>Any visible error message, without private Classroom content</li></ul>
       </div>
-      <p>Do not send OAuth tokens, passwords, authorization codes, screenshots containing private Classroom data, or Google account secrets.</p>
+      <p class="fine-print">Do not send OAuth tokens, passwords, authorization codes, screenshots containing private Classroom data, or Google account secrets.</p>
     </article>
   `)));
   app.get("/refunds", (_req, res) => res.type("html").send(page("Refund and cancellation policy", "refunds", operator, support, config.origin, `
@@ -583,16 +603,16 @@ function page(title: string, active: string, operator: string, support: string, 
 ${title === "Classroom Desk" ? '<link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/5c3ec08f-2dbf-4c0a-8588-f6106a789443.webp" media="(min-width:768px)" fetchpriority="high"><link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/0f4926a4-e660-4df2-9195-2bfb3e341bdd.webp" media="(max-width:767px)" fetchpriority="high">' : ""}
 <link rel="icon" type="image/svg+xml" href="/assets/classroom-desk-favicon.svg">
 <link rel="apple-touch-icon" href="/assets/classroom-desk-logo.svg">
-<style>${siteStyles()}${designStyles()}.numbered-steps b{color:#176b4b!important}.site-header .brand,.desktop-nav a,.header-actions a{min-height:44px;display:inline-flex;align-items:center}.header-cta{min-height:44px!important}.modal-header .eyebrow{color:#b8f3d5}.close-button{min-width:44px;min-height:44px;flex-shrink:0}.copy-chip button{min-width:44px;min-height:44px}@media(max-width:767px) and (max-height:900px){.modal-shell .guide-visual{display:none}}</style>
+<style>${siteStyles()}${designStyles()}.numbered-steps b{color:#176b4b!important}.site-header .brand,.desktop-nav a,.header-actions a{min-height:44px;display:inline-flex;align-items:center}.header-cta{min-height:44px!important}.modal-header .eyebrow{color:#b8f3d5}.close-button{min-width:44px;min-height:44px;flex-shrink:0}.copy-chip button{min-width:44px;min-height:44px}@media(max-width:767px) and (max-height:900px){.modal-shell .guide-visual{display:none}}${active === "support" ? ".support-amounts article{min-height:0}.support-custom-amount{display:grid;gap:.5rem;max-width:420px;margin:1rem 0}.support-custom-amount label{font-weight:750;color:var(--deep)}.support-custom-amount input{min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;padding:.8rem;font:inherit;color:var(--deep);background:var(--soft)}.support-custom-amount input:disabled{opacity:.65;cursor:not-allowed}" : ""}</style>
 </head>
 <body class="${compact ? "compact" : ""}${title === "Classroom Desk" ? " home-page" : ""}">
 <a class="skip-link" href="#main-content">Skip to content</a>
 <header class="site-header">
   <a class="brand" href="/" aria-label="Classroom Desk home">${logoMark()}<span>Classroom Desk</span></a>
-  <nav class="desktop-nav" aria-label="Primary">${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/pricing", "pricing", "Pricing")}</nav>
+  <nav class="desktop-nav" aria-label="Primary">${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/pricing", "pricing", "Pricing")}${nav("/support", "support", '<span class="support-heart" aria-hidden="true">♡</span> Support')}</nav>
   <div class="header-actions"><a class="nav-signin" href="/login">Sign in</a><button class="button header-cta" type="button" data-connect-open>Connect to ChatGPT</button><button class="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu">Menu</button></div>
 </header>
-<nav id="mobile-menu" class="mobile-menu" aria-label="Mobile navigation" hidden>${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/pricing", "pricing", "Pricing")}<a href="/login">Sign in</a><button class="button" type="button" data-connect-open>Connect to ChatGPT</button></nav>
+<nav id="mobile-menu" class="mobile-menu" aria-label="Mobile navigation" hidden>${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/pricing", "pricing", "Pricing")}${nav("/support", "support", '<span class="support-heart" aria-hidden="true">♡</span> Support')}<a href="/login">Sign in</a><button class="button" type="button" data-connect-open>Connect to ChatGPT</button></nav>
 <main id="main-content">${body}</main>
 <footer class="site-footer">
   <div class="footer-grid"><div><a class="brand footer-brand" href="/">${logoMark()}<span>Classroom Desk</span></a><p>Ask ChatGPT about your own authorized Google Classroom.</p></div><div><h2>Product</h2><a href="/#features">Features</a><a href="/#how-it-works">How it works</a><a href="/pricing">Pricing</a><a href="/connect">Connect</a></div><div><h2>Legal</h2><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refunds">Refunds and cancellation</a><a href="/support">Support</a>${projectSupportLink}</div><div><h2>Contact</h2><a href="mailto:${support}">${support}</a><p class="developer-credit">Built by <a href="https://fawzankhan-404.github.io/" target="_blank" rel="noopener noreferrer">${operator}</a>, an independent developer</p></div></div>
@@ -614,7 +634,7 @@ function designStyles() {
 body{font-family:"Segoe UI",Arial,sans-serif;letter-spacing:-.012em}
 .site-header{max-width:1200px;padding:1.15rem 1.6rem;border-bottom:1px solid var(--line)}
 .brand{font-size:1.02rem;letter-spacing:-.03em}.logo{width:44px;height:44px;object-fit:cover;border-radius:11px;border:1px solid var(--line);background:white}
-.site-header nav a{border-radius:5px}.site-header nav a[aria-current=page],.site-header nav a:hover{background:transparent;box-shadow:inset 0 -2px var(--green)}
+.site-header nav a{border-radius:5px}.site-header nav a[aria-current=page],.site-header nav a:hover{background:transparent;box-shadow:inset 0 -2px var(--green)}.support-heart{color:var(--green);font-size:1.1em;line-height:1;margin-right:.3rem}
 main{max-width:1200px;padding:0 1.6rem 4.5rem}.hero{grid-template-columns:minmax(0,1.2fr) minmax(290px,.8fr);gap:clamp(2rem,6vw,6rem);padding:clamp(3rem,8vw,7rem) 0 3rem;align-items:center}
 .hero h1{font-size:clamp(3.3rem,7.6vw,7.2rem);line-height:.92;letter-spacing:-.072em;max-width:750px;margin:1.6rem 0 1.4rem;font-weight:780}
 .hero-copy>p:not(.lede):not(.trust-line){font-size:1.1rem;line-height:1.65;max-width:580px}.lede{font-size:clamp(1.4rem,2.8vw,2.15rem);letter-spacing:-.035em;font-weight:580}

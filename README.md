@@ -119,9 +119,9 @@ Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), use 
 
 ## Support Classroom Desk
 
-Classroom Desk's source remains free and open source under Apache-2.0. The hosted service may offer separate plans; voluntary donations do not purchase a plan, unlock functionality, or change account permissions. Support helps with project maintenance, hosting, infrastructure, documentation, and future development.
+Classroom Desk remains free and open source under Apache-2.0. Contributions are optional and help with maintenance, hosting, infrastructure, documentation, and future development. They do not unlock functionality, purchase a hosted plan, or change account permissions. They are not charitable donations and no tax deduction is promised.
 
-The intended options are recurring support through GitHub Sponsors and optional one-time contributions through Buy Me a Coffee. Those owner accounts are not yet verified as active, so payment links and a GitHub funding button are intentionally omitted. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for what needs to be configured.
+Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for project information. Razorpay payment eligibility and a hosted support page are still awaiting account verification and owner approval; no checkout link or GitHub funding button is active yet. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for the remaining steps.
 
 ## License and attribution
 

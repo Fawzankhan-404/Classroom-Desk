@@ -322,27 +322,50 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain("Refunds and disputes");
     } finally { await close(ctx.server); }
   });
-  it("shows the non-intrusive project support information and footer link without payment URLs", async () => {
+  it("uses the shared site design for support and keeps unverified checkout disabled", async () => {
     const ctx = await setup();
     try {
       const response = await fetch(`${ctx.origin}/support`);
       const html = await response.text();
       expect(response.status).toBe(200);
-      expect(html).toContain('id="project-support"');
-      expect(html).toContain("Support the Project");
+      expect(html).toContain('<article class="doc support-card" id="project-support"');
+      expect(html).toContain("Support Classroom Desk");
+      expect(html).toContain("₹99");
+      expect(html).toContain("₹299");
+      expect(html).toContain("₹999");
+      expect(html).toContain('id="support-custom-amount" type="number"');
+      expect(html).toContain('disabled aria-disabled="true" aria-describedby="support-custom-amount-status"');
+      expect(html).toContain("Razorpay’s Donation Payment Button supports a supporter-chosen amount");
       expect(html).toContain("maintenance, hosting, infrastructure, documentation, and future development");
-      expect(html).toContain("do not unlock functionality");
-      expect(html).toContain("No donation payment links are configured yet.");
+      expect(html).toContain("it does not unlock features, change account permissions, or purchase a hosted plan");
+      expect(html).toContain('class="button secondary" type="button" disabled aria-disabled="true"');
+      expect(html).toContain("No payment will be collected from this page");
       expect(html).not.toContain("buymeacoffee.com");
       expect(html).not.toContain("github.com/sponsors/");
+      expect(html).not.toContain("href=\"https://rzp.io/");
+      expect(html).not.toContain("name=\"support-amount\"");
+      expect(html).toContain("--paper:");
+      expect(html).toContain(".doc{");
+      expect(html).toContain(".price-strip");
+      expect(html).not.toContain("--support-bg:");
+      expect(html).not.toContain("class=\"support-page\"");
+      expect(html).not.toContain("sponsorship-hero");
+      expect(html).toContain("Do not send OAuth tokens, passwords, authorization codes");
       const homeResponse = await fetch(ctx.origin);
       const homeHtml = await homeResponse.text();
       expect(homeResponse.status).toBe(200);
       expect(homeHtml).toContain('href="/support#project-support">Support the Project</a>');
+      expect(homeHtml.match(/class="support-heart"/g) ?? []).toHaveLength(2);
+      expect(homeHtml).toContain('<span class="support-heart" aria-hidden="true">♡</span> Support</a>');
+      expect(homeHtml).toContain('aria-label="Primary"');
+      expect(homeHtml).toContain('aria-label="Mobile navigation"');
+      expect(html.match(/class="support-heart"/g) ?? []).toHaveLength(2);
+      expect(html).toContain('<a aria-current="page" href="/support"><span class="support-heart" aria-hidden="true">♡</span> Support</a>');
       const connectResponse = await fetch(`${ctx.origin}/connect`);
       const connectHtml = await connectResponse.text();
       expect(connectResponse.status).toBe(200);
       expect(connectHtml).not.toContain('href="/support#project-support">Support the Project</a>');
+      expect(connectHtml).not.toContain("Support Classroom Desk</h1>");
     } finally { await close(ctx.server); }
   });
   it("rejects unauthenticated, malformed, and expired bearer tokens", async () => {
