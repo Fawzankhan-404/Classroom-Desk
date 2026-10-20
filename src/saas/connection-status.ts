@@ -2,6 +2,12 @@ import type { PublicOAuthProvider } from "../public/oauth.js";
 import type express from "express";
 import { internalTokenMatches } from "./internal-link.js";
 export type ConnectionStatus = "not_linked"|"authorized"|"reauthorization_required"|"unavailable";
+export function classifyGoogleConnectionFailure(error: unknown): "reauthorization_required" | "unavailable" {
+  const message = error instanceof Error ? error.message : "";
+  return /Google grant unavailable|invalid_grant|oauth_refresh_token_missing|refresh_token_missing/i.test(message)
+    ? "reauthorization_required"
+    : "unavailable";
+}
 export function registerInternalConnectionStatus(app:express.Express,provider:PublicOAuthProvider,secret:string):void {
   app.post('/internal/account/connection',async(req,res)=>{
     if(!internalTokenMatches(req.get('x-classroom-internal-token')??'',secret))return res.status(404).end();
@@ -12,9 +18,7 @@ export function registerInternalConnectionStatus(app:express.Express,provider:Pu
       const token=await auth.getAccessToken();
       return res.json({status:token.token?'authorized':'reauthorization_required'});
     }catch(error){
-      const message=error instanceof Error?error.message:'';
-      const status=message==='Google grant unavailable'||message.includes('invalid_grant')?'reauthorization_required':'unavailable';
-      return res.json({status});
+      return res.json({status:classifyGoogleConnectionFailure(error)});
     }
   });
 }
