@@ -11,6 +11,7 @@ import { reconcileRecentPayments } from "./reconciliation.js";
 import { invoicePaidThrough, RazorpayClient, trialOrderReceipt, type RazorpayPayment, type RazorpaySubscription } from "./razorpay-client.js";
 import { verifyCheckoutSignature, verifySubscriptionSignature } from "./razorpay.js";
 import { renderSubscription } from "./account-portal.js";
+import { CAMPAIGN_END_ISO } from "./campaign.js";
 
 const secret = "synthetic-billing-secret";
 const now = new Date();
@@ -30,21 +31,21 @@ describe("billing provider boundaries (all fetches mocked)", () => {
   it("does not offer a second trial while the first trial is active", () => {
     const view = { user: { id:"00000000-0000-0000-0000-000000000001", googleSubject:"s", email:"reviewer@example.invalid", displayName:"Reviewer", role:"student", status:"active", createdAt:now, lastLoginAt:now }, entitlement:{allowed:true,reason:"active_trial",plan:"student",expiresAt:new Date("2026-10-18T06:09:57.000Z")}, history:{trialStatus:"active",trialExpiresAt:new Date("2026-10-18T06:09:57.000Z"),subscriptions:[],referralsMade:0}, payments:[], linked:false, deletionRequested:false } as never;
     const page = renderSubscription(view, true);
-    expect(page).toContain("Trial already active");
+    expect(page).toContain("Trial active");
     expect(page).not.toContain('data-checkout="trial"');
   });
 
   it("hides plan and trial offers when billing is disabled and keeps them in enabled environments", () => {
     const view = { user: { id:"00000000-0000-0000-0000-000000000001", googleSubject:"s", email:"reviewer@example.invalid", displayName:"Reviewer", role:"student", status:"active", createdAt:now, lastLoginAt:now }, entitlement:{allowed:false,reason:"expired",plan:null,expiresAt:null}, history:{trialStatus:"eligible",trialExpiresAt:null,subscriptions:[],referralsMade:0}, payments:[], linked:false, deletionRequested:false } as never;
     const stagingPage = renderSubscription(view, false);
-    expect(stagingPage).toContain("Checkout is currently unavailable");
-    expect(stagingPage).not.toContain("Available plans");
+    expect(stagingPage).toContain("Checkout is unavailable right now");
+    expect(stagingPage).not.toContain("Plan information");
     expect(stagingPage).not.toContain("₹99/month");
     expect(stagingPage).not.toContain("₹199/month");
     expect(stagingPage).not.toContain("₹9 once for 168 hours");
     expect(stagingPage).not.toContain("data-checkout=");
-    const productionPage = renderSubscription(view, true);
-    expect(productionPage).toContain("Available plans");
+    const productionPage = renderSubscription(view, true, true);
+    expect(productionPage).toContain("Plan information");
     expect(productionPage).toContain("₹99/month");
     expect(productionPage).toContain("₹199/month");
     expect(productionPage).toContain("₹9 once for 168 hours");
@@ -256,13 +257,14 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
 
   it("resumes an owned open order and expires a provider-closed attempt without granting access", async () => {
     const owner = await user("resume-owner");
-    await store.beginTrialPurchase(owner.id, now);
+    const attemptStartedAt = new Date(Date.parse(CAMPAIGN_END_ISO) - 32 * 60 * 1000);
+    await store.beginTrialPurchase(owner.id, attemptStartedAt);
     await store.recordPendingTrialOrder(owner.id,"order_owned",900,"INR");
     const send = await harness(owner.id,{getOrder:async()=>order(owner.id,"created"),getOrderPayments:async()=>({count:0,items:[]})});
     expect(await send("/api/billing/trial/resume")).toMatchObject({status:200,data:{orderId:"order_owned",resumed:true}});
     const closed = await harness(owner.id,{getOrder:async()=>order(owner.id,"closed"),getOrderPayments:async()=>({count:0,items:[]})});
     expect(await closed("/api/billing/trial/resume")).toMatchObject({status:409,data:{error:"trial_attempt_expired"}});
-    expect(await store.beginTrialPurchase(owner.id, new Date(now.getTime() + 31 * 60 * 1000))).toBe(true);
+    expect(await store.beginTrialPurchase(owner.id, new Date(attemptStartedAt.getTime() + 31 * 60 * 1000))).toBe(true);
     expect((await store.entitlement(owner.id)).allowed).toBe(false);
   });
 

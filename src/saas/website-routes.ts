@@ -5,7 +5,7 @@ import { buildWebsiteGoogleUrl, completeWebsiteGoogleLogin, createLoginState, ty
 import type { SaaSStore } from "./store.js";
 import { paymentIsFullyRefunded, paymentMatchesSubscriptionCycle, trialOrderReceipt, validProviderPayment, withProviderTimeout, type RazorpayClient } from "./razorpay-client.js";
 import { requireSameOrigin } from "./csrf.js";
-import { accountScript, renderProfile, renderSubscription, renderReferrals, renderConnection } from "./account-portal.js";
+import { accountScript, html, renderProfile, renderSubscription, renderReferrals, renderConnection } from "./account-portal.js";
 import type {ConnectionStatus} from "./connection-status.js";
 import { verifyCheckoutSignature, verifySubscriptionSignature } from "./razorpay.js";
 import { parseRazorpayEvent } from "./billing-events.js";
@@ -86,20 +86,20 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   const pending = new Map<string, ReturnType<typeof createLoginState> & { returnTo: string }>();
   app.use("/api", requireSameOrigin);
   const requireTeacherMutationAccount = async (req: express.Request, res: express.Response): Promise<string | undefined> => {
-    if (options.teacherDraftWritesEnabled !== true) { res.status(503).type("html").send(message("Teacher draft creation is unavailable", "Teacher coursework draft creation is not enabled in this environment.")); return undefined; }
+    if (options.teacherDraftWritesEnabled !== true) { res.status(503).type("html").send(message("Teacher draft creation is unavailable", "This feature is not available right now.")); return undefined; }
     const session = await currentSession(req.get("cookie"), options.store);
     if (!session) { res.status(401).type("html").send(message("Sign in required", "Sign in before changing coursework drafts.")); return undefined; }
     const user = await options.store.getUser(session.userId);
     const mcpUserId = await options.store.getClassroomMcpUserId(session.userId);
-    if (!user || user.status !== "active" || !mcpUserId) { res.status(409).type("html").send(message("Reconnect the same Google account", "Coursework draft creation requires a linked Classroom connection for this signed-in account.")); return undefined; }
+    if (!user || user.status !== "active" || !mcpUserId) { res.status(409).type("html").send(message("Reconnect Classroom Desk", "Connect the Google account used for this signed-in account, then try again.")); return undefined; }
     try {
       const entitlement = await options.store.entitlement(user.id);
-      if (!entitlement.allowed || entitlement.plan !== "teacher") { res.status(403).type("html").send(message("Teacher plan required", "An active Teacher entitlement is required before changing coursework drafts.")); return undefined; }
+      if (!entitlement.allowed || entitlement.plan !== "teacher") { res.status(403).type("html").send(message("Teacher access required", "An active Teacher plan is required before changing coursework drafts.")); return undefined; }
     } catch { res.status(503).type("html").send(message("Teacher access is unavailable", "Account access could not be verified. No Classroom changes were made.")); return undefined; }
     return user.id;
   };
   app.get("/login", async (req, res) => {
-    if (!options.oauth) return res.status(503).type("html").send(message("Website sign-in is not configured yet.", "Set WEBSITE_GOOGLE_OAUTH_CLIENT_ID and WEBSITE_GOOGLE_OAUTH_CLIENT_SECRET, then restart the Worker."));
+    if (!options.oauth) return res.status(503).type("html").send(message("Google sign-in is unavailable", "Try again later or contact support."));
     const login = createLoginState();
     const returnTo = safeWebsiteReturnPath(req.query.next);
     if (!options.oauthStateStore) pending.set(login.state, { ...login, returnTo });
@@ -149,7 +149,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
       let currentEntitlement;
       try { currentEntitlement = await options.store.entitlement(user.id); }
       catch { return res.status(503).type("html").send(message("Teacher access is unavailable", "Account access could not be verified. No expanded permission was stored.")); }
-      if (!currentEntitlement.allowed || currentEntitlement.plan !== "teacher") return res.status(403).type("html").send(message("Teacher access is unavailable", "An active Teacher entitlement is required. No expanded permission was stored."));
+      if (!currentEntitlement.allowed || currentEntitlement.plan !== "teacher") return res.status(403).type("html").send(message("Teacher access is unavailable", "An active Teacher plan is required. No additional Google permission was saved."));
       try {
         await options.completeTeacherWriteAuthorization({ mcpUserId: teacherWriteFlow.mcpUserId, expectedGoogleSubject: user.googleSubject, code, verifier: teacherWriteFlow.verifier, nonce: teacherWriteFlow.nonce });
         res.setHeader("Cache-Control", "no-store");
@@ -322,7 +322,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   app.post("/api/classroom/link/start", async (req, res) => {
     const session = await currentSession(req.get("cookie"), options.store);
     if (!session) return res.status(401).json({ error: "login_required" });
-    try { const link = await options.store.linking.start(session.userId); return res.status(201).json({ code: link.code, expiresAt: link.expiresAt.toISOString(), instruction: "In your authenticated Classroom Desk MCP connection, use link_website_account with this one-time code." }); }
+    try { const link = await options.store.linking.start(session.userId); return res.status(201).json({ code: link.code, expiresAt: link.expiresAt.toISOString(), instruction: "Use this one-time code with your older Classroom Desk connection in ChatGPT. It does not grant Google access." }); }
     catch { return res.status(503).json({ error: "link_unavailable" }); }
   });
   app.post("/api/account/deletion-request", async (req, res) => {
@@ -354,14 +354,14 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   app.post("/api/teacher/authorization", async (req, res) => {
     const session = await currentSession(req.get("cookie"), options.store);
     if (!session) return res.status(401).type("html").send(message("Sign in required", "Sign in before connecting teacher access."));
-    if (!options.beginTeacherAuthorization || !options.oauthStateStore) return res.status(503).type("html").send(message("Teacher authorization is unavailable", "Google teacher consent is not configured for this environment."));
+    if (!options.beginTeacherAuthorization || !options.oauthStateStore) return res.status(503).type("html").send(message("Teacher access is unavailable", "Try again later or contact support."));
     const user = await options.store.getUser(session.userId);
     const mcpUserId = await options.store.getClassroomMcpUserId(session.userId);
-    if (!user || user.status !== "active" || !mcpUserId) return res.status(409).type("html").send(message("Reconnect the same Google account", "Teacher access requires a linked Classroom connection for this signed-in account. Reconnect Classroom Desk with this Google account, then try again."));
+    if (!user || user.status !== "active" || !mcpUserId) return res.status(409).type("html").send(message("Reconnect Classroom Desk", "Connect the Google account used for this signed-in account, then try again."));
     let entitlement;
     try { entitlement = await options.store.entitlement(user.id); }
     catch { return res.status(503).type("html").send(message("Teacher access is unavailable", "Account access could not be verified. No additional Google permissions were requested.")); }
-    if (!entitlement.allowed || entitlement.plan !== "teacher") return res.status(403).type("html").send(message("Teacher plan required", "A verified Teacher entitlement is required before requesting roster or submission permissions. Your Google authorization was not changed."));
+    if (!entitlement.allowed || entitlement.plan !== "teacher") return res.status(403).type("html").send(message("Teacher access required", "An active Teacher plan is required before requesting access to rosters or submissions. Your Google access was not changed."));
     const state = randomBytes(24).toString("base64url");
     const verifier = randomBytes(32).toString("base64url");
     const nonce = randomBytes(32).toString("base64url");
@@ -380,14 +380,14 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   app.post("/api/teacher/authorization/write", async (req, res) => {
     const session = await currentSession(req.get("cookie"), options.store);
     if (!session) return res.status(401).type("html").send(message("Sign in required", "Sign in before enabling draft coursework creation."));
-    if (options.teacherDraftWritesEnabled !== true || !options.beginTeacherWriteAuthorization || !options.oauthStateStore) return res.status(503).type("html").send(message("Draft creation is unavailable", "Google draft coursework authorization is not enabled in this environment."));
+    if (options.teacherDraftWritesEnabled !== true || !options.beginTeacherWriteAuthorization || !options.oauthStateStore) return res.status(503).type("html").send(message("Draft creation is unavailable", "This feature is not available right now."));
     const user = await options.store.getUser(session.userId);
     const mcpUserId = await options.store.getClassroomMcpUserId(session.userId);
-    if (!user || user.status !== "active" || !mcpUserId) return res.status(409).type("html").send(message("Reconnect the same Google account", "Draft creation requires a linked Classroom connection for this signed-in account."));
+    if (!user || user.status !== "active" || !mcpUserId) return res.status(409).type("html").send(message("Reconnect Classroom Desk", "Connect the Google account used for this signed-in account, then try again."));
     let entitlement;
     try { entitlement = await options.store.entitlement(user.id); }
     catch { return res.status(503).type("html").send(message("Teacher access is unavailable", "Account access could not be verified. No additional Google permissions were requested.")); }
-    if (!entitlement.allowed || entitlement.plan !== "teacher") return res.status(403).type("html").send(message("Teacher plan required", "A verified Teacher entitlement is required before requesting coursework-management permission."));
+    if (!entitlement.allowed || entitlement.plan !== "teacher") return res.status(403).type("html").send(message("Teacher access required", "An active Teacher plan is required before requesting access to create unpublished drafts."));
     const state = randomBytes(24).toString("base64url");
     const verifier = randomBytes(32).toString("base64url");
     const nonce = randomBytes(32).toString("base64url");
@@ -462,7 +462,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
     try { return res.type("html").send(renderTeacherSubmissions(res.locals.accountUser, await options.loadTeacherSubmissions(res.locals.accountUser.id, String(req.params.courseId), String(req.params.courseWorkId)))); }
     catch (error) { const failure = teacherReadFailure(error, "submissions"); return res.status(failure.status).type("html").send(message(failure.title, failure.detail)); }
   });
-  app.get("/app/subscription", async (_req, res) => res.type("html").send(renderSubscription(await options.store.accountOverview(res.locals.accountUser), options.billingEnabled === true)));
+  app.get("/app/subscription", async (_req, res) => res.type("html").send(renderSubscription(await options.store.accountOverview(res.locals.accountUser), options.billingEnabled === true, options.teacherFeaturesEnabled === true)));
   app.get("/app/referrals", async (req, res) => {
     const user = res.locals.accountUser;
     const summary = await options.store.referrals.summary(user.id, { createCode: options.referralRewardsEnabled === true });
@@ -530,4 +530,4 @@ async function currentSession(cookie: string | undefined, store: SaaSStore) {
   return user?.status === "active" ? session : null;
 }
 
-function message(title: string, detail: string): string { return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Classroom Desk</title><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:24px;color:#202923"><p style="color:#207a55;font-weight:700">Classroom Desk</p><h1>${title}</h1><p>${detail}</p><a href="/">Return home</a></body></html>`; }
+function message(title: string, detail: string): string { return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex, nofollow"><title>${html(title)} · Classroom Desk</title></head><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:24px;color:#202923"><p style="color:#207a55;font-weight:700">Classroom Desk</p><h1>${html(title)}</h1><p>${html(detail)}</p><a href="/">Return home</a></body></html>`; }

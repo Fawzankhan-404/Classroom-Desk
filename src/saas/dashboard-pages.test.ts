@@ -14,17 +14,18 @@ describe("account dashboard pages", () => {
     expect(html).toContain("dashboard only");
   });
 
-  it("shows unknown totals and partial-data messages when Google reads fail", () => {
+  it("shows unavailable totals and explains partial Google data in plain language", () => {
     const html = renderStudentDashboard(user, { state: "connected", overview: {
       generatedAt: "2026-10-18T10:00:00Z",
       summary: { courses: 1, assignments: null, missing: null, turnedIn: null, returned: null },
       availability: { courseworkComplete: false, submissionsComplete: false, announcementsComplete: true, materialsComplete: true, topicsComplete: true },
       courses: [{ id: "course-1", name: "Biology" }], assignments: [{ title: "Lab", courseName: "Biology", submissionState: "UNKNOWN", missing: null, late: null, dueAt: null, assignmentUrl: null }], announcements: [], courseMaterials: [],
     } });
-    expect(html).toContain("Unknown");
-    expect(html).toContain("assignment total is unknown");
-    expect(html).toContain("status and missing totals are unknown");
-    expect(html).toContain("UNKNOWN");
+    expect(html).toContain("Not available");
+    expect(html).toContain("assignment count is not available");
+    expect(html).toContain("missing and turned-in counts are not available");
+    expect(html).toContain("Status not available");
+    expect(html).not.toContain("UNKNOWN");
     expect(html).not.toContain("Currently missing</span></article><article><strong>0");
   });
 
@@ -35,7 +36,7 @@ describe("account dashboard pages", () => {
       availability: { courseworkComplete: false, submissionsComplete: true, announcementsComplete: true, materialsComplete: true, topicsComplete: true },
       courses: [{ id: "course-1", name: "Biology" }], assignments: [], announcements: [], courseMaterials: [],
     } });
-    expect(html).toContain("Assignment results are incomplete");
+    expect(html).toContain("We could not retrieve all assignment results from Google");
     expect(html).not.toContain("Google returned no matching published assignments");
   });
 
@@ -49,8 +50,8 @@ describe("account dashboard pages", () => {
       announcements: [], courseMaterials: [],
     } });
     expect(html).toContain("Due: 3 Jan 2026</p>");
-    expect(html).toContain("Missing status unknown");
-    expect(html).toContain("Not late");
+    expect(html).toContain("Missing status not available");
+    expect(html).toContain("Not marked late");
     expect(html).not.toContain("Due: 3 Jan 2026, 00:00");
   });
 
@@ -61,11 +62,29 @@ describe("account dashboard pages", () => {
       availability: { coursesComplete: false, courseworkComplete: false, submissionsComplete: false, announcementsComplete: true, materialsComplete: true, topicsComplete: true, assignmentResultsComplete: false, announcementResultsComplete: false, materialResultsComplete: false },
       courses: [], assignments: [], announcements: [], courseMaterials: [],
     } });
-    expect(html).toContain("Course results are incomplete");
-    expect(html).toContain("The assignment display limit was reached");
-    expect(html).toContain("The announcement display limit was reached");
+    expect(html).toContain("We could not retrieve every course from Google");
+    expect(html).toContain("We could not retrieve every matching assignment from Google");
+    expect(html).toContain("We could not retrieve every announcement from Google");
     expect(html).not.toContain("Google returned no active courses");
     expect(html).not.toContain("Google returned no matching published assignments");
+  });
+
+  it("translates Google submission states without showing raw API enums", () => {
+    const html = renderTeacherSubmissions(user, {
+      courseId: "course-1", courseWorkId: "work-1", title: "Lab", maxPoints: 10,
+      gradebookWritebackEnabled: false, moreAvailable: false, studentRosterMoreAvailable: false,
+      submissions: [
+        { studentName: "A", state: "NEW", late: false, assignedGrade: null, updateTime: null },
+        { studentName: "B", state: "CREATED", late: false, assignedGrade: null, updateTime: null },
+        { studentName: "C", state: "TURNED_IN", late: false, assignedGrade: null, updateTime: null },
+        { studentName: "D", state: "RETURNED", late: false, assignedGrade: null, updateTime: null },
+        { studentName: "E", state: "RECLAIMED_BY_STUDENT", late: false, assignedGrade: null, updateTime: null },
+        { studentName: "F", state: "FUTURE_GOOGLE_STATE", late: false, assignedGrade: null, updateTime: null },
+      ],
+    });
+    for (const status of ["Not submitted", "In progress", "Turned in", "Returned", "Returned to student", "Status not available"]) expect(html).toContain(status);
+    expect(html).not.toContain("RECLAIMED_BY_STUDENT");
+    expect(html).not.toContain("FUTURE_GOOGLE_STATE");
   });
 
   it("keeps teacher data behind explicit authorization and never claims dashboard selection grants roles", () => {
@@ -107,7 +126,7 @@ describe("account dashboard pages", () => {
     });
     expect(html).toContain('action="/api/teacher/authorization/write"');
     expect(html).toContain("Creating or updating an unpublished draft needs a separate Google permission");
-    expect(html).toContain("Google describes this scope as allowing coursework and grade management");
+    expect(html).toContain("This permission can also manage grades");
     expect(html).not.toContain("uses it only to create unpublished assignment drafts");
     expect(html).toContain("Review Google permission for draft management");
     expect(html).not.toContain('action="/api/teacher/courses/course-1/coursework/drafts"');
@@ -159,7 +178,7 @@ describe("account dashboard pages", () => {
       submissions: [{ studentName: null, state: "UNKNOWN", late: false, lateStatus: "UNKNOWN", assignedGrade: null, gradeStatus: "UNKNOWN", updateTime: null }],
       moreAvailable: false, submissionPagesComplete: true, studentRosterMoreAvailable: false, studentRosterPagesComplete: true,
     });
-    expect(rows).toContain("<td>Unknown</td><td>Unknown</td>");
+    expect(rows).toContain("<td>Status not available</td><td>Not available</td>");
     expect(rows).not.toContain("<td>No</td><td>Unscored</td>");
 
     const empty = renderTeacherSubmissions(user, {
@@ -167,7 +186,7 @@ describe("account dashboard pages", () => {
       gradebookWritebackEnabled: false, submissions: [], moreAvailable: false, submissionPagesComplete: false,
       studentRosterMoreAvailable: false, studentRosterPagesComplete: true,
     });
-    expect(empty).toContain("Submission results are incomplete");
+    expect(empty).toContain("We could not retrieve all submissions from Google");
     expect(empty).not.toContain("No submissions were returned by Google");
   });
 

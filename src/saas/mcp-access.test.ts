@@ -57,8 +57,8 @@ describe("actual HTTP MCP entitlement boundary (isolated fixtures, no Google cal
       expect(await (await ctx.send("classroom_desk_status")).text()).toContain("temporarily_unavailable");
       const help = await (await ctx.send("classroom_desk_help")).text();
       expect(help).toContain("supportUrl");
-      expect(help).toContain("verified Google identity");
-      expect(help).toContain("only for older connections");
+      expect(help).toContain("link automatically when Google confirms the same account");
+      expect(help).toContain("Older connections may need a one-time link from Account settings");
       expect(help).not.toContain("explicit MCP pairing");
       expect(await (await ctx.send("link_website_account")).text()).toContain("pairing-fixture");
       expect(ctx.called).not.toHaveBeenCalled();
@@ -182,8 +182,8 @@ describe("temporary staging-only test entitlement",()=>{
 
   it("guides staging accounts with no temporary entitlement without exposing payment actions",()=>{
     const guidance=accessGuidance({allowed:false,reason:"expired"},STAGING_TEST_ORIGIN);
-    expect(guidance.message).toContain("no temporary staging entitlement is active");
-    expect(guidance.message).toContain("Verify the Google account linked on the staging website");
+    expect(guidance.message).toContain("temporary test access is not active");
+    expect(guidance.message).toContain("Check which Google account is linked on the website");
     expect(guidance.message).toContain("No Classroom data was accessed");
     expect(guidance.message).not.toMatch(/payment|choose a plan|checkout/i);
     expect(guidance.actionUrl).toBe(`${STAGING_TEST_ORIGIN}/app/connection`);
@@ -191,15 +191,15 @@ describe("temporary staging-only test entitlement",()=>{
 
   it("preserves production billing guidance for an expired entitlement",()=>{
     const guidance=accessGuidance({allowed:false,reason:"expired"},"https://classroom.jarvis404.com");
-    expect(guidance.message).toContain("Check your payment or choose a plan");
+    expect(guidance.message).toContain("Review your account status and available options");
     expect(guidance.actionUrl).toBe("https://classroom.jarvis404.com/app/subscription");
   });
 });
 
 it("guides an unlinked identity through verified OAuth and keeps pairing as legacy recovery",()=>{
   const guidance=accessGuidance({allowed:false,reason:"none"},"https://classroom.example");
-  expect(guidance.message).toContain("verified Google identity");
-  expect(guidance.message).toContain("only for older MCP connections");
+  expect(guidance.message).toContain("link automatically when Google confirms the same account");
+  expect(guidance.message).toContain("Older connections may need a one-time link from Account settings");
   expect(guidance.message).not.toContain("explicitly pair this MCP connection");
   expect(guidance.actionUrl).toBe("https://classroom.example/app/connection");
 });

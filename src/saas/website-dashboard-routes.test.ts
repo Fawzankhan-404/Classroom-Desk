@@ -105,7 +105,7 @@ describe("authenticated dashboard routes", () => {
       const choose = await fetch(`${origin}/api/account/experience`, { method: "POST", headers, body: "experience=teacher", redirect: "manual" });
       expect(choose.status).toBe(303);
       const teacher = await fetch(`${origin}/app`, { headers: { cookie }, redirect: "manual" });
-      expect(await teacher.text()).toContain("Teacher plan required");
+      expect(await teacher.text()).toContain("Teacher access required");
     });
     expect(saved.store.setDashboardExperience).toHaveBeenCalledWith("user-1", "teacher");
   });
@@ -119,7 +119,9 @@ describe("authenticated dashboard routes", () => {
       const headers = { cookie };
       const course = await fetch(`${origin}/app/teacher/courses/course-1`, { headers, redirect: "manual" });
       expect(course.status).toBe(status);
-      expect(await course.text()).toContain(title);
+      const courseBody = await course.text();
+      expect(courseBody).toContain(title);
+      expect(courseBody).toContain('<meta name="robots" content="noindex, nofollow">');
       const submissions = await fetch(`${origin}/app/teacher/courses/course-1/coursework/work-1`, { headers, redirect: "manual" });
       expect(submissions.status).toBe(status);
       expect(await submissions.text()).toContain(title);
@@ -174,7 +176,7 @@ describe("authenticated dashboard routes", () => {
     const harness = await withServer(async (origin, cookie) => {
       const start = await fetch(`${origin}/api/teacher/authorization`, { method: "POST", headers: { cookie, origin }, redirect: "manual" });
       expect(start.status).toBe(403);
-      expect(await start.text()).toContain("Your Google authorization was not changed");
+      expect(await start.text()).toContain("Your Google access was not changed");
     }, false);
     expect(harness.store.entitlement).toHaveBeenCalledWith("user-1");
     expect(harness.store.sessions.find).toHaveBeenCalledTimes(1);
@@ -309,7 +311,7 @@ describe("authenticated dashboard routes", () => {
       controls.setTeacherEntitled(false);
       const callback = await fetch(`${origin}/auth/google/callback?state=${encodeURIComponent(state)}&code=synthetic-code`, { headers: { cookie: callbackCookie }, redirect: "manual" });
       expect(callback.status).toBe(403);
-      expect(await callback.text()).toContain("No expanded permission was stored");
+      expect(await callback.text()).toContain("No additional Google permission was saved");
     }, true, { teacherDraftWritesEnabled: true });
     expect(harness.completedWrite).not.toHaveBeenCalled();
   });

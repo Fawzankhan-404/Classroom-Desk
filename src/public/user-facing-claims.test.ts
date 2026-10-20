@@ -1,11 +1,14 @@
 import type { AddressInfo } from "node:net";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPublicApp } from "./http.js";
 import { PublicOAuthProvider } from "./oauth.js";
 import { MemoryPublicAuthStore } from "./store.js";
 import { V2_TEACHER_SCOPES, V2_TEACHER_WRITE_SCOPES, V2_UNIFIED_SCOPES } from "../v2/scopes.js";
+import type { SaaSFeatureFlags } from "../saas/flags.js";
 
-async function withPublicApp(run: (baseUrl: string) => Promise<void>, withFlow = false): Promise<void> {
+const closedFlags: SaaSFeatureFlags = { billingUi: false, teacherFeatures: false, teacherDraftWrites: false, referralRewards: false, enforceEntitlements: true };
+
+async function withPublicApp(run: (baseUrl: string) => Promise<void>, withFlow = false, saasFlags = closedFlags): Promise<void> {
   const origin = new URL("http://127.0.0.1");
   const store = new MemoryPublicAuthStore();
   if (withFlow) {
@@ -29,6 +32,7 @@ async function withPublicApp(run: (baseUrl: string) => Promise<void>, withFlow =
     googleClientSecret: "synthetic-client-secret",
     port: 0,
     production: false,
+    saasFlags,
   };
   const provider = new PublicOAuthProvider(store, {
     ...config,
@@ -66,25 +70,47 @@ describe("public authorization and privacy disclosures", () => {
       expect(response.status).toBe(200);
       expect(html).toContain("Connection guide");
       expect(html).toContain("https://classroom.jarvis404.com/mcp");
-      expect(html).toContain("verified Google identity binding");
+      expect(html).toContain("choose the Google account you use for Classroom");
+      expect(html).not.toContain("verified Google identity binding");
       expect(html).not.toContain("account-pairing guide");
       expect(html).not.toContain("MCP installation wizard");
     });
   });
 
-  it("describes Classroom reads, file-scoped Drive, and separately consented teacher actions", async () => {
+  it("keeps public route descriptions and canonical URLs aligned with each page", async () => {
+    const routes = [
+      ["/", "Ask ChatGPT about your authorized Google Classroom courses, assignments, announcements, and deadlines."],
+      ["/pricing", "Review Classroom Desk plan details, current availability, and Google authorization requirements."],
+      ["/support", "Get help connecting Classroom Desk, managing your account, or with a payment question."],
+      ["/connect", "Set up Classroom Desk in ChatGPT, choose the Google account you use for Classroom, and review permissions."],
+      ["/privacy", "Learn what Classroom information Classroom Desk accesses, stores, and shares with your connected app."],
+      ["/terms", "Read the Classroom Desk service terms, authorized-use requirements, and source-code license."],
+      ["/refunds", "Information about existing Classroom Desk payments, subscriptions, cancellations, and refund requests."],
+    ] as const;
+    await withPublicApp(async baseUrl => {
+      for (const [path, description] of routes) {
+        const response = await fetch(`${baseUrl}${path}`);
+        const html = await response.text();
+        const canonicalPath = path === "/" ? "/" : path;
+        expect(response.status, path).toBe(200);
+        expect(html, path).toContain(`<meta name="description" content="${description}">`);
+        expect(html, path).toContain(`<link rel="canonical" href="http://127.0.0.1${canonicalPath}">`);
+        expect(html, path).not.toMatch(/Lorem ipsum|\bTODO\b|replace this text/i);
+      }
+    });
+  });
+
+  it("describes requested Google access in plain language and preserves the teacher write boundary", async () => {
     await withPublicApp(async baseUrl => {
       const response = await fetch(`${baseUrl}/connect/google?flow=synthetic-oauth-flow`);
       const html = await response.text();
       expect(response.status).toBe(200);
-      expect(html).toContain("file-scoped drive.file permission");
-      expect(html).toContain("see, create, edit, and delete specific Drive files");
-      expect(html).toContain("Teacher roster and submission reads need separate consent");
-      expect(html).toContain("server verification of teacher membership");
-      expect(html).toContain("classroom.coursework.students permission");
-      expect(html).toContain("management of coursework and grades in classes you teach");
-      expect(html).toContain("create an unpublished draft or update an existing unpublished draft");
-      expect(html).toContain("does not change published coursework, submit student work, publish drafts, or write grades");
+      expect(html).toContain("see, create, edit, and delete specific files you create with it or choose in Google Picker");
+      expect(html).toContain("Viewing course rosters and student submissions requires separate consent");
+      expect(html).toContain("Google checks that you are a teacher in each course");
+      expect(html).toContain("Google’s permission also covers grade management");
+      expect(html).toContain("Teacher draft tools need an additional Google permission and your confirmation for each action");
+      expect(html).toContain("does not write grades, publish drafts, or submit student work");
       expect(html).toContain("No gradebook writes");
       expect(html).not.toContain("No write access");
     }, true);
@@ -95,22 +121,52 @@ describe("public authorization and privacy disclosures", () => {
       const privacy = await (await fetch(`${baseUrl}/privacy`)).text();
       const terms = await (await fetch(`${baseUrl}/terms`)).text();
       const home = await (await fetch(`${baseUrl}/`)).text();
-      expect(privacy).toContain("Google token material is encrypted before persistent storage");
-      expect(privacy).toContain("file-scoped <code>drive.file</code> permission");
-      expect(privacy).toContain("see, create, edit, and delete specific Google Drive files");
-      expect(privacy).toContain("classroom.coursework.students");
-      expect(privacy).toContain("create an unpublished draft or update an existing unpublished draft");
+      expect(privacy).toContain("Google authorization tokens are encrypted before they are saved");
+      expect(privacy).toContain("limited Google Drive access");
+      expect(privacy).toContain("files you create with Classroom Desk or select in Google Picker");
+      expect(privacy).toContain("Teacher course lists and student submissions require separate consent");
+      expect(privacy).toContain("required to create or update an unpublished assignment draft");
       expect(privacy).toContain("Generated-PDF transfer to Drive is currently unavailable");
       expect(privacy).not.toContain("it uploads only that confirmed file");
       expect(privacy).not.toContain("PostgreSQL-backed production storage");
-      expect(terms).toContain("create an unpublished assignment draft");
-      expect(terms).toContain("explicitly confirm");
+      expect(terms).toContain("creates or updates an unpublished assignment draft");
+      expect(terms).toContain("confirm each action");
       expect(terms).toContain("does not change published coursework, publish drafts, submit student work, or write grades");
-      expect(terms).toContain("Generated-PDF transfer to Drive is currently unavailable");
+      expect(terms).toContain("does not transfer generated PDFs to Drive");
       expect(terms).not.toContain("Drive saves also require explicit confirmation");
-      expect(home).toContain("Download a generated PDF and attach it yourself");
+      expect(home).toContain("If ChatGPT creates a file, download it and attach it in Classroom yourself");
       expect(home).not.toContain("Confirm the Drive save");
       expect(home).not.toContain("Confirmed PDF saves to your Drive");
     });
+  });
+
+  it("shows checkout and trial availability from the configured flags and campaign date", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-21T00:00:00Z"));
+    try {
+      await withPublicApp(async baseUrl => {
+        const pricing = await (await fetch(`${baseUrl}/pricing`)).text();
+        const home = await (await fetch(`${baseUrl}/`)).text();
+        expect(pricing).toContain("Checkout is unavailable right now");
+        expect(pricing).toContain("Teacher plan checkout is not available yet");
+        expect(pricing).not.toContain('href="/app/billing"');
+        expect(home).toContain("Checkout unavailable");
+        expect(pricing).toContain('<meta name="description" content="Review Classroom Desk plan details, current availability, and Google authorization requirements.">');
+      });
+      const enabledFlags: SaaSFeatureFlags = { ...closedFlags, billingUi: true };
+      await withPublicApp(async baseUrl => {
+        const pricing = await (await fetch(`${baseUrl}/pricing`)).text();
+        const home = await (await fetch(`${baseUrl}/`)).text();
+        expect(pricing).toContain("Teacher plan checkout is not available yet");
+        expect(pricing).toContain("The introductory offer has ended");
+        expect(home).toContain("Offer ended");
+        expect(pricing).toContain("₹99");
+        const teacherCard = pricing.match(/<article class="plan-card"><p class="eyebrow">For teachers([\s\S]*?)<\/article>/)?.[1] ?? "";
+        expect(teacherCard).toContain("Teacher plan checkout is not available yet");
+        expect(teacherCard).not.toContain("href=");
+      }, false, enabledFlags);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

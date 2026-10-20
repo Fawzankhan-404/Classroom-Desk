@@ -62,9 +62,9 @@ export function mapSubmission(item: classroom_v1.Schema$StudentSubmission) {
 }
 export function publicError(error: unknown): string {
   const status = (error as { response?: { status?: number }; status?: number })?.response?.status ?? (error as { status?: number })?.status;
-  if (status === 401) return "Google Classroom authorization expired. Reconnect your account.";
-  if (status === 403) return "Permission not granted or this resource is not accessible.";
-  if (status === 404) return "Course or resource not found.";
+  if (status === 401) return "Google access needs to be reconnected. Reconnect your account and try again.";
+  if (status === 403) return "Google did not allow this request. Check that the selected account can access this course or file.";
+  if (status === 404) return "That Classroom item could not be found or is no longer available.";
   if (status === 429 || (typeof status === "number" && status >= 500)) return "Google Classroom is temporarily unavailable. Try again later.";
-  return "Google Classroom request failed. Check access and try again.";
+  return "Classroom Desk could not complete that request. Check your connection and try again.";
 }
