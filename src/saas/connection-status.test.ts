@@ -1,9 +1,13 @@
 import {describe,it,expect} from 'vitest';
 import express from 'express';
 import {createServer} from 'node:http';
-import {registerInternalConnectionStatus} from './connection-status.js';
+import {classifyGoogleConnectionFailure,registerInternalConnectionStatus} from './connection-status.js';
 import type {PublicOAuthProvider} from '../public/oauth.js';
 describe('Private grant-status bridge (mocked Google provider)',()=>{
+ it('classifies missing refresh tokens as reauthorization and transient errors as unavailable',()=>{
+  expect(classifyGoogleConnectionFailure(new Error('oauth_refresh_token_missing'))).toBe('reauthorization_required');
+  expect(classifyGoogleConnectionFailure(new Error('temporary upstream failure'))).toBe('unavailable');
+ });
  it('rejects spoofed requests and exposes only grant status, not tokens',async()=>{
   let calls=0;let revoked=false;
   const provider={googleAuthForUser:async()=>{calls++;if(revoked)throw new Error('Google grant unavailable');return{getAccessToken:async()=>({token:'synthetic-private-token'})};}} as unknown as PublicOAuthProvider;
