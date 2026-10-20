@@ -47,13 +47,17 @@ async function fixture(withGoogleGrant = true) {
         return { content: [{ type: "text", text: "authorized-fixture" }] };
       });
     }
+    mcp.registerTool("link_website_account", { inputSchema: {} }, async () => {
+      paired();
+      return { content: [{ type: "text", text: "pairing-fixture" }] };
+    });
     return mcp;
   });
   const { app, closeSessions } = createPublicApp({
     origin, mcpResource: new URL("/mcp", origin), googleClientId: "fixture",
     googleClientSecret: "fixture", googleCallbackUrl: new URL("/oauth/google/callback", origin).href,
     production: true, port: 0,
-    saasFlags: { billingUi: false, teacherFeatures: false, referralRewards: false, enforceEntitlements: true },
+    saasFlags: { billingUi: false, teacherFeatures: false, teacherDraftWrites: false, referralRewards: false, enforceEntitlements: true },
   }, store, undefined, undefined, undefined, { entitlementCheck: policy, mcpFactory: factory });
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>(resolve => server.once("listening", resolve));
@@ -174,15 +178,17 @@ describe("MCP batch security through actual local HTTP and SDK transport", () =>
     const ctx = await fixture(withGoogleGrant);
     try {
       const response = await ctx.send([
-        callTool("classroom_desk_status", 1), callTool("classroom_desk_help", 2),
+        callTool("classroom_desk_status", 1), callTool("classroom_desk_help", 2), callTool("link_website_account", 3),
       ]);
       expect(response.status).toBe(200);
       const results = await response.json() as Array<{ id: number; result: { isError?: boolean } }>;
       expect(Array.isArray(results)).toBe(true);
-      expect(results).toHaveLength(2);
-      expect(results.map(result => result.id).sort()).toEqual([1, 2]);
+      expect(results).toHaveLength(3);
+      expect(results.map(result => result.id).sort()).toEqual([1, 2, 3]);
       expect(results.every(result => result.result.isError !== true)).toBe(true);
       expect(JSON.stringify(results)).toContain("supportUrl");
+      expect(JSON.stringify(results)).toContain("pairing-fixture");
+      expect(ctx.paired).toHaveBeenCalledTimes(1);
       expect(ctx.called).not.toHaveBeenCalled();
     } finally { await ctx.close(); }
   });

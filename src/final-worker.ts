@@ -2,21 +2,23 @@ import { httpServerHandler } from "cloudflare:node";
 import { isIP } from "node:net";
 import { createHash, randomBytes } from "node:crypto";
 import { OAuth2Client } from "googleapis-common";
-import { ipKeyGenerator } from "express-rate-limit";
+import { checkRequestRateLimits } from "./saas/rate-limit.js";
 import { loadRuntimeConfig } from "./public/config.js";
 import { createPublicApp, type RawBodyRequest } from "./public/http.js";
 import { PostgresPublicAuthStore } from "./public/postgres.js";
 import { D1SqlDatabase } from "./public/d1-database.js";
 import { createClients } from "./classroom.js";
 import { createV2CombinedServer } from "./v2/server.js";
-import { V2_BETA_SCOPES } from "./v2/scopes.js";
-import { GOOGLE_CANONICAL_CLASSROOM_SCOPES } from "./scopes.js";
+import { V2_UNIFIED_SCOPES, V2_TEACHER_SCOPES, V2_TEACHER_REQUIRED_SCOPES, V2_TEACHER_WRITE_SCOPES, isExactV2UnifiedGrant, isExactV2TeacherGrant, isExactV2TeacherWriteGrant, isSupportedV2StoredGrant, isValidV2AuthorizationGrant } from "./v2/scopes.js";
+import { getStudentOverview } from "./v2/student.js";
+import { classifyGoogleReadFailure } from "./v2/workflow.js";
+import { createTeacherCourseworkDraft, getTeacherCourseDetail, getTeacherCourseworkDrafts, getTeacherOverview, getTeacherSubmissions } from "./v2/teacher.js";
 import { DurableAttachmentAuthorizationStore } from "./v2/attachments.js";
 import { GoogleDriveAttachmentReader } from "./v2/attachment-content.js";
 import { buildOnePickAuthorizationUrl, parseOnePickCallback, DRIVE_FILE_SCOPE } from "./v2/picker.js";
 import { buildPickerUrl } from "./v2/urls.js";
 import { discoverAttachments } from "./v2/attachments.js";
-import { loadSaaSFeatureFlags } from "./saas/flags.js";
+import { isSaaSReconciliationEnabled, loadSaaSFeatureFlags } from "./saas/flags.js";
 import { SaaSStore } from "./saas/store.js";
 import { registerWebsiteRoutes } from "./saas/website-routes.js";
 import { registerAdminRoutes } from "./saas/admin-routes.js";
@@ -27,13 +29,16 @@ import { RazorpayClient } from "./saas/razorpay-client.js";
 import { reconcileRecentPayments } from "./saas/reconciliation.js";
 import { PublicOAuthProvider } from "./public/oauth.js";
 import { evaluateInternalPolicy, registerInternalLink, internalTokenMatches } from "./saas/internal-link.js";
-import { resolveMcpAccess } from "./saas/mcp-access.js";
-import { unifiedOAuthAccounts } from "./saas/unified-oauth.js";
+import { hasTeacherMcpEntitlement, isStagingTestOrigin, resolveMcpAccess } from "./saas/mcp-access.js";
 
 type Bindings = {
   DB: { prepare(sql: string): { bind(...values: unknown[]): { all<T>(): Promise<{ results?: T[]; success: boolean; error?: string }> } }; batch<T = Record<string, unknown>>(statements: Array<{ all<T>(): Promise<{ results?: T[]; success: boolean; error?: string }> }>): Promise<Array<{ results?: T[]; success: boolean; error?: string }>> };
   INTERNAL_DELEGATION_SECRET: string;
   MCP_GRANDFATHERED_SUBJECT_HASHES?: string;
+  MCP_STAGING_DIAGNOSTICS_ENABLED?: string;
+  MCP_STAGING_TEST_ENTITLEMENT_ENABLED?: string;
+  MCP_STAGING_TEST_ENTITLEMENT_SUBJECT_HASHES?: string;
+  MCP_STAGING_TEST_ENTITLEMENT_EXPIRES_AT?: string;
   MCP_ACCESS_POLICY_SECRET?: string;
   V2_PUBLIC_RATE_LIMIT: { limit(input: { key: string }): Promise<{ success: boolean }> };
   V2_AUTH_RATE_LIMIT: { limit(input: { key: string }): Promise<{ success: boolean }> };
@@ -41,17 +46,16 @@ type Bindings = {
   V2_PUBLIC_OPERATOR_NAME: string;
   V2_PUBLIC_SUPPORT_EMAIL: string;
   V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64: string;
+  V2_PROFILE_BACKFILL_ENABLED?: string;
+  V2_PROFILE_BACKFILL_SUBJECT_PREFIX?: string;
   V2_GOOGLE_OAUTH_CLIENT_ID: string;
   V2_GOOGLE_OAUTH_CLIENT_SECRET: string;
   V2_PICKER_CALLBACK_URL: string;
-  PUBLIC_STAGE_WIDE_VIDEO_URL?: string;
-  PUBLIC_STAGE_WIDE_POSTER_URL?: string;
-  PUBLIC_STAGE_NARROW_VIDEO_URL?: string;
-  PUBLIC_STAGE_NARROW_POSTER_URL?: string;
   V2_AUTH_TABLE?: string;
   SAAS_BILLING_UI_ENABLED?: string;
   SAAS_RECONCILIATION_ENABLED?: string;
   SAAS_TEACHER_FEATURES_ENABLED?: string;
+  SAAS_TEACHER_DRAFT_WRITES_ENABLED?: string;
   SAAS_REFERRAL_REWARDS_ENABLED?: string;
   SAAS_ENFORCE_ENTITLEMENTS?: string;
   RAZORPAY_WEBHOOK_SECRET?: string;
@@ -61,11 +65,8 @@ type Bindings = {
   RAZORPAY_TEACHER_PLAN_ID?: string;
 };
 
-const betaGrant = (scopes: string[]) => {
-  const actual = new Set(scopes);
-  const accepted = [new Set(V2_BETA_SCOPES), new Set([...GOOGLE_CANONICAL_CLASSROOM_SCOPES, "https://www.googleapis.com/auth/drive.file"] )];
-  return accepted.some((expected) => actual.size === expected.size && [...expected].every((scope) => actual.has(scope)));
-};
+const betaGrant = (scopes: string[]) => isExactV2UnifiedGrant(scopes);
+const betaStoredGrant = (scopes: string[]) => isSupportedV2StoredGrant(scopes);
 
 export const pickerUrl = buildPickerUrl;
 
@@ -76,12 +77,19 @@ export default {
   async fetch(request: Request, bindings: Bindings, context: unknown) {
     const path = new URL(request.url).pathname;
     const clientIp = request.headers.get("cf-connecting-ip") ?? "";
-    const internalPath = path === "/internal/account/access" || path === "/internal/transport/ping" || path === "/internal/transport/policy-shape";
-    const trustedAccountLink = internalPath && internalTokenMatches(request.headers.get("x-classroom-access-policy-token") ?? "", bindings.MCP_ACCESS_POLICY_SECRET);
+    const internalPath = path === "/internal/account/link" || path === "/internal/account/access" || path === "/internal/transport/ping" || path === "/internal/transport/policy-shape";
+    const trustedAccountLink = internalPath && (path === "/internal/account/access" || path === "/internal/transport/ping" || path === "/internal/transport/policy-shape"
+      ? internalTokenMatches(request.headers.get("x-classroom-access-policy-token") ?? "", bindings.MCP_ACCESS_POLICY_SECRET)
+      : internalTokenMatches(request.headers.get("x-classroom-internal-token") ?? "", bindings.INTERNAL_DELEGATION_SECRET));
     if (internalPath && !trustedAccountLink) return new Response(null,{status:404});
     if (path !== "/health" && !trustedAccountLink && !isIP(clientIp)) { const response = Response.json({ error: "invalid_client_address" }, { status: 400 }); response.headers.set("x-classroom-policy-stage", "network_admission"); return response; }
     const receivedOrigin = new URL(request.url).origin;
     const configuredOrigin = new URL(bindings.V2_PUBLIC_APP_ORIGIN).origin;
+    const isolatedStaging = isStagingTestOrigin(configuredOrigin);
+    const stagingDiagnosticsEnabled = isolatedStaging && bindings.MCP_STAGING_DIAGNOSTICS_ENABLED?.trim().toLowerCase() === "true";
+    const stagingTestEntitlement = isolatedStaging && bindings.MCP_STAGING_TEST_ENTITLEMENT_ENABLED?.trim().toLowerCase() === "true"
+      ? { enabled: true, origin: configuredOrigin, subjectHashes: bindings.MCP_STAGING_TEST_ENTITLEMENT_SUBJECT_HASHES, expiresAt: bindings.MCP_STAGING_TEST_ENTITLEMENT_EXPIRES_AT }
+      : undefined;
     // Cloudflare service bindings may normalize the received URL/Host. A
     // trusted service-binding token is the internal proof; public requests
     // still require an exact canonical origin and same-origin header.
@@ -103,11 +111,8 @@ export default {
       return response;
     }
     if (!trustedAccountLink) {
-      try {
-        const key = ipKeyGenerator(clientIp,56);
-        if (!(await bindings.V2_PUBLIC_RATE_LIMIT.limit({key})).success) return Response.json({error:"rate_limited"},{status:429});
-        if (/^\/(?:login|logout|auth\/google\/callback|api\/|admin)/.test(path) && !(await bindings.V2_AUTH_RATE_LIMIT.limit({key})).success) return Response.json({error:"rate_limited"},{status:429});
-      } catch { return Response.json({error:"rate_limit_unavailable"},{status:503}); }
+      const decision = await checkRequestRateLimits(path, clientIp, bindings.V2_PUBLIC_RATE_LIMIT, bindings.V2_AUTH_RATE_LIMIT);
+      if (!decision.allowed) return Response.json({error: decision.error}, {status: decision.status});
     }
     let handler = handlers.get(requestOrigin);
     if (!handler) {
@@ -117,25 +122,33 @@ export default {
         PUBLIC_SUPPORT_EMAIL: bindings.V2_PUBLIC_SUPPORT_EMAIL, PUBLIC_AUTH_ENCRYPTION_KEY_B64: bindings.V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64,
         GOOGLE_OAUTH_CLIENT_ID: bindings.V2_GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET: bindings.V2_GOOGLE_OAUTH_CLIENT_SECRET,
         GOOGLE_OAUTH_CALLBACK_URL: `${requestOrigin}/oauth/google/callback`, MCP_RESOURCE_URL: `${requestOrigin}/mcp`,
-        PUBLIC_STAGE_WIDE_VIDEO_URL: bindings.PUBLIC_STAGE_WIDE_VIDEO_URL, PUBLIC_STAGE_WIDE_POSTER_URL: bindings.PUBLIC_STAGE_WIDE_POSTER_URL,
-        PUBLIC_STAGE_NARROW_VIDEO_URL: bindings.PUBLIC_STAGE_NARROW_VIDEO_URL, PUBLIC_STAGE_NARROW_POSTER_URL: bindings.PUBLIC_STAGE_NARROW_POSTER_URL,
       });
       config.saasFlags = loadSaaSFeatureFlags(bindings);
-      config.googleScopes = V2_BETA_SCOPES;
+      config.googleScopes = V2_UNIFIED_SCOPES;
+      config.teacherScopes = V2_TEACHER_SCOPES;
+      if (config.saasFlags.teacherDraftWrites) config.teacherWriteScopes = V2_TEACHER_WRITE_SCOPES;
+      config.teacherGoogleCallbackUrl = `${requestOrigin}/auth/google/callback`;
+      config.teacherGrantValidator = isExactV2TeacherGrant;
+      if (config.saasFlags.teacherDraftWrites) config.teacherWriteGrantValidator = isExactV2TeacherWriteGrant;
       config.googleGrantValidator = betaGrant;
+      config.googleStoredGrantValidator = betaStoredGrant;
       const database = new D1SqlDatabase(bindings.DB);
       const saasStore = new SaaSStore(database, {
-        referralRewardsEnabled: false,
+        referralRewardsEnabled: config.saasFlags?.referralRewards === true,
         profileEncryptionKeyBase64: bindings.V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64,
         requireProfileEncryption: true,
-        // Release A reads encrypted rows while preserving the current legacy
-        // writer format. The privacy write transition is a later release.
-        encryptProfilesOnWrite: false,
       });
-      try { await saasStore.verifyProfileStorageCompatibility(); }
-      catch { return Response.json({ error: "profile_storage_unavailable" }, { status: 503 }); }
-      try { await saasStore.readyUnifiedOAuth(); }
-      catch { return Response.json({ error: "unified_oauth_schema_unavailable" }, { status: 503 }); }
+      if (bindings.V2_PROFILE_BACKFILL_ENABLED?.trim().toLowerCase() === "true") {
+        try {
+          const migrated = await saasStore.backfillLegacyProfiles(1_000, bindings.V2_PROFILE_BACKFILL_SUBJECT_PREFIX);
+          console.info(JSON.stringify({ event: "legacy_profile_backfill", result: "ok", migrated }));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "profile_backfill_failed";
+          const category = /^[a-z0-9_]+$/.test(message) ? message : "profile_backfill_failed";
+          console.warn(JSON.stringify({ event: "legacy_profile_backfill", result: "failed", category }));
+          return Response.json({ error: "profile_migration_unavailable" }, { status: 503 });
+        }
+      }
       const store = new PostgresPublicAuthStore(database, config.encryptionKeyBase64, bindings.V2_AUTH_TABLE?.trim() || "classroom_desk_auth_records");
       if (path === "/internal/account/access") {
         if (!internalTokenMatches(request.headers.get("x-classroom-access-policy-token") ?? "", bindings.MCP_ACCESS_POLICY_SECRET)) return new Response(null, { status: 404 });
@@ -144,17 +157,23 @@ export default {
         const result = await evaluateInternalPolicy(saasStore, payload.subject, bindings.MCP_GRANDFATHERED_SUBJECT_HASHES);
         return Response.json(result.body, { status: result.status, headers: { "x-classroom-policy-stage": result.stage } });
       }
-      const publicProvider = new PublicOAuthProvider(store, config, undefined, unifiedOAuthAccounts(saasStore, store));
+      const publicProvider = new PublicOAuthProvider(store, {
+        ...config,
+        googleAuthorizationGrantValidator: isValidV2AuthorizationGrant,
+        googleIdentityResolver: identity => saasStore.resolveGoogleIdentityBinding({ ...identity, now: new Date() }),
+      });
       const attachmentAuthorizations = new DurableAttachmentAuthorizationStore(store);
       const pickerCallback = `${requestOrigin}/picker/callback`;
       // A reachable database is insufficient: OAuth needs the beta schema.
       const { app } = createPublicApp({ ...config, workerClientIp: true }, store, publicProvider, () => store.ready(), createClients, {
         internalDelegationSecret: bindings.INTERNAL_DELEGATION_SECRET,
         resourceName: "Classroom Desk",
-        entitlementCheck: (userId) => resolveMcpAccess(saasStore,userId,bindings.MCP_GRANDFATHERED_SUBJECT_HASHES),
-        accountIdentity: userId => saasStore.accountIdentityForMcpUser(userId),
+        stagingSubjectFingerprint: stagingDiagnosticsEnabled,
+        entitlementCheck: (userId) => resolveMcpAccess(saasStore,userId,bindings.MCP_GRANDFATHERED_SUBJECT_HASHES,stagingTestEntitlement),
         mcpFactory: async (auth, userId) => {
           const clients = createClients(auth);
+          const grantedScopes = await publicProvider.googleGrantScopes(userId);
+          const teacherEntitled = await hasTeacherMcpEntitlement(saasStore, userId, config.saasFlags?.teacherFeatures === true);
           const reader = { read: async (attachment: Parameters<GoogleDriveAttachmentReader["read"]>[0]) => {
             if (!attachment.driveFileId) throw new Error("picker_authorization_required");
             const tokens = await attachmentAuthorizations.getPickerGrant<Record<string, unknown>>(userId, attachment.driveFileId);
@@ -163,7 +182,7 @@ export default {
             oauth.setCredentials(tokens as never);
             return new GoogleDriveAttachmentReader(createClients(oauth).drive).read(attachment);
           } } as GoogleDriveAttachmentReader;
-          return createV2CombinedServer({ ...clients, subject: userId, diagnostic: (event) => console.warn("final_classroom_diagnostic", event), uploadPdf: async (context, name, bytes) => {
+          return createV2CombinedServer({ ...clients, subject: userId, grantedScopes, teacherEntitled, diagnostic: (event) => console.warn("final_classroom_diagnostic", event), uploadPdf: async (context, name, bytes) => {
             const work = (await clients.classroom.courses.courseWork.get({ courseId: context.courseId, id: context.courseWorkId })).data;
             const driveIds = discoverAttachments(work.materials).filter((item) => item.kind === "drive_file" && item.driveFileId).map((item) => item.driveFileId!);
             let accessToken: string | undefined;
@@ -188,7 +207,7 @@ export default {
               }
             }
             return undefined;
-          }, attachmentAccess: { authorizations: attachmentAuthorizations, reader, pickerUrl: (id) => pickerUrl(config.origin.toString(), id) } }, { name: "classroom-desk", version: "2.0.0", accountStatus: (mcpId) => saasStore.accountStatusForMcpUser(mcpId, requestOrigin) });
+          }, attachmentAccess: { authorizations: attachmentAuthorizations, reader, pickerUrl: (id) => pickerUrl(config.origin.toString(), id) } }, { name: "classroom-desk", version: "2.0.0", linkWebsiteAccount: (code, mcpId) => saasStore.linking.consume(code, mcpId), accountStatus: (mcpId) => saasStore.accountStatusForMcpUser(mcpId, requestOrigin), teacherAuthorizationUrl: new URL("/app/teacher", requestOrigin).toString(), teacherWriteAuthorizationUrl: new URL("/app/teacher", requestOrigin).toString(), teacherDraftWritesEnabled: config.saasFlags?.teacherDraftWrites === true });
         },
         registerRoutes: (routeApp) => {
           registerInternalLink(routeApp,saasStore,bindings.INTERNAL_DELEGATION_SECRET,bindings.MCP_GRANDFATHERED_SUBJECT_HASHES,bindings.MCP_ACCESS_POLICY_SECRET);
@@ -207,12 +226,12 @@ export default {
             razorpayKeyId: bindings.RAZORPAY_KEY_ID,
             razorpayKeySecret: bindings.RAZORPAY_KEY_SECRET,
             razorpayPlanIds: { student: bindings.RAZORPAY_STUDENT_PLAN_ID, teacher: bindings.RAZORPAY_TEACHER_PLAN_ID },
-            billingEnabled: false,
-            billingAllowlistUuids: config.saasFlags?.billingAllowlistUuids,
+            billingEnabled: config.saasFlags?.billingUi === true,
             teacherFeaturesEnabled: config.saasFlags?.teacherFeatures === true,
-            referralRewardsEnabled: false,
+            teacherDraftWritesEnabled: config.saasFlags?.teacherDraftWrites === true,
+            referralRewardsEnabled: config.saasFlags?.referralRewards === true,
             loadConnectionStatus:async websiteUserId=>{
-              const subject=await saasStore.getLinkedMcpUserId(websiteUserId);
+              const subject=await saasStore.getClassroomMcpUserId(websiteUserId);
               if(!subject)return 'not_linked';
               try{
                 const auth=await publicProvider.googleAuthForUser(subject);
@@ -223,33 +242,80 @@ export default {
                 return message==='Google grant unavailable'||message.includes('invalid_grant')?'reauthorization_required':'unavailable';
               }
             },
-            loadMcpStatus: async websiteUserId => {
-              const subject = await saasStore.getLinkedMcpUserId(websiteUserId);
-              if (!subject) return { state: "ACCOUNT_SETUP_REQUIRED", message: "Connect Classroom Desk in ChatGPT and authorize Google.", plan: null, expiresAt: null, linked: false };
-              try { return await saasStore.accountStatusForMcpUser(subject, requestOrigin); }
-              catch { return { state: "STATUS_UNAVAILABLE", message: "Access status could not be checked right now.", plan: null, expiresAt: null, linked: true }; }
-            },
             loadClassroomDashboard: async (websiteUserId) => {
-              const mcpUserId = await saasStore.getLinkedMcpUserId(websiteUserId);
-              if (!mcpUserId) return { courses: null, upcomingAssignments: null, missingAssignments: null, sync: "not_connected" as const };
+              const mcpUserId = await saasStore.getClassroomMcpUserId(websiteUserId);
+              if (!mcpUserId) return { state: "not_connected" as const };
+              try {
+                const access = await resolveMcpAccess(saasStore, mcpUserId, bindings.MCP_GRANDFATHERED_SUBJECT_HASHES);
+                if (!access.allowed) return { state: "access_required" as const };
+                const auth = await publicProvider.googleAuthForUser(mcpUserId);
+                const overview = await getStudentOverview({ ...createClients(auth), subject: mcpUserId }, { limit: 50 });
+                return { state: "connected" as const, overview };
+              } catch (error) {
+                return { state: classifyGoogleReadFailure(error) };
+              }
+            },
+            loadTeacherDashboard: async (websiteUserId, coursePageToken) => {
+              if (config.saasFlags?.teacherFeatures !== true) return { state: "unavailable" as const };
+              const mcpUserId = await saasStore.getClassroomMcpUserId(websiteUserId);
+              if (!mcpUserId) return { state: "not_connected" as const };
+              const access = await resolveMcpAccess(saasStore, mcpUserId, bindings.MCP_GRANDFATHERED_SUBJECT_HASHES);
+              if (!access.allowed) return { state: "access_required" as const };
+              const entitlement = await saasStore.entitlement(websiteUserId);
+              if (!entitlement.allowed || entitlement.plan !== "teacher") return { state: "teacher_entitlement_required" as const };
+              const scopes = await publicProvider.googleGrantScopes(mcpUserId);
+              if (!V2_TEACHER_REQUIRED_SCOPES.every(scope => scopes.includes(scope))) return { state: "authorization_required" as const };
               try {
                 const auth = await publicProvider.googleAuthForUser(mcpUserId);
-                const classroom = createClients(auth).classroom;
-                const coursesResponse = await classroom.courses.list({ courseStates: ["ACTIVE"], pageSize: 100 });
-                const courses = coursesResponse.data.courses ?? [];
-                let upcomingAssignments = 0;
-                for (const course of courses.slice(0, 20)) {
-                  if (!course.id) continue;
-                  const work = await classroom.courses.courseWork.list({ courseId: course.id, courseWorkStates: ["PUBLISHED"], pageSize: 100 });
-                  for (const item of work.data.courseWork ?? []) {
-                    const due = item.dueDate;
-                    if (due && new Date(Date.UTC(due.year ?? 0, (due.month ?? 1) - 1, due.day ?? 1)).getTime() >= Date.now()) upcomingAssignments++;
-                  }
-                }
-                return { courses: courses.length, upcomingAssignments, missingAssignments: null, sync: "connected" as const };
-              } catch {
-                return { courses: null, upcomingAssignments: null, missingAssignments: null, sync: "reauthorization_required" as const };
+                const overview = await getTeacherOverview({ ...createClients(auth), subject: mcpUserId, grantedScopes: scopes, teacherEntitled: true }, coursePageToken);
+                return { state: "connected" as const, courses: overview.courses, nextCoursePageToken: overview.nextCoursePageToken, previousPageAvailable: Boolean(coursePageToken) };
+              } catch (error) {
+                return { state: classifyGoogleReadFailure(error) };
               }
+            },
+            loadTeacherCourse: async (websiteUserId, courseId) => {
+              if (config.saasFlags?.teacherFeatures !== true) throw new Error("teacher_features_disabled");
+              const mcpUserId = await saasStore.getClassroomMcpUserId(websiteUserId);
+              if (!mcpUserId) throw new Error("teacher_account_binding_required");
+              const access = await resolveMcpAccess(saasStore, mcpUserId, bindings.MCP_GRANDFATHERED_SUBJECT_HASHES);
+              if (!access.allowed) throw new Error("account_access_required");
+              const entitlement = await saasStore.entitlement(websiteUserId);
+              if (!entitlement.allowed || entitlement.plan !== "teacher") throw new Error("teacher_entitlement_required");
+              const scopes = await publicProvider.googleGrantScopes(mcpUserId);
+              const auth = await publicProvider.googleAuthForUser(mcpUserId);
+              const clients = { ...createClients(auth), subject: mcpUserId, grantedScopes: scopes, teacherEntitled: true };
+              const detail = await getTeacherCourseDetail(clients, courseId);
+              const courseworkDraftsEnabled = config.saasFlags?.teacherDraftWrites === true && isExactV2TeacherWriteGrant(scopes);
+              const draftResult = courseworkDraftsEnabled ? await getTeacherCourseworkDrafts(clients, courseId) : { drafts: [], moreAvailable: false };
+              return { ...detail, drafts: draftResult.drafts, draftsMoreAvailable: draftResult.moreAvailable, courseworkDraftsEnabled, writeAuthorizationAvailable: config.saasFlags?.teacherDraftWrites === true };
+            },
+            loadTeacherSubmissions: async (websiteUserId, courseId, courseWorkId) => {
+              if (config.saasFlags?.teacherFeatures !== true) throw new Error("teacher_features_disabled");
+              const mcpUserId = await saasStore.getClassroomMcpUserId(websiteUserId);
+              if (!mcpUserId) throw new Error("teacher_account_binding_required");
+              const access = await resolveMcpAccess(saasStore, mcpUserId, bindings.MCP_GRANDFATHERED_SUBJECT_HASHES);
+              if (!access.allowed) throw new Error("account_access_required");
+              const entitlement = await saasStore.entitlement(websiteUserId);
+              if (!entitlement.allowed || entitlement.plan !== "teacher") throw new Error("teacher_entitlement_required");
+              const scopes = await publicProvider.googleGrantScopes(mcpUserId);
+              const auth = await publicProvider.googleAuthForUser(mcpUserId);
+              return getTeacherSubmissions({ ...createClients(auth), subject: mcpUserId, grantedScopes: scopes, teacherEntitled: true }, courseId, courseWorkId);
+            },
+            beginTeacherAuthorization: async input => publicProvider.beginTeacherConsent({ userId: input.mcpUserId, state: input.state, verifier: input.verifier, nonce: input.nonce }),
+            completeTeacherAuthorization: async input => publicProvider.completeTeacherConsent({ userId: input.mcpUserId, expectedGoogleSubject: input.expectedGoogleSubject, code: input.code, verifier: input.verifier, nonce: input.nonce }),
+            beginTeacherWriteAuthorization: async input => publicProvider.beginTeacherWriteConsent({ userId: input.mcpUserId, state: input.state, verifier: input.verifier, nonce: input.nonce }),
+            completeTeacherWriteAuthorization: async input => publicProvider.completeTeacherWriteConsent({ userId: input.mcpUserId, expectedGoogleSubject: input.expectedGoogleSubject, code: input.code, verifier: input.verifier, nonce: input.nonce }),
+            createTeacherCourseworkDraft: async (websiteUserId, courseId, input) => {
+              if (config.saasFlags?.teacherFeatures !== true) throw new Error("teacher_features_disabled");
+              const mcpUserId = await saasStore.getClassroomMcpUserId(websiteUserId);
+              if (!mcpUserId) throw new Error("teacher_account_binding_required");
+              const access = await resolveMcpAccess(saasStore, mcpUserId, bindings.MCP_GRANDFATHERED_SUBJECT_HASHES);
+              if (!access.allowed) throw new Error("account_access_required");
+              const entitlement = await saasStore.entitlement(websiteUserId);
+              if (!entitlement.allowed || entitlement.plan !== "teacher") throw new Error("teacher_entitlement_required");
+              const scopes = await publicProvider.googleGrantScopes(mcpUserId);
+              const auth = await publicProvider.googleAuthForUser(mcpUserId);
+              return createTeacherCourseworkDraft({ ...createClients(auth), subject: mcpUserId, grantedScopes: scopes, teacherEntitled: true }, courseId, input, "CREATE_UNPUBLISHED_DRAFT");
             },
           });
           registerAdminRoutes(routeApp, saasStore);
@@ -308,14 +374,8 @@ export default {
   async scheduled(_event: unknown, bindings: Bindings) {
     try {
       const database = new D1SqlDatabase(bindings.DB);
-      if (bindings.RAZORPAY_KEY_ID && bindings.RAZORPAY_KEY_SECRET && (bindings.SAAS_BILLING_UI_ENABLED === "true" || bindings.SAAS_RECONCILIATION_ENABLED === "true")) {
-        const billingStore = new SaaSStore(database, {
-          referralRewardsEnabled: false,
-          profileEncryptionKeyBase64: bindings.V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64,
-          requireProfileEncryption: true,
-          encryptProfilesOnWrite: false,
-        });
-        await billingStore.verifyProfileStorageCompatibility();
+      if (bindings.RAZORPAY_KEY_ID && bindings.RAZORPAY_KEY_SECRET && isSaaSReconciliationEnabled(bindings)) {
+        const billingStore = new SaaSStore(database, { referralRewardsEnabled: bindings.SAAS_REFERRAL_REWARDS_ENABLED === "true" });
         const result = await reconcileRecentPayments(database, billingStore, new RazorpayClient(bindings.RAZORPAY_KEY_ID, bindings.RAZORPAY_KEY_SECRET),new Date(),{student:bindings.RAZORPAY_STUDENT_PLAN_ID,teacher:bindings.RAZORPAY_TEACHER_PLAN_ID});
         console[result.failed > 0 ? "warn" : "log"](JSON.stringify({ event: "billing_reconciliation", ...result }));
       }

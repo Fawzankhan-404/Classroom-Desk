@@ -16,11 +16,11 @@ const authConfig: PublicOAuthConfig = {
 };
 const runtimeConfig = { ...authConfig, port: 0, production: false };
 
-async function setup() {
+async function setup(config: PublicOAuthConfig = authConfig) {
   const store = new MemoryPublicAuthStore();
   let revoked: string[] = [];
-  const provider = new PublicOAuthProvider(store, authConfig, async (token) => { revoked.push(token); });
-  const { app } = createPublicApp(runtimeConfig, store, provider);
+  const provider = new PublicOAuthProvider(store, config, async (token) => { revoked.push(token); });
+  const { app } = createPublicApp({ ...runtimeConfig, ...config }, store, provider);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -28,26 +28,12 @@ async function setup() {
     await store.putGrant({ userId, refreshToken: `google-refresh-${userId}`, scopes: [...PUBLIC_CLASSROOM_SCOPES], createdAt: Date.now(), updatedAt: Date.now() });
     await store.putAccess({ token: accessToken, clientId: "test-client", userId, scopes: [MCP_SCOPE], resource: authConfig.mcpResource, expiresAt: Date.now() + 60_000 });
   }
-  return { store, provider, origin, server, seedUser, get revoked() { return revoked; } };
+  return { app, store, provider, origin, server, seedUser, get revoked() { return revoked; } };
 }
 
 async function close(server: Server) {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
-
-it("keeps unified onboarding on the configured MCP origin without a second website login", async () => {
-  const ctx = await setup();
-  try {
-    const html = await (await fetch(`${ctx.origin}/connect`)).text();
-    expect(html).toContain('data-copy-mcp="http://127.0.0.1/mcp"');
-    expect(html).not.toContain('data-copy-mcp="https://classroom.jarvis404.com/mcp"');
-    expect(html).toContain("connect your account automatically");
-    expect(html).toContain("Back to app");
-    const script = await (await fetch(`${ctx.origin}/assets/connect.js`)).text();
-    expect(script).not.toContain("are separate steps");
-    expect(/Generate pairing code|link_website_account/.test(html + script)).toBe(false);
-  } finally { await close(ctx.server); }
-});
 const bearer = (token: string) => ({ authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json, text/event-stream" });
 const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test-client", version: "1" } } };
 
@@ -77,8 +63,6 @@ describe("public V1 scopes and projections", () => {
     expect(() => loadRuntimeConfig({ ...base, NODE_ENV: "production", PUBLIC_AUTH_STORE: "memory" })).toThrow("encrypted persistent authorization store");
     expect(() => loadRuntimeConfig({ ...base, NODE_ENV: "production", PUBLIC_AUTH_STORE: "postgres" })).toThrow("DATABASE_URL");
     expect(loadRuntimeConfig({ ...base, NODE_ENV: "production", PUBLIC_AUTH_STORE: "d1", PUBLIC_AUTH_ENCRYPTION_KEY_B64: Buffer.alloc(32).toString("base64"), PUBLIC_OPERATOR_NAME: "Classroom Desk", PUBLIC_SUPPORT_EMAIL: "support@example.com" }).storeKind).toBe("d1");
-    expect(() => loadRuntimeConfig({ ...base, PUBLIC_STAGE_WIDE_VIDEO_URL: "http://media.example/video.mp4" })).toThrow("HTTPS CloudFront");
-    expect(loadRuntimeConfig({ ...base, PUBLIC_STAGE_WIDE_VIDEO_URL: "https://media.example.cloudfront.net/video.mp4" }).stageMedia?.wideVideo).toContain("cloudfront.net");
   });
 });
 
@@ -174,6 +158,159 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(title).not.toMatch(/color-scheme|--[a-z-]+:|background:|font-size:/i);
     } finally { await close(ctx.server); }
   });
+  it("registers exactly one homepage route", async () => {
+    const ctx = await setup();
+    try {
+      const layers = (ctx.app as unknown as { router: { stack: Array<{ route?: { path?: string; methods?: Record<string, boolean> } }> } }).router.stack;
+      const homepageRoutes = layers.filter((layer) => layer.route?.path === "/" && layer.route.methods?.get === true);
+      expect(homepageRoutes).toHaveLength(1);
+      const response = await fetch(`${ctx.origin}/`);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("<title>Classroom Desk | Google Classroom Meets ChatGPT</title>");
+    } finally { await close(ctx.server); }
+  });
+  it.each(["https://attacker.example/callback", "https://chatgpt.com.attacker.example/callback", "https://chatgpt.com@attacker.example/callback", "https://chatgpt.com/other/callback", "https://chatgpt.com/connector/oauth/app?next=attacker"])("rejects an MCP authorization response destination outside the ChatGPT callback pattern (%s)", async redirectUri => {
+    const store = new MemoryPublicAuthStore();
+    const provider = new PublicOAuthProvider(store, {
+      ...authConfig,
+      origin: new URL("https://classroom.example"),
+      mcpResource: new URL("https://classroom.example/mcp"),
+      googleCallbackUrl: "https://classroom.example/oauth/google/callback",
+    });
+    const putFlow = vi.spyOn(store, "putFlow");
+    const response = { setHeader: vi.fn(), redirect: vi.fn() } as never;
+    const client = { client_id: "dynamically-registered", redirect_uris: [redirectUri] } as never;
+    await expect(provider.authorize(client, {
+      clientId: "dynamically-registered", redirectUri, scopes: [MCP_SCOPE], codeChallenge: "pkce-challenge",
+    } as never, response)).rejects.toThrow("Unsupported MCP redirect origin");
+    expect(putFlow).not.toHaveBeenCalled();
+  });
+  it.each([
+    "https://attacker.example/callback",
+    "https://chatgpt.com/connector/oauth/app?next=https://attacker.example",
+    "http://127.0.0.1/callback?next=attacker",
+    "http://127.0.0.1/callback#fragment",
+  ])("rejects dynamic registration with a callback that cannot be safely disclosed (%s)", async redirectUri => {
+    const store = new MemoryPublicAuthStore();
+    const provider = new PublicOAuthProvider(store, authConfig);
+    const persist = vi.spyOn(store, "registerClient");
+    await expect(provider.clientsStore.registerClient!({
+      redirect_uris: [redirectUri], token_endpoint_auth_method: "none",
+    } as never)).rejects.toThrow("Unsupported redirect URI");
+    expect(persist).not.toHaveBeenCalled();
+  });
+  it("rejects unsafe DCR metadata at the HTTP registration endpoint", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/register`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redirect_uris: ["https://attacker.example/callback"], token_endpoint_auth_method: "none" }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_client_metadata" });
+      expect(await ctx.store.getClient("https://attacker.example/callback")).toBeUndefined();
+    } finally { await close(ctx.server); }
+  });
+  it("allows the ChatGPT callback origin for production authorization", async () => {
+    const store = new MemoryPublicAuthStore();
+    const provider = new PublicOAuthProvider(store, {
+      ...authConfig,
+      origin: new URL("https://classroom.example"),
+      mcpResource: new URL("https://classroom.example/mcp"),
+      googleCallbackUrl: "https://classroom.example/oauth/google/callback",
+    });
+    const redirect = vi.fn();
+    const response = { setHeader: vi.fn(), redirect } as never;
+    const redirectUri = "https://chatgpt.com/connector/oauth/verified-app";
+    await provider.authorize({ client_id: "chatgpt-client", redirect_uris: [redirectUri] } as never, {
+      clientId: "chatgpt-client", redirectUri, scopes: [MCP_SCOPE], codeChallenge: "pkce-challenge",
+    } as never, response);
+    expect(redirect).toHaveBeenCalledWith(302, expect.stringContaining("/connect/google?flow="));
+  });
+  it("rejects a previously registered unsafe callback directly without redirecting to it", async () => {
+    const ctx = await setup();
+    const registered = await ctx.store.registerClient({ redirect_uris: ["https://attacker.example/callback"], token_endpoint_auth_method: "none" } as never);
+    try {
+      const response = await fetch(`${ctx.origin}/authorize?response_type=code&client_id=${encodeURIComponent(registered.client_id)}&redirect_uri=${encodeURIComponent(registered.redirect_uris[0])}&code_challenge=synthetic-challenge&code_challenge_method=S256&scope=${encodeURIComponent(MCP_SCOPE)}`, { redirect: "manual" });
+      expect(response.status).toBe(400);
+      expect(response.headers.get("location")).toBeNull();
+      expect(await response.json()).toMatchObject({ error: "invalid_request" });
+    } finally { await close(ctx.server); }
+  });
+  it("rejects an unsafe callback in a POST authorization request without redirecting to it", async () => {
+    const ctx = await setup();
+    const registered = await ctx.store.registerClient({ redirect_uris: ["https://attacker.example/callback"], token_endpoint_auth_method: "none" } as never);
+    try {
+      const response = await fetch(`${ctx.origin}/authorize`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          response_type: "code", client_id: registered.client_id,
+          redirect_uri: "https://attacker.example/callback", code_challenge: "synthetic-challenge",
+          code_challenge_method: "S256", scope: MCP_SCOPE,
+        }),
+        redirect: "manual",
+      });
+      expect(response.status).toBe(400);
+      expect(response.headers.get("location")).toBeNull();
+      expect(await response.json()).toMatchObject({ error: "invalid_request" });
+    } finally { await close(ctx.server); }
+  });
+  it("allows a valid loopback callback through the preflight and SDK authorization handler", async () => {
+    const ctx = await setup();
+    try {
+      const registration = await fetch(`${ctx.origin}/register`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redirect_uris: ["http://127.0.0.1/callback"], token_endpoint_auth_method: "none" }),
+      });
+      expect(registration.status).toBe(201);
+      const client = await registration.json() as { client_id: string };
+      const challenge = crypto.createHash("sha256").update("synthetic-verifier").digest("base64url");
+      const params = new URLSearchParams({
+        response_type: "code", client_id: client.client_id, redirect_uri: "http://127.0.0.1/callback",
+        code_challenge: challenge, code_challenge_method: "S256", scope: MCP_SCOPE,
+      });
+      const response = await fetch(`${ctx.origin}/authorize?${params}`, { redirect: "manual" });
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toContain("/connect/google?flow=");
+    } finally { await close(ctx.server); }
+  });
+  it("rejects persisted unsafe flows before Google consent and before issuing callback errors", async () => {
+    const store = new MemoryPublicAuthStore();
+    const provider = new PublicOAuthProvider(store, authConfig);
+    const flow = {
+      id: "old-policy-flow", userId: "user-old-flow",
+      client: { client_id: "old-client", redirect_uris: ["https://attacker.example/callback"] } as never,
+      params: { state: "state", scopes: [MCP_SCOPE], codeChallenge: "challenge", redirectUri: "https://attacker.example/callback" },
+      googleState: "old-policy-state", googleVerifier: "verifier", expiresAt: Date.now() + 60_000, started: false,
+    };
+    await store.putFlow(flow);
+    const markStarted = vi.spyOn(store, "setFlowStarted");
+    await expect(provider.beginGoogle(flow.id)).rejects.toThrow("Authorization expired, invalid, or already started");
+    expect(markStarted).not.toHaveBeenCalled();
+    await store.putFlow({ ...flow, started: true });
+    const exchange = vi.spyOn(OAuth2Client.prototype, "getToken");
+    try {
+      await expect(provider.completeGoogle(flow.googleState, "synthetic-google-code", undefined)).rejects.toThrow("Invalid authorization callback");
+      expect(exchange).not.toHaveBeenCalled();
+    } finally { exchange.mockRestore(); }
+  });
+  it("returns a direct 400 for a Google callback backed by a persisted unsafe redirect", async () => {
+    const ctx = await setup();
+    const flow = {
+      id: "old-callback-flow", userId: "user-old-callback",
+      client: { client_id: "old-client", redirect_uris: ["https://attacker.example/callback"] } as never,
+      params: { state: "state", scopes: [MCP_SCOPE], codeChallenge: "challenge", redirectUri: "https://attacker.example/callback" },
+      googleState: "old-callback-state", googleVerifier: "verifier", expiresAt: Date.now() + 60_000, started: true,
+    };
+    await ctx.store.putFlow(flow);
+    try {
+      const response = await fetch(`${ctx.origin}/oauth/google/callback?state=${flow.googleState}&error=access_denied`, { redirect: "manual" });
+      expect(response.status).toBe(400);
+      expect(response.headers.get("location")).toBeNull();
+      expect(await response.text()).toContain("could not be completed");
+    } finally { await close(ctx.server); }
+  });
   it("publishes the refund and cancellation policy page", async () => {
     const ctx = await setup();
     try {
@@ -181,8 +318,7 @@ describe("public OAuth and HTTP authorization boundary", () => {
       const html = await response.text();
       expect(response.status).toBe(200);
       expect(html).toContain("Refund and cancellation policy");
-      expect(html).toContain("historical transactions");
-      expect(html).toContain("new payment enrollment is disabled");
+      expect(html).toContain("168 hours");
       expect(html).toContain("Refunds and disputes");
     } finally { await close(ctx.server); }
   });
@@ -280,12 +416,76 @@ describe("public OAuth and HTTP authorization boundary", () => {
     const url = new URL(await provider.beginGoogle(flowId));
     expect(url.searchParams.get("scope")?.split(" ").sort()).toEqual([...PUBLIC_CLASSROOM_SCOPES].sort());
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(url.searchParams.get("include_granted_scopes")).toBe("false");
+    expect(url.searchParams.get("include_granted_scopes")).toBe("true");
     const denied = await provider.completeGoogle(flow.googleState, undefined, "access_denied");
     expect(new URL(denied).searchParams.get("error")).toBe("access_denied");
     await expect(provider.completeGoogle(flow.googleState, "replay", undefined)).rejects.toThrow("Invalid authorization callback");
     await store.putFlow({ ...flow, id: "expired-flow", googleState: "expired-state", expiresAt: Date.now() - 1, started: true });
     await expect(provider.completeGoogle("expired-state", "code", undefined)).rejects.toThrow("Invalid authorization callback");
+  });
+  it.each([
+    ["server_error", "server_error"],
+    ["temporarily_unavailable", "temporarily_unavailable"],
+    ["provider_private_detail", "server_error"],
+  ])("keeps provider OAuth failures distinct from local failures (%s)", async (providerError, expectedError) => {
+    const store = new MemoryPublicAuthStore(); const provider = new PublicOAuthProvider(store, authConfig);
+    const flowId = crypto.randomBytes(32).toString("base64url");
+    const flow = { id: flowId, userId: crypto.randomUUID(), client: { client_id: "client", redirect_uris: ["http://127.0.0.1/cb"] } as never,
+      params: { state: "client-state", scopes: [MCP_SCOPE], codeChallenge: "challenge", redirectUri: "http://127.0.0.1/cb" },
+      googleState: crypto.randomBytes(32).toString("base64url"), googleVerifier: crypto.randomBytes(32).toString("base64url"), expiresAt: Date.now() + 60_000, started: false };
+    await store.putFlow(flow); await provider.beginGoogle(flowId);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const redirect = new URL(await provider.completeGoogle(flow.googleState, undefined, providerError));
+      expect(redirect.searchParams.get("error")).toBe(expectedError);
+      expect(redirect.searchParams.get("state")).toBe("client-state");
+      expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "google_authorization_failed", source: "provider", reason: "google_denied" }));
+      if (providerError === "provider_private_detail") {
+        expect(log).toHaveBeenCalledWith(expect.objectContaining({ providerErrorCategory: "other" }));
+        expect(JSON.stringify(log.mock.calls)).not.toContain(providerError);
+      }
+      expect(await store.getGrant(flow.userId)).toBeUndefined();
+    } finally { log.mockRestore(); }
+  });
+  it("reports a missing callback code as a local server failure and retains state", async () => {
+    const store = new MemoryPublicAuthStore(); const provider = new PublicOAuthProvider(store, authConfig);
+    const flowId = crypto.randomBytes(32).toString("base64url");
+    const flow = { id: flowId, userId: crypto.randomUUID(), client: { client_id: "client", redirect_uris: ["http://127.0.0.1/cb"] } as never,
+      params: { state: "client-state", scopes: [MCP_SCOPE], codeChallenge: "challenge", redirectUri: "http://127.0.0.1/cb" },
+      googleState: crypto.randomBytes(32).toString("base64url"), googleVerifier: crypto.randomBytes(32).toString("base64url"), expiresAt: Date.now() + 60_000, started: false };
+    await store.putFlow(flow); await provider.beginGoogle(flowId);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const redirect = new URL(await provider.completeGoogle(flow.googleState, undefined, undefined));
+      expect(redirect.searchParams.get("error")).toBe("server_error");
+      expect(redirect.searchParams.get("state")).toBe("client-state");
+      expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "google_authorization_failed", source: "worker", reason: "callback_missing_code" }));
+      expect(await store.getGrant(flow.userId)).toBeUndefined();
+    } finally { log.mockRestore(); }
+  });
+  it.each(["scope_mismatch", "missing_refresh_token"] as const)("returns the right OAuth error for %s", async failure => {
+    const store = new MemoryPublicAuthStore(); const provider = new PublicOAuthProvider(store, authConfig);
+    const flowId = crypto.randomBytes(32).toString("base64url");
+    const flow = { id: flowId, userId: crypto.randomUUID(), client: { client_id: "client", redirect_uris: ["http://127.0.0.1/cb"] } as never,
+      params: { state: "client-state", scopes: [MCP_SCOPE], codeChallenge: "challenge", redirectUri: "http://127.0.0.1/cb" },
+      googleState: crypto.randomBytes(32).toString("base64url"), googleVerifier: crypto.randomBytes(32).toString("base64url"), expiresAt: Date.now() + 60_000, started: false };
+    await store.putFlow(flow); await provider.beginGoogle(flowId);
+    const scopes = [...PUBLIC_CLASSROOM_SCOPES];
+    if (failure === "scope_mismatch") scopes.pop();
+    const tokens = failure === "scope_mismatch"
+      ? { access_token: "synthetic-access", refresh_token: "synthetic-refresh", scope: scopes.join(" ") }
+      : { access_token: "synthetic-access", scope: scopes.join(" ") };
+    const getToken = vi.spyOn(OAuth2Client.prototype, "getToken").mockResolvedValue({ tokens } as never);
+    const putGrantAndCode = vi.spyOn(store, "putGrantAndCode");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const redirect = new URL(await provider.completeGoogle(flow.googleState, "synthetic-google-code", undefined));
+      expect(redirect.searchParams.get("error")).toBe(failure === "scope_mismatch" ? "access_denied" : "server_error");
+      expect(redirect.searchParams.get("state")).toBe("client-state");
+      expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "google_authorization_failed", source: "worker", reason: failure }));
+      expect(putGrantAndCode).not.toHaveBeenCalled();
+      expect(await store.getGrant(flow.userId)).toBeUndefined();
+    } finally { getToken.mockRestore(); putGrantAndCode.mockRestore(); log.mockRestore(); }
   });
   it("keeps the Google grant bound to its MCP subject until explicit account pairing", async () => {
     const store = new MemoryPublicAuthStore();
@@ -308,19 +508,106 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(getToken).toHaveBeenCalledTimes(1);
     } finally { getToken.mockRestore(); }
   });
+  it("binds a verified Google subject to its canonical account and preserves its refresh token on reconnect", async () => {
+    const userId = "00000000-0000-4000-8000-000000000001";
+    const identityScopes = [...PUBLIC_CLASSROOM_SCOPES, "openid", "email"];
+    const scopeValidator = (scopes: string[]) => scopes.length === identityScopes.length && identityScopes.every((scope) => scopes.includes(scope));
+    const store = new MemoryPublicAuthStore();
+    const resolver = vi.fn(async (identity: { googleSubject: string; email: string; displayName: string }) => {
+      expect(identity).toEqual({ googleSubject: "google-subject-stable-001", email: "reviewer@example.invalid", displayName: "Reviewer" });
+      return userId;
+    });
+    const provider = new PublicOAuthProvider(store, { ...authConfig, googleScopes: identityScopes, googleGrantValidator: scopeValidator, googleStoredGrantValidator: scopeValidator, googleIdentityResolver: resolver });
+    const client = { client_id: "client-unified" } as never;
+    const beginFlow = async (id: string, state: string, nonce: string) => {
+      const flow = { id, userId: `temporary-${id}`, client: { client_id: "client-unified", redirect_uris: ["http://127.0.0.1/callback"] } as never, params: { state: `client-${state}`, scopes: [MCP_SCOPE, MCP_OFFLINE_SCOPE], codeChallenge: "challenge", redirectUri: "http://127.0.0.1/callback" }, googleState: state, googleVerifier: `verifier-${id}`, googleNonce: nonce, expiresAt: Date.now() + 60_000, started: false };
+      await store.putFlow(flow);
+      const googleUrl = new URL(await provider.beginGoogle(id));
+      expect(googleUrl.searchParams.get("nonce")).toBe(nonce);
+      return flow;
+    };
+    const payload = (nonce: string) => ({ iss: "https://accounts.google.com", aud: "client-test", exp: Math.floor(Date.now() / 1000) + 300, iat: Math.floor(Date.now() / 1000), nonce, sub: "google-subject-stable-001", email: "reviewer@example.invalid", email_verified: true, name: "Reviewer" });
+    const tokenMock = vi.spyOn(OAuth2Client.prototype, "getToken");
+    const identityMock = vi.spyOn(OAuth2Client.prototype, "verifyIdToken");
+    try {
+      const first = await beginFlow("first-unified", "google-state-one", "nonce-one");
+      tokenMock.mockResolvedValueOnce({ tokens: { access_token: "access-one", refresh_token: "refresh-one", id_token: "id-one", scope: identityScopes.join(" ") } } as never);
+      identityMock.mockResolvedValueOnce({ getPayload: () => payload(first.googleNonce!) } as never);
+      const redirect = new URL(await provider.completeGoogle(first.googleState, "google-code-one", undefined));
+      expect(redirect.searchParams.get("state")).toBe("client-google-state-one");
+      const code = redirect.searchParams.get("code")!;
+      const issued = await provider.exchangeAuthorizationCode(client, code, undefined, first.params.redirectUri, authConfig.mcpResource);
+      expect(await provider.verifyAccessToken(issued.access_token)).toMatchObject({ extra: { userId } });
+      expect(await store.getGrant(userId)).toMatchObject({ refreshToken: "refresh-one" });
+
+      const reconnect = await beginFlow("reconnect-unified", "google-state-two", "nonce-two");
+      tokenMock.mockResolvedValueOnce({ tokens: { access_token: "access-two", id_token: "id-two", scope: identityScopes.join(" ") } } as never);
+      identityMock.mockResolvedValueOnce({ getPayload: () => payload(reconnect.googleNonce!) } as never);
+      const reconnectRedirect = new URL(await provider.completeGoogle(reconnect.googleState, "google-code-two", undefined));
+      const reconnectCode = reconnectRedirect.searchParams.get("code")!;
+      await provider.exchangeAuthorizationCode(client, reconnectCode, undefined, reconnect.params.redirectUri, authConfig.mcpResource);
+      expect(await store.getGrant(userId)).toMatchObject({ refreshToken: "refresh-one", scopes: identityScopes });
+      expect(resolver).toHaveBeenCalledTimes(2);
+    } finally { tokenMock.mockRestore(); identityMock.mockRestore(); }
+  });
+  it("rejects a mismatched Google OIDC nonce without replacing an existing account grant", async () => {
+    const userId = "00000000-0000-4000-8000-000000000002";
+    const identityScopes = [...PUBLIC_CLASSROOM_SCOPES, "openid", "email"];
+    const store = new MemoryPublicAuthStore();
+    await store.putGrant({ userId, refreshToken: "preserve-this-grant", scopes: identityScopes, createdAt: Date.now() - 1000, updatedAt: Date.now() - 1000 });
+    const provider = new PublicOAuthProvider(store, { ...authConfig, googleScopes: identityScopes, googleGrantValidator: () => true, googleStoredGrantValidator: () => true, googleIdentityResolver: async () => userId });
+    const flow = { id: "nonce-replay", userId: "temporary-flow", client: { client_id: "client-unified", redirect_uris: ["http://127.0.0.1/callback"] } as never, params: { state: "client-state", scopes: [MCP_SCOPE], codeChallenge: "challenge", redirectUri: "http://127.0.0.1/callback" }, googleState: "google-state-replay", googleVerifier: "verifier", googleNonce: "expected-nonce", expiresAt: Date.now() + 60_000, started: false };
+    await store.putFlow(flow); await provider.beginGoogle(flow.id);
+    const tokenMock = vi.spyOn(OAuth2Client.prototype, "getToken").mockResolvedValue({ tokens: { access_token: "access", refresh_token: "replacement", id_token: "id", scope: identityScopes.join(" ") } } as never);
+    const identityMock = vi.spyOn(OAuth2Client.prototype, "verifyIdToken").mockResolvedValue({ getPayload: () => ({ iss: "https://accounts.google.com", aud: "client-test", exp: Math.floor(Date.now() / 1000) + 300, iat: Math.floor(Date.now() / 1000), nonce: "wrong-nonce", sub: "google-subject-stable-002", email: "other@example.invalid", email_verified: true }) } as never);
+    try {
+      const redirect = new URL(await provider.completeGoogle(flow.googleState, "google-code", undefined));
+      expect(redirect.searchParams.get("error")).toBe("server_error");
+      expect(await store.getGrant(userId)).toMatchObject({ refreshToken: "preserve-this-grant" });
+    } finally { tokenMock.mockRestore(); identityMock.mockRestore(); }
+  });
   it("shows a minimal connection page and enforces same-origin form submission", async () => {
     const ctx = await setup();
-    const flow = { id: "one-time-flow", userId: "internal-user", client: { client_id: "client", redirect_uris: ["http://127.0.0.1/cb"] } as never,
+    const flow = { id: "one-time-flow", userId: "internal-user", client: { client_id: "client", client_name: "<img src=x>", redirect_uris: ["http://127.0.0.1/cb"] } as never,
       params: { state: "state", scopes: [MCP_SCOPE], codeChallenge: "challenge", redirectUri: "http://127.0.0.1/cb" }, googleState: "google-state", googleVerifier: "verifier", expiresAt: Date.now() + 60_000, started: false };
     await ctx.store.putFlow(flow);
     try {
       const page = await fetch(`${ctx.origin}/connect/google?flow=${flow.id}`);
       const html = await page.text();
-      expect(html).toContain("Continue with Google"); expect(html).toContain("Read-only access");
-      expect(html).toContain("We never ask for your Google password."); expect(html).toContain("No arbitrary Drive access");
+      expect(html).toContain("Continue with Google"); expect(html).toContain("read-only access to supported Google Classroom data");
+      expect(html).toContain("&lt;img src=x&gt;"); expect(html).toContain("http://127.0.0.1");
+      expect(html).toContain("client name is supplied by the connecting MCP client and is not verified");
+      expect(html).toContain("After Google authorization, the response will be returned to <code>http://127.0.0.1/cb</code>");
+      expect(html).toContain("We never ask for your Google password."); expect(html).toContain("This consent does not request Google Drive access.");
       expect(html).toContain("Disconnect is available");
       const rejected = await fetch(`${ctx.origin}/connect/google`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: "https://attacker.example" }, body: `flow=${flow.id}`, redirect: "manual" });
       expect(rejected.status).toBe(403);
+    } finally { await close(ctx.server); }
+  });
+  it("does not display Google consent for a persisted callback with a query string", async () => {
+    const ctx = await setup();
+    const flow = { id: "old-query-flow", userId: "internal-user", client: { client_id: "old-client", client_name: "MCP client", redirect_uris: ["http://127.0.0.1/cb?next=elsewhere"] } as never,
+      params: { state: "state", scopes: [MCP_SCOPE], codeChallenge: "challenge", redirectUri: "http://127.0.0.1/cb?next=elsewhere" }, googleState: "old-query-state", googleVerifier: "verifier", expiresAt: Date.now() + 60_000, started: false };
+    await ctx.store.putFlow(flow);
+    try {
+      const response = await fetch(`${ctx.origin}/connect/google?flow=${flow.id}`);
+      expect(response.status).toBe(400);
+      expect(await response.text()).not.toContain("Continue with Google");
+    } finally { await close(ctx.server); }
+  });
+  it("accurately discloses creation and update of unpublished drafts when that permission is configured", async () => {
+    const teacherWriteScope = "https://www.googleapis.com/auth/classroom.coursework.students";
+    const ctx = await setup({ ...authConfig, teacherWriteScopes: [teacherWriteScope] });
+    const flow = { id: "write-disclosure-flow", userId: "internal-user", client: { client_id: "registered-client", client_name: "MCP client", redirect_uris: ["https://chatgpt.com/connector/oauth/test-app"] } as never,
+      params: { state: "state", scopes: [MCP_SCOPE], codeChallenge: "challenge", redirectUri: "https://chatgpt.com/connector/oauth/test-app" }, googleState: "google-state", googleVerifier: "verifier", expiresAt: Date.now() + 60_000, started: false };
+    await ctx.store.putFlow(flow);
+    try {
+      const response = await fetch(`${ctx.origin}/connect/google?flow=${flow.id}`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).toContain("create an unpublished draft or update an existing unpublished draft");
+      expect(html).toContain("does not change published coursework, submit student work, publish drafts, or write grades");
+      expect(html).not.toContain("does not edit existing coursework");
     } finally { await close(ctx.server); }
   });
   it("rejects a bearer whose Google grant is missing without leaking stored credentials", async () => {

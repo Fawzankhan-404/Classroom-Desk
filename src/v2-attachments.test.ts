@@ -35,8 +35,8 @@ function betaClients(options: { now?: () => number; mimeType?: string; body?: st
 }
 
 describe("V2 explicit teacher attachment authorization", () => {
-  it("normalizes beta origins and keeps a fresh authorization valid for its TTL", async () => {
-    expect(buildPickerUrl("https://beta.classroom.jarvis404.com/", "opaque")).toBe("https://beta.classroom.jarvis404.com/picker/opaque");
+  it("normalizes configured origins and keeps a fresh authorization valid for its TTL", async () => {
+    expect(buildPickerUrl("https://classroom.jarvis404.com/", "opaque")).toBe("https://classroom.jarvis404.com/picker/opaque");
     let now = 1_700_000_000_000;
     const store = new AttachmentAuthorizationStore(600_000, () => now);
     const created = store.create({ subject: "student-a", courseId: "c1", courseWorkId: "w1", attachment });
@@ -88,12 +88,21 @@ describe("V2 authorized attachment content", () => {
   });
 
   it("rejects unsupported, malformed, oversized, inaccessible, and failed files predictably", async () => {
-    await expect(new GoogleDriveAttachmentReader(driveFor("application/zip", "PK")).read(attachment)).rejects.toMatchObject({ code: "unsupported_mime" });
+    await expect(new GoogleDriveAttachmentReader(driveFor("application/zip", "PK")).read(attachment)).rejects.toMatchObject({ code: "unsupported_mime", message: "This attachment type is not supported." });
     await expect(new GoogleDriveAttachmentReader(driveFor("application/pdf", "not a pdf")).read(attachment)).rejects.toMatchObject({ code: "malformed_attachment" });
-    await expect(new GoogleDriveAttachmentReader(driveFor("text/plain", "too large"), { maxBytes: 3 }).read(attachment)).rejects.toMatchObject({ code: "attachment_too_large" });
+    await expect(new GoogleDriveAttachmentReader(driveFor("text/plain", "too large"), { maxBytes: 3 }).read(attachment)).rejects.toMatchObject({ code: "attachment_too_large", message: "The attachment exceeds the supported size limit." });
     const inaccessible = driveFor("text/plain", "x"); inaccessible.files.get.mockRejectedValue({ response: { status: 403 } });
     await expect(new GoogleDriveAttachmentReader(inaccessible).read(attachment)).rejects.toMatchObject({ code: "attachment_inaccessible" });
     const failed = driveFor("text/plain", "x"); failed.files.get.mockRejectedValue(new Error("secret diagnostic"));
     await expect(new GoogleDriveAttachmentReader(failed).read(attachment)).rejects.toMatchObject({ code: "attachment_read_failed", message: "Classroom Desk could not read the selected attachment." });
+  });
+
+  it("uses a neutral message when attachment reading is unavailable", async () => {
+    const clients = betaClients();
+    delete clients.attachmentAccess;
+    await expect(readTeacherAttachment(clients, "opaque-authorization-id")).rejects.toMatchObject({
+      code: "attachment_beta_unavailable",
+      message: "Teacher attachment reading is not configured for this connection.",
+    });
   });
 });

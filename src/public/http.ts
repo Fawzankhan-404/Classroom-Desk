@@ -6,24 +6,26 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { createClients } from "../classroom.js";
 import type { ClassroomClients } from "../classroom.js";
 import { OAuth2Client } from "googleapis-common";
 import { createServer } from "../server.js";
 import { MCP_OFFLINE_SCOPE, MCP_SCOPE, PublicOAuthProvider } from "./oauth.js";
+import { loadSaaSFeatureFlags } from "../saas/flags.js";
+import { renderPricingPage } from "../saas/portal.js";
 import type { PublicAuthStore } from "./store.js";
 import type { RuntimeConfig } from "./config.js";
-import { logHttp } from "./log.js";
+import { logHttp, logOAuthCallbackRedirect, logOAuthCallbackRejected } from "./log.js";
 import { faviconSvg, logoSvg } from "./favicon-asset.js";
 import { socialPreviewPngBase64 } from "./social-preview-asset.js";
 import { accessGuidance, MCP_ONBOARDING_TOOLS, registerMcpOnboarding } from "../saas/mcp-access.js";
-import { sessionCookie } from "../saas/sessions.js";
 
 type Session = { userId: string; transport: StreamableHTTPServerTransport; server: McpServer };
 type AuthenticatedRequest = Request & { auth?: AuthInfo };
 export type RawBodyRequest = Request & { rawBody?: Buffer };
 type McpFactory = (auth: OAuth2Client, userId: string) => Promise<McpServer>;
-type PublicAppOptions = { mcpFactory?: McpFactory; resourceName?: string; registerRoutes?: (app: express.Express) => void; entitlementCheck?: (userId: string) => Promise<{ allowed: boolean; reason: string }>; accountIdentity?: (userId: string) => Promise<{ id: string; displayName: string } | null>; publicOnly?: boolean; internalDelegationSecret?: string };
+type PublicAppOptions = { mcpFactory?: McpFactory; resourceName?: string; registerRoutes?: (app: express.Express) => void; entitlementCheck?: (userId: string) => Promise<{ allowed: boolean; reason: string }>; publicOnly?: boolean; internalDelegationSecret?: string; stagingSubjectFingerprint?: boolean };
 
 export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, provider = new PublicOAuthProvider(store, config), readyCheck?: () => Promise<void>, clientsFactory: (auth: OAuth2Client) => ClassroomClients = createClients, options: PublicAppOptions = {}) {
   const app = express();
@@ -68,7 +70,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
 
   const metadataUrl = new URL("/.well-known/oauth-protected-resource/mcp", config.origin).toString();
   app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
-  app.get("/pricing", (_req, res) => res.redirect(308, "/"));
+  app.get("/pricing", (_req, res) => res.type("html").send(page("Pricing", "pricing", operator, support, config.origin, pricingBody(config.saasFlags ?? loadSaaSFeatureFlags(process.env)))));
   const readyLimit = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false, keyGenerator: workerKeyGenerator,
     handler: (_req, res) => res.status(429).json({ error: "rate_limited" }),
   });
@@ -96,42 +98,21 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
     res.setHeader("Cache-Control", "public, max-age=86400, no-transform");
     res.type("js").send(connectScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript());
   });
-  app.get("/", (_req, res) => res.type("html").send(page("Classroom Desk", "home", operator, support, config.origin, homeBody(config.stageMedia ?? {}))));
-  app.get("/connect", (_req, res) => res.type("html").send(page("Connect to ChatGPT", "connect", operator, support, config.origin, connectBody(config.mcpResource.href))));
-  app.get("/connect", (_req, res) => res.type("html").send(page("Connect to ChatGPT", "connect", operator, support, config.origin, `
-    <article class="connect-card installation-guide">
-      <div class="hero-logo" aria-label="Classroom Desk logo">${logoSvg}</div>
-      <p class="eyebrow">MCP installation wizard</p>
-      <h1>Set up Classroom Desk in ChatGPT.</h1>
-      <p>ChatGPT controls the connection screen. This guide shows what to expect without attempting cross-origin automation or claiming that setup has completed.</p>
-      <div class="wizard-shell" data-wizard>
-        <ol class="wizard-progress" aria-label="Installation progress"><li class="active" data-wizard-dot aria-current="step">Open Plugins</li><li data-wizard-dot aria-current="false">Add custom MCP</li><li data-wizard-dot aria-current="false">Configure</li><li data-wizard-dot aria-current="false">Authorize</li></ol>
-        <div class="wizard-panel">
-          <section data-wizard-step><span class="wizard-kicker">Step 1</span><h2>Open ChatGPT Plugins</h2><div class="chatgpt-preview"><header><strong>Plugins</strong><button type="button" disabled>Add</button></header><label><span aria-hidden="true">⌕</span><input aria-label="Search plugins example" placeholder="Search plugins" disabled></label><ul><li><span class="plugin-glyph">C</span><span><strong>Classroom Desk</strong><small>Google Classroom workspace</small></span></li><li><span class="plugin-glyph">N</span><span><strong>Notes</strong><small>Organize your ideas</small></span></li></ul><div class="preview-highlight">The real ChatGPT screen controls this action.</div></div><p>Availability depends on your ChatGPT plan and workspace. Use the button below to open the official interface in a new tab.</p></section>
-          <section data-wizard-step hidden><span class="wizard-kicker">Step 2</span><h2>Add a custom MCP connection</h2><div class="dropdown-preview"><span>Connection type</span><strong>Custom MCP server <b>⌄</b></strong><small>This is an illustrative preview. The actual dropdown appears inside ChatGPT.</small></div><p>Choose the custom connection option only if it is offered by your current ChatGPT workspace. Do not paste credentials into this guide.</p></section>
-          <section data-wizard-step hidden><span class="wizard-kicker">Step 3</span><h2>Configure Classroom Desk</h2><dl class="config-preview"><div><dt>Name</dt><dd>Classroom Desk</dd></div><div><dt>Description</dt><dd>Connect Google Classroom to ChatGPT to work with courses, assignments, deadlines, and authorized materials.</dd></div><div><dt>Connection</dt><dd><code>https://classroom.jarvis404.com/mcp</code></dd></div><div><dt>Authentication</dt><dd>OAuth</dd></div></dl><div class="mcp-url-row"><label for="mcp-url">Canonical MCP URL</label><input id="mcp-url" data-mcp-url readonly value="https://classroom.jarvis404.com/mcp"><button class="button" type="button" data-copy-mcp="https://classroom.jarvis404.com/mcp">Copy MCP URL</button></div></section>
-          <section data-wizard-step hidden><span class="wizard-kicker">Step 4</span><h2>Trust, then authorize</h2><div class="trust-preview"><span aria-hidden="true">✓</span><div><strong>Trust this custom MCP server?</strong><p>Review the server name and URL before continuing. Google will ask separately for Classroom permissions.</p></div></div><p class="wizard-path">ChatGPT <b>→</b> Classroom Desk <b>→</b> Google OAuth <b>→</b> Connected</p><p>Trusting a server does not grant paid access, and this page cannot report a successful connection. Finish the authorization in ChatGPT, then return here if you need the website dashboard.</p></section>
-        </div>
-        <div class="wizard-actions"><button class="button secondary" type="button" data-wizard-back hidden>Back</button><button class="button" type="button" data-wizard-next>Next step</button></div>
-      </div>
-      <div class="guide-actions"><a class="button secondary" href="/login">Sign in to Classroom Desk</a><a class="button secondary" href="/start">Get started</a><a class="text-link" href="/app">Open dashboard</a></div>
-      <details class="troubleshooting"><summary>Connection troubleshooting</summary><ul><li>If no Plugins, connector, or custom MCP option appears, your plan or workspace may not support manual connections.</li><li>If Google authorization fails, restart the connection from ChatGPT and use the same Google account that owns the Classroom access.</li><li>If tools return an authorization error, reconnect Google Classroom; website sign-in and Classroom authorization are separate.</li><li>For help, contact <a href="mailto:${mailto}">${support}</a> without sending passwords, OAuth codes, or private Classroom content.</li></ul></details>
-    </article>
-    <script src="/assets/connect.js" defer></script>
-  `)));
+  app.get("/", (_req, res) => res.type("html").send(page("Classroom Desk", "home", operator, support, config.origin, homeBody())));
+  app.get("/connect", (_req, res) => res.type("html").send(page("Connect to ChatGPT", "connect", operator, support, config.origin, connectBody())));
   app.get("/privacy", (_req, res) => res.type("html").send(page("Privacy policy", "privacy", operator, support, config.origin, `
     <article class="doc">
       <h1>Privacy policy</h1>
       <p class="updated">Last updated: 3 October 2026.</p>
       <p>Classroom Desk is operated by ${operator}. Contact: <a href="${mailto}">${support}</a>.</p>
       <h2>Data accessed and used</h2>
-      <p>With your permission, this service reads your Google Classroom courses, announcements, coursework, course materials metadata, topics, and your own submissions and grades to answer requests from your connected MCP client. It requests six Classroom read-only permissions and no Google Drive, Gmail, or Google write permission.</p>
+      <p>Student tools request six read-only Google Classroom permissions. The standard consent also includes Google's file-scoped <code>drive.file</code> permission, which can let Classroom Desk see, create, edit, and delete specific Google Drive files you use with the app or explicitly share through Google Picker. It does not allow browsing arbitrary Drive files. Teacher roster and submission reads require separate Google consent and server verification of teacher membership. Optional Teacher draft management uses the separate <code>classroom.coursework.students</code> scope. Google describes it as allowing management of coursework and grades in classes you teach, and viewing coursework and grades in classes you administer. After separate consent and explicit confirmation, Classroom Desk can create an unpublished draft or update an existing unpublished draft. It does not change published coursework, submit student work, publish drafts, or write grades.</p>
       <p>Teacher attachment content is not read by default. When a supported assignment file is needed, you explicitly authorize that exact file through Google’s file picker. Classroom Desk does not browse arbitrary Drive files.</p>
       <h2>Authentication and token handling</h2>
-      <p>Google handles sign-in. This service never receives your Google password. In production, authorization records include an internal connection identifier, encrypted Google refresh grant, OAuth client and token records, and timestamps needed to maintain your connection.</p>
+      <p>Google handles sign-in. This service never receives your Google password. Google token material is encrypted before persistent storage. The service also stores account and connection identifiers, authorized-scope metadata, and timestamps needed to maintain your connection.</p>
       <h2>Storage, sharing, and infrastructure</h2>
-      <p>Authorization records are stored in encrypted PostgreSQL-backed production storage. We do not persist course content or attachment bodies as an application cache. Requested Classroom information is returned to your connected MCP client, which may process it under that client's own terms and privacy policy. Google processes sign-in and Classroom API requests. Cloudflare and the database provider process hosting and storage operations needed to run the service.</p>
-      <p>We do not sell Classroom data or use it for advertising. If you explicitly ask Classroom Desk to save a generated assignment PDF, it uploads only that confirmed file to your connected Drive. You then attach and submit it yourself in Google Classroom.</p>
+      <p>Connection metadata and encrypted Google token material are stored in the configured application database. We do not persist course content or attachment bodies as an application cache. Requested Classroom information is returned to your connected MCP client, which may process it under that client's own terms and privacy policy. Google processes sign-in and Classroom API requests. Cloudflare and the database provider process hosting and storage operations needed to run the service.</p>
+      <p>We do not sell Classroom data or use it for advertising. Generated-PDF transfer to Drive is currently unavailable. Download files yourself and attach them in Google Classroom; Classroom Desk does not claim that a Drive upload is a Classroom submission.</p>
       <h2>Google API Services Limited Use</h2>
       <p>Classroom Desk uses information received from Google APIs only to provide the user-requested Classroom features described here and will follow the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>, including its Limited Use requirements. When you ask ChatGPT to answer from your Classroom, the requested result is sent to your connected ChatGPT/MCP client so it can answer your request. Classroom Desk does not use Classroom data for advertising or to train generalized models.</p>
       <h2>Retention, disconnect, and deletion</h2>
@@ -145,9 +126,9 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
       <p class="updated">Last updated: 3 October 2026.</p>
       <p>This service is operated by ${operator}. You must use an account you are authorized to access and comply with your school and Google’s applicable rules.</p>
       <h2>What the service does</h2>
-      <p>Classroom Desk helps a compatible MCP client answer questions about your Google Classroom courses, announcements, coursework, materials, topics, deadlines, and your own submissions. You may explicitly authorize a supported teacher attachment, save a generated PDF to Drive after confirmation, and ask Classroom Desk to verify the actual Classroom submission state.</p>
+      <p>Classroom Desk helps a compatible MCP client answer questions about your Google Classroom courses, announcements, coursework, materials, topics, deadlines, and your own submissions. You may explicitly authorize a supported teacher attachment and ask Classroom Desk to verify the actual Classroom submission state. Generated-PDF transfer to Drive is currently unavailable; attach downloaded files yourself.</p>
       <h2>Limits</h2>
-      <p>The service may be unavailable when Google, a school administrator, the connected client, or the hosting provider limits access. Classroom information may be incomplete or delayed; check the original Classroom item before relying on a deadline or grade. Classroom Desk does not submit, edit, grade, or change Classroom content. Drive saves require explicit confirmation, and Classroom submission remains your action.</p>
+      <p>The service may be unavailable when Google, a school administrator, the connected client, or the hosting provider limits access. Classroom information may be incomplete or delayed; check the original Classroom item before relying on a deadline or grade. If you separately authorize the coursework-management permission and explicitly confirm the action, Classroom Desk can create an unpublished assignment draft or update an existing unpublished draft in a course where Google verifies you as a teacher. It does not change published coursework, publish drafts, submit student work, or write grades or submissions. Generated PDFs are not transferred to Drive; attach downloaded files yourself, and submit through Google Classroom yourself.</p>
       <h2>Copyright and trademarks</h2>
       <p>© 2026 ${operator}. Original website text, design, and service materials are reserved by the operator. Your Classroom content remains subject to the rights of its respective owners; using this service does not transfer ownership of that content.</p>
       <p>Google Classroom is a trademark of Google LLC. ChatGPT and OpenAI are trademarks of OpenAI. These names describe the services this independent integration connects with. Google and OpenAI do not operate or endorse Classroom Desk.</p>
@@ -169,13 +150,13 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   `)));
   app.get("/refunds", (_req, res) => res.type("html").send(page("Refund and cancellation policy", "refunds", operator, support, config.origin, `
     <article class="doc">
-      <h1>Existing payment support</h1>
+      <h1>Refund and cancellation policy</h1>
       <p class="updated">Last updated: 9 October 2026.</p>
-      <p>Classroom Desk is free and new payment enrollment is disabled. This page is for questions about historical transactions and any existing recurring subscription.</p>
-      <h2>Historical transactions</h2>
-      <p>Existing payment and trial records are preserved for accounting and support. They do not control access to the free Classroom Desk experience.</p>
-      <h2>Existing recurring subscriptions</h2>
-      <p>An existing recurring subscription may continue until its owner cancels it. Sign in and use the existing subscription page to request cancellation, or contact support if you cannot access that page.</p>
+      <p>This page describes the initial Classroom Desk billing behavior. Prices are shown in INR. Applicable taxes, invoices, payment-provider terms, and cancellation details are presented with the relevant payment flow or receipt.</p>
+      <h2>Promotional trial</h2>
+      <p>The ₹9 trial is a one-time payment for exactly 168 hours from verified payment. It does not automatically convert into a recurring subscription. Existing valid trials continue until their recorded expiry.</p>
+      <h2>Monthly subscriptions</h2>
+      <p>Monthly plans renew through the payment provider according to the recurring authorization you confirm. Cancellation stops future renewal where supported and preserves access until the verified paid-through date.</p>
       <h2>Refunds and disputes</h2>
       <p>Refund requests are reviewed against the provider transaction, payment state, access period, and applicable merchant policy. Verified refund or chargeback events can change billing state and effective access. Do not send card details, passwords, OAuth tokens, or private Classroom content.</p>
       <h2>Contact</h2>
@@ -195,9 +176,33 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   // Keeping these trusted service-binding routes first preserves the public
   // MCP surface while allowing canonical policy evaluation to run.
   options.registerRoutes?.(app);
+  // The MCP SDK redirects provider errors to the requested redirect_uri. Reject
+  // disallowed destinations before its handler so a rejected client never
+  // receives even an OAuth error redirect.
+  const rejectUnsafeAuthorizationRedirect = async (req: Request, res: Response, next: NextFunction) => {
+    const params = (req.method === "GET" ? req.query : req.body) as Record<string, unknown> | undefined;
+    const clientId = typeof params?.client_id === "string" ? params.client_id : undefined;
+    if (!clientId) return next();
+    try {
+      const client = await provider.clientsStore.getClient(clientId);
+      if (!client) return next(); // The SDK returns invalid_client directly, before redirect handling.
+      const redirectUri = typeof params?.redirect_uri === "string"
+        ? params.redirect_uri
+        : client.redirect_uris.length === 1 ? client.redirect_uris[0] : undefined;
+      if (redirectUri && !provider.isAllowedAuthorizationRedirect(client as OAuthClientInformationFull, redirectUri)) {
+        return res.status(400).json({ error: "invalid_request", error_description: "Unsupported redirect URI." });
+      }
+      return next();
+    } catch {
+      // Fail closed without redirecting to any client-controlled destination.
+      return res.status(400).json({ error: "invalid_request", error_description: "Authorization request could not be validated." });
+    }
+  };
+  app.get("/authorize", rejectUnsafeAuthorizationRedirect);
+  app.post("/authorize", rejectUnsafeAuthorizationRedirect);
   app.use(mcpAuthRouter({
     provider, issuerUrl: config.origin, baseUrl: config.origin, resourceServerUrl: config.mcpResource,
-    scopesSupported: [MCP_SCOPE, MCP_OFFLINE_SCOPE], resourceName: options.resourceName ?? "Classroom Desk read-only access",
+    scopesSupported: [MCP_SCOPE, MCP_OFFLINE_SCOPE], resourceName: options.resourceName ?? "Classroom Desk MCP access",
     authorizationOptions: workerOAuthLimit,
     clientRegistrationOptions: workerOAuthLimit,
     tokenOptions: workerOAuthLimit,
@@ -206,16 +211,33 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
 
   app.get("/connect/google", async (req, res) => {
     const flow = typeof req.query.flow === "string" ? req.query.flow : "";
-    if (!flow || !(await store.getFlow(flow))) return res.status(400).type("text").send("This connection request expired. Return to your MCP client and try again.");
+    const oauthFlow = flow ? await store.getFlow(flow) : undefined;
+    if (!oauthFlow || !provider.isAllowedFlowRedirect(oauthFlow)) return res.status(400).type("text").send("This connection request expired or could not be validated. Return to your MCP client and try again.");
     const hiddenFlow = escapeHtml(flow);
-    // Preserve the origin on form POSTs while omitting sensitive flow URLs.
-    // This must also apply to the unified authorization page below.
-    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    if (provider.accounts) {
-      const account = await provider.accounts.session(req.get("cookie"));
-      const drive = config.googleScopes?.includes("https://www.googleapis.com/auth/drive.file");
-      return res.type("html").send(page("Authorize Classroom Desk", "connect", operator, support, config.origin, `<section class="connect-card"><h1>Connect Classroom Desk</h1><p>${account ? `Continue as ${escapeHtml(account.displayName)}. A valid existing Classroom authorization will be reused.` : "Sign in with Google to connect your Classroom Desk account and authorize Classroom access in one flow."}</p><p>Classroom access is read-only.${drive ? " Google Drive permission applies only to specific files used with this app; it permits reading, editing, creating and deleting those files. File actions require your explicit instruction." : ""}</p><form method="post" action="/connect/google"><input type="hidden" name="flow" value="${hiddenFlow}"><button class="button" type="submit">${account ? "Authorize connection" : "Continue with Google"}</button>${account ? '<button type="submit" name="account" value="select">Use another Google account</button>' : ""}</form><p>Connecting does not activate a paid plan. Google and account permissions apply to every request.</p></section>`, true));
+    const clientName = typeof oauthFlow.client.client_name === "string"
+      ? oauthFlow.client.client_name.slice(0, 160)
+      : "Unidentified MCP client";
+    const redirectUri = oauthFlow.params.redirectUri;
+    let responseRecipient = "Unavailable; cancel this request";
+    if (typeof redirectUri === "string") {
+      try {
+        const recipient = new URL(redirectUri);
+        if ((recipient.protocol === "https:" || recipient.protocol === "http:") && !recipient.search && !recipient.hash) responseRecipient = `${recipient.origin}${recipient.pathname}`.slice(0, 320);
+      } catch { /* Keep the fail-closed display if the registered callback cannot be parsed. */ }
     }
+    const googleScopes = provider.config.googleScopes ?? [];
+    const hasDriveFileScope = googleScopes.includes("https://www.googleapis.com/auth/drive.file");
+    const hasTeacherReadConsent = Boolean(provider.config.teacherScopes?.length);
+    const hasTeacherDraftConsent = Boolean(provider.config.teacherWriteScopes?.length);
+    const driveDisclosure = hasDriveFileScope
+      ? "The standard consent also includes Google's file-scoped drive.file permission, which can let Classroom Desk see, create, edit, and delete specific Drive files you use with the app or explicitly share through Google Picker. It does not allow browsing arbitrary Drive files."
+      : "This consent does not request Google Drive access.";
+    const teacherReadDisclosure = hasTeacherReadConsent
+      ? "Teacher roster and submission reads need separate consent and server verification of teacher membership."
+      : "";
+    const teacherDraftDisclosure = hasTeacherDraftConsent
+      ? "Optional Teacher draft management uses a separate classroom.coursework.students permission. Google describes it as allowing management of coursework and grades in classes you teach and viewing coursework and grades in classes you administer. After separate consent and explicit confirmation, Classroom Desk can create an unpublished draft or update an existing unpublished draft. It does not change published coursework, submit student work, publish drafts, or write grades."
+      : "";
     // A no-referrer policy can cause browser form POSTs to send Origin: null.
     // Keep the same-origin CSRF check and send only the origin to Google on navigation.
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -224,12 +246,21 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
       <section class="connect-card">
         ${logoMark()}
         <h1>Connect Classroom Desk</h1>
-        <p>Read-only access to your Classroom courses, announcements, coursework, course materials, topics, and your submissions.</p>
-        <div class="badge-row"><span>Read-only</span><span>No arbitrary Drive access</span><span>No write access</span></div>
+        <div class="permission-note">
+          <h2>Connection requested by</h2>
+          <p><strong>${escapeHtml(clientName)}</strong></p>
+          <p>After Google authorization, the response will be returned to <code>${escapeHtml(responseRecipient)}</code>.</p>
+          <p>The client name is supplied by the connecting MCP client and is not verified by Classroom Desk. Continue only if you recognize both the client and destination.</p>
+        </div>
+        <p>Student tools request read-only access to supported Google Classroom data. ${driveDisclosure} ${teacherReadDisclosure} ${teacherDraftDisclosure}</p>
+        <div class="badge-row"><span>Classroom reads</span><span>${hasDriveFileScope ? "File-scoped Drive access" : "No Google Drive access"}</span><span>No gradebook writes</span></div>
         <div class="permission-note">
           <h2>Before you continue</h2>
           <ul>
-            <li>You will be redirected to Google to approve Classroom read-only access.</li>
+            <li>Google will show the permissions requested by this connection before you approve them.</li>
+            ${hasTeacherReadConsent ? "<li>Teacher roster and submission access requires separate consent and a Google-verified teacher role.</li>" : ""}
+            ${hasTeacherDraftConsent ? "<li>Creating an unpublished teacher assignment draft requires a further permission and your explicit confirmation.</li>" : ""}
+            <li>Classroom Desk does not submit student work or write grades. It does not publish teacher drafts.</li>
             <li>Classroom Desk is operated by ${operator}.</li>
             <li>We never ask for your Google password.</li>
             <li>Disconnect is available from the connected client and revokes/deletes the local authorization where possible.</li>
@@ -248,7 +279,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   app.post("/connect/google", async (req, res) => {
     if (req.get("origin") !== config.origin.origin) return res.status(403).type("text").send("Connection request could not be validated.");
     const flow = typeof req.body?.flow === "string" ? req.body.flow : "";
-    try { return res.redirect(303, await provider.beginGoogle(flow, req.get("cookie"), req.body?.account === "select")); }
+    try { return res.redirect(303, await provider.beginGoogle(flow)); }
     catch { return res.status(400).type("text").send("This connection request expired or has already started. Return to your MCP client and try again."); }
   });
 
@@ -257,8 +288,11 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
       const state = typeof req.query.state === "string" ? req.query.state : undefined;
       const code = typeof req.query.code === "string" ? req.query.code : undefined;
       const error = typeof req.query.error === "string" ? req.query.error : undefined;
-      return res.redirect(303, await provider.completeGoogle(state, code, error, req.get("cookie"), token => res.append("Set-Cookie", sessionCookie(token, config.origin.protocol === "https:"))));
+      const location = await provider.completeGoogle(state, code, error);
+      logOAuthCallbackRedirect(location, 303, error);
+      return res.redirect(303, location);
     } catch {
+      logOAuthCallbackRejected();
       return res.status(400).type("text").send("Google authorization could not be completed. Return to your MCP client and try again.");
     }
   });
@@ -338,7 +372,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
       if (!auth && protectedInvocation) return undefined;
       auth ??= new OAuth2Client(); // Discovery/onboarding never calls Google.
       const mcp = options.mcpFactory ? await options.mcpFactory(auth, userId) : await createServer(clientsFactory(auth), { publicV1: true });
-      registerMcpOnboarding(mcp, () => options.entitlementCheck?.(userId) ?? Promise.resolve({ allowed: false, reason: "account_setup_required" }), config.origin.origin, options.accountIdentity ? () => options.accountIdentity!(userId) : undefined);
+      registerMcpOnboarding(mcp, () => options.entitlementCheck?.(userId) ?? Promise.resolve({ allowed: false, reason: "account_setup_required" }), config.origin.origin, options.stagingSubjectFingerprint ? userId : undefined);
       return mcp;
     };
     if (config.production) {
@@ -398,25 +432,32 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   return { app, provider, sessions, closeSessions };
 }
 
-function homeBody(media: { wideVideo?: string; widePoster?: string; narrowVideo?: string; narrowPoster?: string }) {
-  return `<section class="home-stage" data-home-stage aria-labelledby="home-title"><video class="stage-motion stage-motion--wide" autoplay muted loop playsinline preload="metadata" aria-hidden="true" poster="${media.widePoster ?? ""}" data-stage-src="${media.wideVideo ?? ""}"></video><video class="stage-motion stage-motion--narrow" muted loop playsinline preload="none" aria-hidden="true" poster="${media.narrowPoster ?? ""}" data-stage-src="${media.narrowVideo ?? ""}"></video><svg class="home-stage-noise" viewBox="0 0 160 160" preserveAspectRatio="none" aria-hidden="true"><filter id="homeNoise"><feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="2" seed="8" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .14"/></feComponentTransfer></filter><rect width="160" height="160" filter="url(#homeNoise)"/></svg><div class="home-stage-inner"><div class="home-masthead"><div class="home-copy"><p class="eyebrow home-eyebrow">Google Classroom for ChatGPT</p><h1 id="home-title">Built for <span>Classroom clarity</span>.</h1><p class="home-intro">Bring your authorized Google Classroom context into a conversation that helps you know what is due, what changed, and what to do next.</p><div class="actions"><a class="button" href="/start">Get Started — Free</a><a class="text-link" href="#features">See what you can ask <span aria-hidden="true">↗</span></a><a class="text-link" href="https://github.com/Fawzankhan-404/Classroom-Desk" target="_blank" rel="noopener noreferrer">View on GitHub <span aria-hidden="true">↗</span></a></div><p class="home-note">Illustrative product experience. Connect your account for live Classroom answers.</p></div><div class="home-console" aria-label="Interactive illustrative Classroom Desk conversation"><div class="console-top"><span class="console-title"><span class="console-mark" aria-hidden="true"></span>Classroom Desk example</span><span class="console-status">Illustrative only</span></div><div class="example-panel home-example-panel" aria-live="polite"><span class="example-badge">Example question</span><h2 class="example-question" data-example-question>What assignments do I have?</h2><p class="example-answer" data-example-answer>“You have three current items: a Physics lab report, History reading notes, and a returned Biology assignment. Check each Classroom item for its latest details.”</p><small>Illustrative response. It is not live account data.</small></div><div class="prompt-tabs home-prompt-tabs" role="tablist" aria-label="Choose an illustrative question"><p class="prompt-label">Try an example</p><button role="tab" aria-selected="true" data-prompt-tab="0" data-copy-prompt="What assignments do I have?">What assignments do I have?<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="1" data-copy-prompt="What deadlines are coming up?">What deadlines are coming up?<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="2" data-copy-prompt="Show my recent Classroom activity.">Recent activity<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="3" data-copy-prompt="Show announcements from my courses.">Announcements<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="4" data-copy-prompt="Find missing or returned work.">Missing work<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="5" data-copy-prompt="Explain the instructions for my assignment.">Instructions<span>Copy</span></button></div></div></div><section id="features" class="capability-section" aria-labelledby="capability-title"><div class="capability-heading"><p class="eyebrow">What you can ask</p><h2 id="capability-title">Useful context, without the noise.</h2><p>Classroom Desk keeps the answer close to the source you authorized and clear about what it can do.</p></div><div class="capability-cards"><article class="capability-card"><div class="capability-card-top"><span>01</span><span>Course context</span></div><h3>Ask about the work in front of you.</h3><p>Bring questions about courses, coursework, announcements, and your own submission status into one conversation.</p><svg class="capability-visual" viewBox="0 0 240 92" aria-hidden="true"><path d="M8 68h224M18 52h48M18 37h86M18 22h125" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="188" cy="22" r="6" fill="currentColor"/><circle cx="207" cy="37" r="6" fill="currentColor"/><circle cx="225" cy="52" r="6" fill="currentColor"/></svg></article><article class="capability-card"><div class="capability-card-top"><span>02</span><span>Due date clarity</span></div><h3>Know what needs your attention.</h3><p>Find upcoming, missing, and returned work with answers grounded in the Classroom data you approved.</p><svg class="capability-visual" viewBox="0 0 240 92" aria-hidden="true"><rect x="16" y="16" width="52" height="52" rx="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M30 43l9 9 18-22M94 25h116M94 46h86M94 67h58" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="214" cy="25" r="5" fill="currentColor"/></svg></article><article class="capability-card"><div class="capability-card-top"><span>03</span><span>Clear boundaries</span></div><h3>Understand the task, stay in control.</h3><p>Teacher files require explicit authorization, and Classroom Desk never submits or edits work automatically.</p><svg class="capability-visual" viewBox="0 0 240 92" aria-hidden="true"><path d="M42 18h58l24 24v32H42zM100 18v25h24M58 59h50M160 26h54M160 46h40M160 66h26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="144" cy="26" r="6" fill="currentColor"/></svg></article></div></section></div></section>
+function homeBody() {
+  return `<section class="home-stage" data-home-stage aria-labelledby="home-title"><video class="stage-motion stage-motion--wide" autoplay muted loop playsinline preload="metadata" aria-hidden="true" poster="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/5c3ec08f-2dbf-4c0a-8588-f6106a789443.webp" data-stage-src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260826_125226_45cb4f38-aa7e-47e1-885d-ae0b69745369.mp4"></video><video class="stage-motion stage-motion--narrow" muted loop playsinline preload="none" aria-hidden="true" poster="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/0f4926a4-e660-4df2-9195-2bfb3e341bdd.webp" data-stage-src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260826_125242_daae1570-386d-4bd5-8896-80499e2371e0.mp4"></video><svg class="home-stage-noise" viewBox="0 0 160 160" preserveAspectRatio="none" aria-hidden="true"><filter id="homeNoise"><feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="2" seed="8" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .14"/></feComponentTransfer></filter><rect width="160" height="160" filter="url(#homeNoise)"/></svg><div class="home-stage-inner"><div class="home-masthead"><div class="home-copy"><p class="eyebrow home-eyebrow">Google Classroom for ChatGPT</p><h1 id="home-title">Built for <span>Classroom clarity</span>.</h1><p class="home-intro">Bring your authorized Google Classroom context into a conversation that helps you know what is due, what changed, and what to do next.</p><div class="actions"><button class="button" type="button" data-connect-open>Connect to ChatGPT</button><a class="text-link" href="#features">See what you can ask <span aria-hidden="true">↗</span></a></div><p class="home-note">Illustrative product experience. Connect your account for live Classroom answers.</p></div><div class="home-console" aria-label="Interactive illustrative Classroom Desk conversation"><div class="console-top"><span class="console-title"><span class="console-mark" aria-hidden="true"></span>Classroom Desk example</span><span class="console-status">Illustrative only</span></div><div class="example-panel home-example-panel" aria-live="polite"><span class="example-badge">Example question</span><h2 class="example-question" data-example-question>What assignments do I have?</h2><p class="example-answer" data-example-answer>“You have three current items: a Physics lab report, History reading notes, and a returned Biology assignment. Check each Classroom item for its latest details.”</p><small>Illustrative response. It is not live account data.</small></div><div class="prompt-tabs home-prompt-tabs" role="tablist" aria-label="Choose an illustrative question"><p class="prompt-label">Try an example</p><button role="tab" aria-selected="true" data-prompt-tab="0" data-copy-prompt="What assignments do I have?">What assignments do I have?<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="1" data-copy-prompt="What deadlines are coming up?">What deadlines are coming up?<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="2" data-copy-prompt="Show my recent Classroom activity.">Recent activity<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="3" data-copy-prompt="Show announcements from my courses.">Announcements<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="4" data-copy-prompt="Find missing or returned work.">Missing work<span>Copy</span></button><button role="tab" aria-selected="false" data-prompt-tab="5" data-copy-prompt="Explain the instructions for my assignment.">Instructions<span>Copy</span></button></div></div></div><section id="features" class="capability-section" aria-labelledby="capability-title"><div class="capability-heading"><p class="eyebrow">What you can ask</p><h2 id="capability-title">Useful context, without the noise.</h2><p>Classroom Desk keeps the answer close to the source you authorized and clear about what it can do.</p></div><div class="capability-cards"><article class="capability-card"><div class="capability-card-top"><span>01</span><span>Course context</span></div><h3>Ask about the work in front of you.</h3><p>Bring questions about courses, coursework, announcements, and your own submission status into one conversation.</p><svg class="capability-visual" viewBox="0 0 240 92" aria-hidden="true"><path d="M8 68h224M18 52h48M18 37h86M18 22h125" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="188" cy="22" r="6" fill="currentColor"/><circle cx="207" cy="37" r="6" fill="currentColor"/><circle cx="225" cy="52" r="6" fill="currentColor"/></svg></article><article class="capability-card"><div class="capability-card-top"><span>02</span><span>Due date clarity</span></div><h3>Know what needs your attention.</h3><p>Find upcoming, missing, and returned work with answers grounded in the Classroom data you approved.</p><svg class="capability-visual" viewBox="0 0 240 92" aria-hidden="true"><rect x="16" y="16" width="52" height="52" rx="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M30 43l9 9 18-22M94 25h116M94 46h86M94 67h58" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="214" cy="25" r="5" fill="currentColor"/></svg></article><article class="capability-card"><div class="capability-card-top"><span>03</span><span>Clear boundaries</span></div><h3>Understand the task, stay in control.</h3><p>Teacher files require explicit authorization, and Classroom Desk never submits or edits work automatically.</p><svg class="capability-visual" viewBox="0 0 240 92" aria-hidden="true"><path d="M42 18h58l24 24v32H42zM100 18v25h24M58 59h50M160 26h54M160 46h40M160 66h26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="144" cy="26" r="6" fill="currentColor"/></svg></article></div></section></div></section>
   <section id="how-it-works" class="section how-section"><p class="eyebrow">How it works</p><h2>Three steps, a few minutes.</h2><div class="numbered-steps"><div><b>01</b><h3>Add Classroom Desk to ChatGPT</h3><p>Open ChatGPT's supported apps or developer settings and add a custom connection if your workspace offers it.</p></div><div><b>02</b><h3>Approve Google access</h3><p>Review the permissions Google shows you and approve only the account you intend to use.</p></div><div><b>03</b><h3>Ask your first question</h3><p>Try a plain question about your courses, assignments or deadlines.</p></div></div><div class="section-actions"><button class="button" type="button" data-connect-open>Connect to ChatGPT</button><a class="text-link" href="/connect">Read the full guide <span aria-hidden="true">↗</span></a></div></section>
-  <section class="section trust-section"><div><p class="eyebrow">Your control</p><h2>You stay in control.</h2><p>Classroom Desk works only with Google access you approve, and it never turns in work for you.</p><a class="text-link" href="/privacy">Read the privacy policy <span aria-hidden="true">↗</span></a></div><div class="trust-columns"><div><h3>What it can help with</h3><ul><li>Courses and coursework</li><li>Deadlines and activity</li><li>Announcements and topics</li><li>Your submission status</li><li>One teacher attachment you explicitly authorize</li><li>PDF saves to your Drive that you confirm</li></ul></div><div><h3>What it will not do automatically</h3><ul><li>Browse your Drive</li><li>Submit or edit Classroom work</li><li>Change grades or course content</li><li>Read Gmail</li><li>Claim a save is a submission</li></ul></div></div></section>
-  <section class="section free-access-note"><p class="eyebrow">Free and open source</p><h2>Classroom Desk is free for students and teachers.</h2><p>Connect your authorized Google Classroom account. Your Google permissions continue to control which data you can access.</p><a class="button" href="/start">Get started — free</a></section>
-  <section class="section faq-section"><p class="eyebrow">Questions</p><h2>Questions, answered.</h2><div class="faq-list"><details open><summary>Does copying the address connect my Classroom?</summary><p>No. You still need a compatible ChatGPT connection and Google authorization.</p></details><details><summary>Which ChatGPT plans can use it?</summary><p>Availability depends on your ChatGPT plan and workspace settings. ChatGPT may ask you to turn on Developer mode, and workspace admins may need to allow it.</p></details><details><summary>What does Classroom Desk read?</summary><p>With your permission, it reads supported courses, coursework, announcements, topics and your own submission status. Teacher files require explicit authorization when supported.</p></details><details><summary>Is Classroom Desk free?</summary><p>Yes. Sign in with Google, choose a Student or Teacher experience, and authorize only the Google access you need.</p></details><details><summary>Is this official Google or ChatGPT software?</summary><p>No. Classroom Desk is an independent integration.</p></details></div></section>
-  <section class="closing-cta"><h2>Ready to ask your Classroom a question?</h2><div><button class="button" type="button" data-connect-open>Connect to ChatGPT</button><a class="text-link" href="/start">Get started free <span aria-hidden="true">↗</span></a></div></section>`;
+  <section class="section trust-section"><div><p class="eyebrow">Your control</p><h2>You stay in control.</h2><p>Classroom Desk works only with Google access you approve, and it never turns in work for you.</p><a class="text-link" href="/privacy">Read the privacy policy <span aria-hidden="true">↗</span></a></div><div class="trust-columns"><div><h3>What it can help with</h3><ul><li>Courses and coursework</li><li>Deadlines and activity</li><li>Announcements and topics</li><li>Your submission status</li><li>One teacher attachment you explicitly authorize</li><li>Download a generated PDF and attach it yourself</li></ul></div><div><h3>What it will not do automatically</h3><ul><li>Browse your Drive</li><li>Submit or edit Classroom work</li><li>Change grades or course content</li><li>Read Gmail</li><li>Claim a save is a submission</li></ul></div></div></section>
+  <section class="section pricing-teaser"><p class="eyebrow">Pricing</p><h2>Simple plans, clearly explained.</h2><div class="price-list"><div><strong>Trial</strong><span>₹9 once</span><em>Not open yet</em></div><div><strong>Student</strong><span>₹99 per month</span><em>Not open yet</em></div><div><strong>Teacher</strong><span>₹199 per month</span><em>Not open yet</em></div></div><a class="text-link" href="/pricing">Compare plans <span aria-hidden="true">↗</span></a></section>
+  <section class="section faq-section"><p class="eyebrow">Questions</p><h2>Questions, answered.</h2><div class="faq-list"><details open><summary>Does copying the address connect my Classroom?</summary><p>No. You still need a compatible ChatGPT connection and Google authorization.</p></details><details><summary>Which ChatGPT plans can use it?</summary><p>Availability depends on your ChatGPT plan and workspace settings. ChatGPT may ask you to turn on Developer mode, and workspace admins may need to allow it.</p></details><details><summary>What does Classroom Desk read?</summary><p>With your permission, it reads supported courses, coursework, announcements, topics and your own submission status. Teacher files require explicit authorization when supported.</p></details><details><summary>Does a subscription give access to my Classroom data?</summary><p>No. Billing and Google authorization are separate decisions.</p></details><details><summary>Is this official Google or ChatGPT software?</summary><p>No. Classroom Desk is an independent integration.</p></details></div></section>
+  <section class="closing-cta"><h2>Ready to ask your Classroom a question?</h2><div><button class="button" type="button" data-connect-open>Connect to ChatGPT</button><a class="text-link" href="/pricing">See pricing <span aria-hidden="true">↗</span></a></div></section>`;
 }
 
-function connectBody(mcpUrl: string) {
-  return `<article class="guide-page"><p class="eyebrow">Connection guide</p><h1>Connect Classroom Desk to ChatGPT.</h1><p class="page-lead">Follow these three steps. ChatGPT controls its own connection settings, and Google will show you the permissions before you approve them.</p>${connectGuideMarkup(true, mcpUrl)}<details class="troubleshooting"><summary>Troubleshooting</summary><ul><li>If you do not see a custom connection option, your plan or workspace may not offer it.</li><li>If Google authorization fails, restart from ChatGPT and use the intended Google account.</li><li>If tools return an authorization error, reconnect Google Classroom. Google authorization establishes your Classroom Desk account automatically.</li><li>For help, contact support without sending passwords, OAuth codes or private Classroom content.</li></ul></details><p class="test-prompt">Test it: ask “What assignments do I have?”</p></article>`;
+function pricingBody(flags: ReturnType<typeof loadSaaSFeatureFlags>) {
+  const open = flags.billingUi;
+  const status = open ? "" : `<p class="status-strip">Checkout is not open yet. Plans are shown for reference.</p>`;
+  const action = open ? `<a class="button" href="/app/billing">Choose plan</a>` : `<span class="disabled-control">Not open yet</span><a class="text-link" href="/connect">Connect Classroom Desk</a>`;
+  return `<article class="pricing-page"><p class="eyebrow">Pricing</p><h1>Useful Classroom access, clearly priced.</h1><p class="page-lead">Classroom Desk brings your authorized Google Classroom context into ChatGPT. Plans cover product access; Google authorization remains your separate decision.</p>${status}<section class="pricing-grid" aria-label="Classroom Desk plans"><article class="plan-card"><p class="eyebrow">Try it</p><h2>₹9 once</h2><p>Seven days of access from verified payment. No automatic conversion to a subscription.</p><ul><li>Ask about courses and coursework</li><li>Check deadlines and activity</li><li>Review announcements and submissions</li></ul>${action}</article><article class="plan-card featured"><p class="eyebrow">For students</p><h2>₹99 <small>per month</small></h2><p>Keep everyday coursework questions close to the conversation.</p><ul><li>Authorized courses and coursework</li><li>Upcoming, missing and returned work</li><li>Announcements, topics and activity</li><li>Your own submission status</li><li>Supported teacher files by explicit authorization</li><li>Download PDFs and attach them yourself in Classroom</li></ul>${action}</article><article class="plan-card"><p class="eyebrow">For teachers</p><h2>₹199 <small>per month</small></h2><p>A planned teacher-focused tier for supported Classroom workflows.</p><ul><li>Monthly product access</li><li>Google authorization required</li><li>Teacher features open separately</li></ul><p class="muted">Not open yet. No checkout is available.</p>${action}</article></section><section class="compare"><h2>What every plan requires</h2><div class="table-scroll"><table><thead><tr><th>Requirement</th><th>Why it matters</th></tr></thead><tbody><tr><th>Compatible ChatGPT connection</th><td>ChatGPT controls whether custom connections are available to your plan or workspace.</td></tr><tr><th>Your Google authorization</th><td>A subscription never grants access to Classroom data by itself.</td></tr><tr><th>Classroom write boundary</th><td>Classroom Desk does not submit student work, publish drafts, or write grades automatically; separately authorized draft creation or updates require explicit confirmation.</td></tr></tbody></table></div></section><section class="plain-billing"><h2>Billing in plain words</h2><div><p><strong>Trial</strong><br>The ₹9 trial lasts exactly 168 hours from verified payment and does not auto-convert.</p><p><strong>Monthly plans</strong><br>Cancellation stops future renewals where supported, while access continues through the verified paid-through date.</p><p><strong>Refunds</strong><br>Refund requests are reviewed against the provider transaction, payment state, access period and applicable merchant policy.</p></div><a class="text-link" href="/refunds">Read the refund and cancellation policy <span aria-hidden="true">↗</span></a></section></article>`;
 }
 
-function connectGuideMarkup(inline = false, mcpUrl = "https://classroom.jarvis404.com/mcp") {
-  return `<div class="connect-guide ${inline ? "inline-guide" : ""}" data-connect-guide><div class="guide-steps"><p class="step-kicker">Step <span data-guide-number>1</span> of 3</p><section data-guide-step><h2>Open ChatGPT</h2><p>Go to ChatGPT's apps or developer settings.</p><a class="button" href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer">Open ChatGPT</a><p class="help-text">ChatGPT may ask you to turn on Developer mode first. If you do not see the option, your plan or workspace may not allow custom connections. Ask your workspace admin.</p></section><section data-guide-step hidden><h2>Add Classroom Desk</h2><p>Create a new connection, name it Classroom Desk, and paste this address. If ChatGPT asks how to sign in, choose OAuth.</p><div class="copy-chip"><code>${escapeHtml(mcpUrl)}</code><button type="button" data-copy-mcp="${escapeHtml(mcpUrl)}">Copy</button></div><p class="help-text">Button names vary between ChatGPT versions. ChatGPT may call this the server URL.</p></section><section data-guide-step hidden><h2>Approve Google and ask</h2><p>Classroom Desk will request Google authorization if needed and connect your account automatically. Return to ChatGPT, click Back to app, verify status and your account, then try:</p><div class="copy-chip"><code>What assignments do I have?</code><button type="button" data-copy-prompt="What assignments do I have?">Copy</button></div><p class="help-text">This guide cannot detect or complete the connection for you.</p></section></div><div class="guide-visual" aria-hidden="true"><span class="example-badge">Illustration</span><div class="guide-visual-board"><span></span><span></span><span></span><span></span></div></div><div class="guide-controls"><button class="button secondary" type="button" data-guide-back hidden>Back</button><button class="button" type="button" data-guide-next>Next</button><a class="text-link" href="/support">Need help?</a></div></div>`;
+function connectBody() {
+  return `<article class="guide-page"><p class="eyebrow">Connection guide</p><h1>Connect Classroom Desk to ChatGPT.</h1><p class="page-lead">Follow these three steps. ChatGPT controls its own connection settings, and Google will show you the permissions before you approve them.</p>${connectGuideMarkup(true)}<details class="troubleshooting"><summary>Troubleshooting</summary><ul><li>If you do not see a custom connection option, your plan or workspace may not offer it.</li><li>If Google authorization fails, restart from ChatGPT and use the intended Google account.</li><li>If tools return an authorization error, reconnect Google Classroom. Website sign-in and Classroom authorization are separate.</li><li>For help, contact support without sending passwords, OAuth codes or private Classroom content.</li></ul></details><p class="test-prompt">Test it: ask “What assignments do I have?”</p></article>`;
 }
 
-function connectGuideModal(mcpUrl: string) {
-  return `<dialog class="connect-modal" data-connect-modal aria-labelledby="connect-modal-title"><div class="modal-shell"><div class="modal-header"><div><p class="eyebrow">Connection guide</p><h2 id="connect-modal-title">Connect Classroom Desk to ChatGPT</h2></div><button class="close-button" type="button" data-connect-close aria-label="Close connection guide">×</button></div><p class="modal-progress">Step <span data-guide-number>1</span> of 3</p>${connectGuideMarkup(false, mcpUrl)}<div class="modal-footer"><button class="button secondary" type="button" data-guide-back hidden>Back</button><button class="button" type="button" data-guide-next>Next</button><a class="text-link" href="/support">Need help?</a></div></div></dialog>`;
+function connectGuideMarkup(inline = false) {
+  return `<div class="connect-guide ${inline ? "inline-guide" : ""}" data-connect-guide><div class="guide-steps"><p class="step-kicker">Step <span data-guide-number>1</span> of 3</p><section data-guide-step><h2>Open ChatGPT</h2><p>Go to ChatGPT's apps or developer settings.</p><a class="button" href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer">Open ChatGPT</a><p class="help-text">ChatGPT may ask you to turn on Developer mode first. If you do not see the option, your plan or workspace may not allow custom connections. Ask your workspace admin.</p></section><section data-guide-step hidden><h2>Add Classroom Desk</h2><p>Create a new connection, name it Classroom Desk, and paste this address. If ChatGPT asks how to sign in, choose OAuth.</p><div class="copy-chip"><code>https://classroom.jarvis404.com/mcp</code><button type="button" data-copy-mcp="https://classroom.jarvis404.com/mcp">Copy</button></div><p class="help-text">Button names vary between ChatGPT versions. ChatGPT may call this the server URL.</p></section><section data-guide-step hidden><h2>Approve Google and ask</h2><p>ChatGPT will send you to Google. Review the permissions, approve them, then try:</p><div class="copy-chip"><code>What assignments do I have?</code><button type="button" data-copy-prompt="What assignments do I have?">Copy</button></div><p class="help-text">This guide cannot detect or complete the connection for you.</p></section></div><div class="guide-visual" aria-hidden="true"><span class="example-badge">Illustration</span><div class="guide-visual-board"><span></span><span></span><span></span><span></span></div></div><div class="guide-controls"><button class="button secondary" type="button" data-guide-back hidden>Back</button><button class="button" type="button" data-guide-next>Next</button><a class="text-link" href="/support">Need help?</a></div></div>`;
+}
+
+function connectGuideModal() {
+  return `<dialog class="connect-modal" data-connect-modal aria-labelledby="connect-modal-title"><div class="modal-shell"><div class="modal-header"><div><p class="eyebrow">Connection guide</p><h2 id="connect-modal-title">Connect Classroom Desk to ChatGPT</h2></div><button class="close-button" type="button" data-connect-close aria-label="Close connection guide">×</button></div><p class="modal-progress">Step <span data-guide-number>1</span> of 3</p>${connectGuideMarkup()}<div class="modal-footer"><button class="button secondary" type="button" data-guide-back hidden>Back</button><button class="button" type="button" data-guide-next>Next</button><a class="text-link" href="/support">Need help?</a></div></div></dialog>`;
 }
 
 function connectScript() {
@@ -483,7 +524,7 @@ function connectDemoScript() {
 }
 
 function connectAccountGuidanceScript() {
-  return `if (location.pathname === "/connect") { const lead = document.querySelector(".guide-page .page-lead"); if (lead) lead.textContent = "Connect the Google account you actually use for Google Classroom. If you use more than one Google account, choose the one containing your courses when Google shows the account chooser. Google authorization establishes your Classroom Desk account and connects ChatGPT automatically. No separate website login is required."; }`;
+  return `if (location.pathname === "/connect") { const lead = document.querySelector(".guide-page .page-lead"); if (lead) lead.textContent = "Connect the Google account you actually use for Google Classroom. If you use more than one Google account, choose the one containing your courses when Google shows the account chooser. Website sign-in, Google Classroom authorization, and the ChatGPT connection are separate steps."; }`;
 }
 
 function connectDemoStyleScript() {
@@ -509,7 +550,7 @@ function connectModalProgressScript() {
 function page(title: string, active: string, operator: string, support: string, origin: URL, body: string, compact = false) {
   const nav = (href: string, key: string, label: string) => `<a ${active === key ? 'aria-current="page"' : ""} href="${href}">${label}</a>`;
   const documentTitle = title === "Classroom Desk" ? "Classroom Desk | Google Classroom Meets ChatGPT" : `${title} | Classroom Desk`;
-  const descriptions: Record<string,string> = { home:"Connect Google Classroom with ChatGPT. Access coursework, manage assignments, and stay organized.", start:"Get started with free Classroom Desk. Sign in with Google, choose Student or Teacher, and authorize Classroom access.", connect:"Connect Classroom Desk to ChatGPT and choose the Google account you use for Google Classroom. Follow the secure Google authorization flow.", refunds:"Support for historical payments and existing subscriptions.", privacy:"How Classroom Desk protects your Google Classroom authorization and account information.", terms:"Classroom Desk terms of service and authorized-use requirements.", support:"Get help with Classroom Desk connections, Google authorization, and accounts." };
+  const descriptions: Record<string,string> = { home:"Connect Google Classroom with ChatGPT. Access coursework, manage assignments, and stay organized.", pricing:"Classroom Desk pricing: Student ₹99/month, Teacher ₹199/month and an eligible ₹9 seven-day launch trial. Google authorization stays separate.", connect:"Connect Classroom Desk to ChatGPT and authorize the Google account linked to your profile. Current OAuth connections use verified Google identity binding.", refunds:"Classroom Desk refund and subscription cancellation policy.", privacy:"How Classroom Desk protects your Google Classroom authorization and account information.", terms:"Classroom Desk terms of service and authorized-use requirements.", support:"Get help with Classroom Desk connections, Google authorization, accounts and billing." };
   const description = descriptions[active] ?? descriptions.home!;
   const canonicalUrl = new URL(active === "home" ? "/" : `/${active}`, origin).toString();
   const imageUrl = new URL("/assets/classroom-desk-social-card.png?v=20261012-layout2", origin).toString();
@@ -533,7 +574,7 @@ function page(title: string, active: string, operator: string, support: string, 
 <meta name="twitter:title" content="${escapeHtml(documentTitle)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
 <meta name="twitter:image" content="${escapeHtml(imageUrl)}">
-${title === "Classroom Desk" ? '<link rel="preload" as="image" href="${media.widePoster ?? ""}" media="(min-width:768px)" fetchpriority="high"><link rel="preload" as="image" href="${media.narrowPoster ?? ""}" media="(max-width:767px)" fetchpriority="high">' : ""}
+${title === "Classroom Desk" ? '<link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/5c3ec08f-2dbf-4c0a-8588-f6106a789443.webp" media="(min-width:768px)" fetchpriority="high"><link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/0f4926a4-e660-4df2-9195-2bfb3e341bdd.webp" media="(max-width:767px)" fetchpriority="high">' : ""}
 <link rel="icon" type="image/svg+xml" href="/assets/classroom-desk-favicon.svg">
 <link rel="apple-touch-icon" href="/assets/classroom-desk-logo.svg">
 <style>${siteStyles()}${designStyles()}.numbered-steps b{color:#176b4b!important}.site-header .brand,.desktop-nav a,.header-actions a{min-height:44px;display:inline-flex;align-items:center}.header-cta{min-height:44px!important}.modal-header .eyebrow{color:#b8f3d5}.close-button{min-width:44px;min-height:44px;flex-shrink:0}.copy-chip button{min-width:44px;min-height:44px}@media(max-width:767px) and (max-height:900px){.modal-shell .guide-visual{display:none}}</style>
@@ -542,17 +583,17 @@ ${title === "Classroom Desk" ? '<link rel="preload" as="image" href="${media.wid
 <a class="skip-link" href="#main-content">Skip to content</a>
 <header class="site-header">
   <a class="brand" href="/" aria-label="Classroom Desk home">${logoMark()}<span>Classroom Desk</span></a>
-  <nav class="desktop-nav" aria-label="Primary">${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/start", "start", "Get started")}</nav>
+  <nav class="desktop-nav" aria-label="Primary">${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/pricing", "pricing", "Pricing")}</nav>
   <div class="header-actions"><a class="nav-signin" href="/login">Sign in</a><button class="button header-cta" type="button" data-connect-open>Connect to ChatGPT</button><button class="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu">Menu</button></div>
 </header>
-<nav id="mobile-menu" class="mobile-menu" aria-label="Mobile navigation" hidden>${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/start", "start", "Get started")}<a href="/login">Sign in</a><button class="button" type="button" data-connect-open>Connect to ChatGPT</button></nav>
+<nav id="mobile-menu" class="mobile-menu" aria-label="Mobile navigation" hidden>${nav("/#features", "features", "Features")}${nav("/#how-it-works", "how", "How it works")}${nav("/pricing", "pricing", "Pricing")}<a href="/login">Sign in</a><button class="button" type="button" data-connect-open>Connect to ChatGPT</button></nav>
 <main id="main-content">${body}</main>
 <footer class="site-footer">
-  <div class="footer-grid"><div><a class="brand footer-brand" href="/">${logoMark()}<span>Classroom Desk</span></a><p>Ask ChatGPT about your own authorized Google Classroom.</p></div><div><h2>Product</h2><a href="/#features">Features</a><a href="/#how-it-works">How it works</a><a href="/start">Get started</a><a href="/connect">Connect</a></div><div><h2>Legal</h2><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refunds">Refunds and cancellation</a><a href="/support">Support</a></div><div><h2>Contact</h2><a href="mailto:${support}">${support}</a><p class="developer-credit">Built by <a href="https://fawzankhan-404.github.io/" target="_blank" rel="noopener noreferrer">${operator}</a>, an independent developer</p></div></div>
+  <div class="footer-grid"><div><a class="brand footer-brand" href="/">${logoMark()}<span>Classroom Desk</span></a><p>Ask ChatGPT about your own authorized Google Classroom.</p></div><div><h2>Product</h2><a href="/#features">Features</a><a href="/#how-it-works">How it works</a><a href="/pricing">Pricing</a><a href="/connect">Connect</a></div><div><h2>Legal</h2><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/refunds">Refunds and cancellation</a><a href="/support">Support</a></div><div><h2>Contact</h2><a href="mailto:${support}">${support}</a><p class="developer-credit">Built by <a href="https://fawzankhan-404.github.io/" target="_blank" rel="noopener noreferrer">${operator}</a>, an independent developer</p></div></div>
   <p class="disclaimer">Classroom Desk is an independent integration and is not affiliated with or endorsed by Google or OpenAI. Google Classroom, ChatGPT, and OpenAI are trademarks of their respective owners.</p>
 </footer>
-${connectGuideModal(new URL("/mcp", origin).href)}
-<script src="/assets/connect.js?v=20261016-unified1" defer></script>
+${connectGuideModal()}
+<script src="/assets/connect.js?v=20261010-hardening1" defer></script>
 </body>
 </html>`;
 }

@@ -27,6 +27,8 @@ describe("V2 Google Picker boundary", () => {
     expect(page).not.toMatch(/https?:[^\"']*token-secret/);
     expect(page).not.toContain("<b>unsafe</b>");
     expect(page).toContain('EXPECTED_FILE_ID="classroom-file"');
+    expect(page).toContain("<p>Classroom Desk</p>");
+    expect(page).not.toContain("private beta");
     expect(page).toContain("setFileIds(EXPECTED_FILE_ID)");
     expect(page).toContain('.setOrigin("http://127.0.0.1:8792")');
     expect(page).toContain("/picker/status");

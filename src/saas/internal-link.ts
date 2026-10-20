@@ -59,4 +59,11 @@ export function registerInternalLink(app:express.Express,store:SaaSStore,secret:
       return res.status(503).json({allowed:false,reason});
     }
   });
+  app.post("/internal/account/link",async(req,res)=>{
+    if(!internalTokenMatches(req.get("x-classroom-internal-token")??"",secret))return res.status(404).end();
+    const code=req.body?.code, subject=req.body?.subject;
+    if(typeof code!=="string"||!isMcpSubject(subject))return res.status(400).json({linked:false});
+    try{return res.json({linked:await store.linking.consume(code,subject)});}
+    catch{return res.status(503).json({linked:false});}
+  });
 }

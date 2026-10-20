@@ -1,9 +1,8 @@
 import type express from "express";
 import { readSessionCookie } from "./sessions.js";
-import { renderAdminBilling, renderAdminCRM, renderAdminReferrals, renderAdminUser } from "./admin.js";
+import { renderAdminAudit, renderAdminBilling, renderAdminCRM, renderAdminReferrals, renderAdminSubscriptionReconciliation, renderAdminUser } from "./admin.js";
 import type { SaaSStore } from "./store.js";
 import { requireSameOrigin } from "./csrf.js";
-import {html,portalPage} from "./account-portal.js";
 
 export function registerAdminRoutes(app: express.Express, store: SaaSStore): void {
   app.use("/admin", requireSameOrigin);
@@ -13,10 +12,10 @@ export function registerAdminRoutes(app: express.Express, store: SaaSStore): voi
     next();
   });
   app.get("/admin/audit",async(req,res)=>{
-    const actor=await currentAdmin(req.get("cookie"),store);
-    if(!actor)return res.status(403).type('text').send('Administrator access required.');
+    const actor=await currentSuperAdmin(req.get("cookie"),store);
+    if(!actor)return res.status(403).type('text').send('Super administrator access required.');
     const events=await store.adminAudit();
-    return res.type('html').send(portalPage('Operational audit',actor,`<section><h2>Recent administrative actions</h2><p>Up to 50 recorded actions. Credentials and OAuth payloads are excluded.</p>${events.length?`<ul>${events.map(e=>`<li>${html(new Date(e.created_at).toISOString())} · ${html(e.action)} · ${html(e.reason)}</li>`).join('')}</ul>`:'<p>No administrative actions recorded.</p>'}<a href="/admin">Back to users</a></section>`));
+    return res.type('html').send(renderAdminAudit(events));
   });
   app.get("/admin", async (req, res) => {
     const actor = await currentAdmin(req.get("cookie"), store);
@@ -33,9 +32,14 @@ export function registerAdminRoutes(app: express.Express, store: SaaSStore): voi
     if (!actor) return res.status(403).type("text").send("Administrator access required.");
     return res.type("html").send(renderAdminBilling(await store.adminPayments()));
   });
-  app.get("/admin/referrals", async (req, res) => {
+  app.get("/admin/billing/reconciliation", async (req, res) => {
     const actor = await currentAdmin(req.get("cookie"), store);
     if (!actor) return res.status(403).type("text").send("Administrator access required.");
+    return res.type("html").send(renderAdminSubscriptionReconciliation(await store.adminSubscriptionCreationReservations()));
+  });
+  app.get("/admin/referrals", async (req, res) => {
+    const actor = await currentSuperAdmin(req.get("cookie"), store);
+    if (!actor) return res.status(403).type("text").send("Super administrator access required.");
     return res.type("html").send(renderAdminReferrals(await store.adminReferrals()));
   });
   app.get(/^\/admin\/users\/([0-9a-f-]{36})$/, async (req, res) => {
@@ -96,4 +100,9 @@ async function currentAdmin(cookie: string | undefined, store: SaaSStore) {
   const token = readSessionCookie(cookie); if (!token) return null;
   const session = await store.sessions.find(token); if (!session) return null;
   const user = await store.getUser(session.userId); return user && (user.role === "SUPER_ADMIN" || user.role === "SUPPORT_ADMIN") && user.status === "active" ? user : null;
+}
+
+async function currentSuperAdmin(cookie: string | undefined, store: SaaSStore) {
+  const actor = await currentAdmin(cookie, store);
+  return actor?.role === "SUPER_ADMIN" ? actor : null;
 }

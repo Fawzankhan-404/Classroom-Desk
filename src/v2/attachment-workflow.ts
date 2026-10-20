@@ -5,7 +5,7 @@ import type { V2Clients } from "./workflow.js";
 import { V2WorkflowError } from "./workflow.js";
 
 function runtime(clients: V2Clients) {
-  if (!clients.attachmentAccess) throw new V2WorkflowError("attachment_beta_unavailable", "Teacher attachment reading is not configured for this private beta connection.");
+  if (!clients.attachmentAccess) throw new V2WorkflowError("attachment_beta_unavailable", "Teacher attachment reading is not configured for this connection.");
   return clients.attachmentAccess;
 }
 
