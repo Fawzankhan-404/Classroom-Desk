@@ -266,14 +266,22 @@ export class PublicOAuthProvider implements OAuthServerProvider {
       }
       let grantUserId = flow.userId;
       let accountBinding: GoogleAccountBinding | undefined;
+      let googleSubject: string | undefined;
       if (this.config.googleIdentityResolver) {
         failureStage = "google_identity_binding";
         const resolved = await this.resolveGoogleIdentity(client, tokens.id_token, flow.googleNonce ?? "");
         grantUserId = resolved.mcpUserId;
         accountBinding = resolved;
+        googleSubject = resolved.googleSubject;
       }
       const existingGrant = this.config.googleIdentityResolver ? await this.store.getGrant(grantUserId) : undefined;
-      const refreshToken = tokens.refresh_token ?? existingGrant?.refreshToken;
+      // A grant can have a different legacy MCP key from the newly verified
+      // website account. Reuse a stored Google refresh token only when its
+      // persisted stable subject matches the ID token for this callback.
+      const reusableRefreshToken = googleSubject && existingGrant?.googleSubject === googleSubject
+        ? existingGrant.refreshToken
+        : undefined;
+      const refreshToken = tokens.refresh_token ?? reusableRefreshToken;
       if (!refreshToken) {
         logGoogleAuthorizationFailure("missing_refresh_token");
         return this.clientErrorRedirect(flow, "server_error");
@@ -301,6 +309,7 @@ export class PublicOAuthProvider implements OAuthServerProvider {
         scopes: storedScopes,
         createdAt: existingGrant?.createdAt ?? Date.now(),
         updatedAt: Date.now(),
+        ...(googleSubject ? { googleSubject } : {}),
       }, authorizationCode, accountBinding);
       const target = new URL(flow.params.redirectUri);
       target.searchParams.set("code", mcpCode);
@@ -312,7 +321,7 @@ export class PublicOAuthProvider implements OAuthServerProvider {
     }
   }
 
-  private async resolveGoogleIdentity(client: OAuth2Client, idToken: string | null | undefined, expectedNonce: string): Promise<GoogleAccountBinding> {
+  private async resolveGoogleIdentity(client: OAuth2Client, idToken: string | null | undefined, expectedNonce: string): Promise<GoogleAccountBinding & { googleSubject: string }> {
     const payload = await this.verifiedGoogleClaims(idToken, expectedNonce, client);
     const resolved = await this.config.googleIdentityResolver!({
       googleSubject: payload.sub,
@@ -322,7 +331,7 @@ export class PublicOAuthProvider implements OAuthServerProvider {
     const binding = typeof resolved === "string" ? { accountId: resolved, mcpUserId: resolved } : resolved;
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(binding.accountId)
       || typeof binding.mcpUserId !== "string" || binding.mcpUserId.length < 1 || binding.mcpUserId.length > 256 || /[\u0000-\u001f\u007f]/.test(binding.mcpUserId)) throw new Error("canonical_account_invalid");
-    return binding;
+    return { ...binding, googleSubject: payload.sub };
   }
 
   private async verifiedGoogleClaims(idToken: string | null | undefined, expectedNonce: string, client = this.googleClient()): Promise<{ sub: string; email: string; name?: string }> {

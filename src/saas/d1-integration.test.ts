@@ -680,12 +680,12 @@ describe("D1 migration and account-link atomicity", () => {
 
       await authStore.migrate();
       await authStore.putGrantAndCode(
-        { userId: unifiedId, refreshToken: "synthetic-refresh", scopes: ["openid", "email"], createdAt: Date.now(), updatedAt: Date.now() },
+        { userId: unifiedId, refreshToken: "synthetic-refresh", scopes: ["openid", "email"], createdAt: Date.now(), updatedAt: Date.now(), googleSubject: "synthetic-dual-map-google" },
         { code: "synthetic-dual-map-code", clientId: "synthetic-client", userId: unifiedId, redirectUri: "https://chatgpt.com/connector/oauth/callback", challenge: "synthetic-pkce-challenge", scopes: ["mcp:tools"], expiresAt: Date.now() + 30_000 },
         { accountId: user.id, mcpUserId: unifiedId },
       );
 
-      expect(await authStore.getGrant(unifiedId)).toMatchObject({ userId: unifiedId, refreshToken: "synthetic-refresh" });
+      expect(await authStore.getGrant(unifiedId)).toMatchObject({ userId: unifiedId, refreshToken: "synthetic-refresh", googleSubject: "synthetic-dual-map-google" });
       expect(await authStore.getCode("synthetic-dual-map-code")).toMatchObject({ userId: unifiedId });
       expect((await database.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_connections WHERE website_user_id=$1`, [user.id])).rows).toEqual([{ mcp_user_id: "legacy-opaque-subject" }]);
       expect((await database.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_oauth_accounts WHERE website_user_id=$1`, [user.id])).rows).toEqual([{ mcp_user_id: unifiedId }]);
@@ -704,12 +704,12 @@ describe("D1 migration and account-link atomicity", () => {
       expect(binding).toEqual({ accountId: user.id, mcpUserId: user.id });
       await authStore.migrate();
       await authStore.putGrantAndCode(
-        { userId: binding.mcpUserId, refreshToken: "synthetic-legacy-refresh", scopes: ["openid"], createdAt: Date.now(), updatedAt: Date.now() },
+        { userId: binding.mcpUserId, refreshToken: "synthetic-legacy-refresh", scopes: ["openid"], createdAt: Date.now(), updatedAt: Date.now(), googleSubject: "synthetic-legacy-schema" },
         { code: "synthetic-legacy-schema-code", clientId: "synthetic-client", userId: binding.mcpUserId, redirectUri: "https://chatgpt.com/connector/oauth/callback", challenge: "synthetic-pkce-challenge", scopes: ["mcp:tools"], expiresAt: Date.now() + 30_000 },
         binding,
       );
       expect((await database.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_connections WHERE website_user_id=$1`, [user.id])).rows).toEqual([{ mcp_user_id: user.id }]);
-      expect(await authStore.getGrant(user.id)).toMatchObject({ refreshToken: "synthetic-legacy-refresh" });
+      expect(await authStore.getGrant(user.id)).toMatchObject({ refreshToken: "synthetic-legacy-refresh", googleSubject: "synthetic-legacy-schema" });
       expect(await users.accountStatusForMcpUser(user.id, "https://classroom.jarvis404.com")).not.toMatchObject({ state: "ACCOUNT_SETUP_REQUIRED" });
     } finally { sqlite.close(); }
   });

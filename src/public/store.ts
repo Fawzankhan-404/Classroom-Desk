@@ -3,7 +3,7 @@ import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/serv
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 
-export type GoogleGrant = { userId: string; refreshToken: string; scopes: string[]; createdAt: number; updatedAt: number };
+export type GoogleGrant = { userId: string; refreshToken: string; scopes: string[]; createdAt: number; updatedAt: number; googleSubject?: string };
 export type GoogleAccountBinding = { accountId: string; mcpUserId: string };
 export type GoogleFlow = {
   id: string; client: OAuthClientInformationFull; params: AuthorizationParams; userId: string;

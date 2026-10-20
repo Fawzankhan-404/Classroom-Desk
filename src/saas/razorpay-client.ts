@@ -4,7 +4,7 @@ import { planPricePaise, TRIAL_PRICE_PAISE } from "./campaign.js";
 import type { Plan } from "./types.js";
 
 export interface RazorpayOrder { id: string; amount: number; currency: string; status: string; receipt?: string; notes?: Record<string, string>; }
-export interface RazorpaySubscription { id: string; plan_id: string; status: string; charge_at?: number; current_start?: number; current_end?: number; notes?: Record<string, string>; }
+export interface RazorpaySubscription { id: string; plan_id: string; status: string; charge_at?: number; current_start?: number; current_end?: number; has_scheduled_changes?: boolean; change_scheduled_at?: number | null; notes?: Record<string, string>; }
 export interface RazorpayPayment { id: string; order_id?: string | null; subscription_id?: string | null; invoice_id?: string | null; amount: number; currency: string; status: string; refund_status?: string | null; amount_refunded?: number; created_at?: number; notes?: Record<string, string>; }
 export interface RazorpayInvoice { id: string; subscription_id: string; payment_id: string; order_id?: string | null; amount: number; currency: string; status: string; billing_start?: number | null; billing_end?: number | null; }
 export interface RazorpayCollection<T> { items: T[]; count: number; }
@@ -101,6 +101,12 @@ export class RazorpayClient {
   async cancelSubscription(subscriptionId: string, cancelAtCycleEnd = true): Promise<RazorpaySubscription> {
     const subscription = await this.post<RazorpaySubscription>(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, { cancel_at_cycle_end: cancelAtCycleEnd ? 1 : 0 });
     if (!subscription || subscription.id !== subscriptionId) throw new Error("billing_subscription_mismatch");
+    // Razorpay can keep an end-of-cycle cancellation in the active state. In
+    // that case it must explicitly report the scheduled change; an unchanged
+    // same-ID object is not proof that future renewals have been stopped.
+    if (subscription.status !== "cancelled" && !(cancelAtCycleEnd && subscription.has_scheduled_changes === true)) {
+      throw new Error("billing_cancellation_unconfirmed");
+    }
     return subscription;
   }
   async getPayment(paymentId: string): Promise<RazorpayPayment> {

@@ -68,6 +68,18 @@ describe("billing provider boundaries (all fetches mocked)", () => {
     await expect(new RazorpayClient("synthetic-key", secret).getPayment("pay_requested")).rejects.toThrow("billing_payment_mismatch");
   });
 
+  it("rejects a same-ID subscription cancellation response that confirms no cancellation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_requested", plan_id: "plan_student", status: "active", has_scheduled_changes: false })));
+    await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_requested", true)).rejects.toThrow("billing_cancellation_unconfirmed");
+  });
+
+  it("accepts a cycle-end cancellation only when Razorpay confirms a scheduled change", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_requested", plan_id: "plan_student", status: "active", has_scheduled_changes: true })));
+    await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_requested", true)).resolves.toMatchObject({
+      id: "sub_requested", has_scheduled_changes: true,
+    });
+  });
+
   it("bounds fetch and response-body stalls, including implementations ignoring abort", async () => {
     vi.useFakeTimers();
     let signal: AbortSignal | undefined;

@@ -11,7 +11,7 @@ const canonicalScopes = [...GOOGLE_CANONICAL_CLASSROOM_SCOPES, V2_DRIVE_SCOPE, "
 const userId = "00000000-0000-4000-8000-000000000003";
 afterEach(() => vi.restoreAllMocks());
 
-async function callback(scopes: string[], claimOverrides: Record<string, unknown> = {}, options: { existingScopes?: string[]; refreshToken?: string | null } = {}) {
+async function callback(scopes: string[], claimOverrides: Record<string, unknown> = {}, options: { existingScopes?: string[]; existingGoogleSubject?: string | null; refreshToken?: string | null } = {}) {
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const store = new MemoryPublicAuthStore();
   const resolver = vi.fn(async () => userId);
@@ -26,7 +26,11 @@ async function callback(scopes: string[], claimOverrides: Record<string, unknown
     googleStoredGrantValidator: isSupportedV2StoredGrant,
     googleIdentityResolver: resolver,
   });
-  if (options.existingScopes) await store.putGrant({ userId, refreshToken: "existing-synthetic-refresh", scopes: options.existingScopes, createdAt: 1, updatedAt: 2 });
+  if (options.existingScopes) await store.putGrant({
+    userId, refreshToken: "existing-synthetic-refresh", scopes: options.existingScopes, createdAt: 1, updatedAt: 2,
+    ...((options.existingGoogleSubject === undefined ? "synthetic-google-subject" : options.existingGoogleSubject)
+      ? { googleSubject: options.existingGoogleSubject ?? "synthetic-google-subject" } : {}),
+  });
   await store.putFlow({
     id: "synthetic-flow", userId: "temporary-flow-owner", client: { client_id: "synthetic-mcp-client", redirect_uris: ["https://chatgpt.com/connector/oauth/synthetic"] } as never,
     params: { state: "synthetic-client-state", scopes: [MCP_SCOPE], codeChallenge: "synthetic-challenge", redirectUri: "https://chatgpt.com/connector/oauth/synthetic" },
@@ -60,7 +64,7 @@ describe("unified OAuth callback scope validation", () => {
     expect(redirect.searchParams.has("code")).toBe(true);
     expect(redirect.searchParams.has("error")).toBe(false);
     expect(resolver).toHaveBeenCalledOnce();
-    expect(await store.getGrant(userId)).toMatchObject({ refreshToken: "synthetic-refresh", scopes: canonicalScopes });
+    expect(await store.getGrant(userId)).toMatchObject({ refreshToken: "synthetic-refresh", scopes: canonicalScopes, googleSubject: "synthetic-google-subject" });
     expect(await store.getGrant("temporary-flow-owner")).toBeUndefined();
     await expect(provider.completeGoogle("synthetic-google-state", "replay", undefined)).rejects.toThrow("Invalid authorization callback");
   });
@@ -77,6 +81,31 @@ describe("unified OAuth callback scope validation", () => {
     const { redirect, store } = await callback(canonicalScopes, {}, { existingScopes: teacherScopes, refreshToken: null });
     expect(redirect.searchParams.has("code")).toBe(true);
     expect(await store.getGrant(userId)).toMatchObject({ refreshToken: "existing-synthetic-refresh", scopes: canonicalScopes });
+  });
+
+  it.each([
+    { label: "a legacy grant without a recorded subject", existingGoogleSubject: null },
+    { label: "a grant recorded for a different Google subject", existingGoogleSubject: "another-google-subject" },
+  ])("does not reuse $label when Google omits a new refresh token", async ({ existingGoogleSubject }) => {
+    const { redirect, store } = await callback(canonicalScopes, {}, {
+      existingScopes: canonicalScopes, existingGoogleSubject, refreshToken: null,
+    });
+    expect(redirect.searchParams.get("error")).toBe("server_error");
+    expect(redirect.searchParams.has("code")).toBe(false);
+    expect(await store.getGrant(userId)).toMatchObject({
+      refreshToken: "existing-synthetic-refresh", scopes: canonicalScopes,
+      ...(existingGoogleSubject ? { googleSubject: existingGoogleSubject } : {}),
+    });
+  });
+
+  it("reuses an existing Google refresh token only for the same verified subject", async () => {
+    const { redirect, store } = await callback(canonicalScopes, {}, {
+      existingScopes: canonicalScopes, existingGoogleSubject: "synthetic-google-subject", refreshToken: null,
+    });
+    expect(redirect.searchParams.has("code")).toBe(true);
+    expect(await store.getGrant(userId)).toMatchObject({
+      refreshToken: "existing-synthetic-refresh", googleSubject: "synthetic-google-subject",
+    });
   });
 
   it("preserves the prior grant when Google's reconnect response omits a required scope", async () => {
