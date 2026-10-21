@@ -144,4 +144,16 @@ describe("production release preflight", () => {
     expect(result.decision).toBe("NO-GO");
     expect(result.checks.find((check) => check.gate === "metadata contains names and settings only")?.status).toBe("BLOCKED");
   });
+
+  it.each([
+    ["workers.dev", "workersDev", true],
+    ["preview URLs", "previewUrls", true],
+    ["variable retention", "keepVars", false],
+  ])("blocks observed metadata when %s settings contradict the production candidate", (_label, key, value) => {
+    const metadata = goodMetadata();
+    Object.assign(metadata, { [key]: value });
+    const result = evaluateReleasePreflight({ config: goodConfig(), metadata, evidence: goodEvidence(), candidateMigrationNames: migrationNames });
+    expect(result.decision).toBe("NO-GO");
+    expect(result.checks.find((check) => check.gate === "observed public endpoint and variable retention settings")?.status).toBe("BLOCKED");
+  });
 });

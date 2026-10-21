@@ -126,6 +126,7 @@ export function evaluateReleasePreflight({ config, metadata, evidence, candidate
     result("candidate required secret names", same(configSecrets, expected.secrets)),
     result("observed worker and active version", metadata?.workerName === expected.workerName && metadata?.activeVersionId === expected.activeVersionId && metadata?.trafficPercentage === 100),
     result("observed route and runtime", metadata?.route === expected.route && metadata?.compatibilityDate === expected.compatibilityDate && same(metadata?.compatibilityFlags, expected.compatibilityFlags)),
+    result("observed public endpoint and variable retention settings", metadata?.workersDev === false && metadata?.previewUrls === false && metadata?.keepVars === true),
     result("observed D1 identity", metadata?.d1?.name === expected.d1Name && metadata?.d1?.id === expected.d1Id),
     result("observed secret binding names", same(metadata?.secretNames, expected.secrets)),
     result("observed retained variable names", same(metadata?.plainTextBindingNames, expected.plainTextBindings)),
