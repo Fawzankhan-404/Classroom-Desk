@@ -23,6 +23,11 @@ Thumbs.db
 /OS_INTERNAL_SOURCE.md
 /eng.traineddata
 /scripts/
+!/scripts/
+/scripts/*
+!/scripts/verify-encrypted-records.mjs
+!/scripts/production-release-preflight.mjs
+!/scripts/test-worker-http-local.mjs
 .neon
 # Local release artifacts and synthetic test outputs
 *.zip
