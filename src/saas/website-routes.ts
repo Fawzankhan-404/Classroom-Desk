@@ -1,7 +1,7 @@
 import type express from "express";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readSessionCookie, sessionCookie, clearSessionCookie } from "./sessions.js";
-import { buildWebsiteGoogleUrl, completeWebsiteGoogleLogin, createLoginState, type WebsiteOAuthConfig } from "./website-auth.js";
+import { buildWebsiteGoogleUrl, completeWebsiteGoogleIdentity, completeWebsiteGoogleLogin, createLoginState, type VerifiedWebsiteGoogleIdentity, type WebsiteOAuthConfig } from "./website-auth.js";
 import type { SaaSStore } from "./store.js";
 import { paymentIsFullyRefunded, paymentMatchesSubscriptionCycle, trialOrderReceipt, validProviderPayment, withProviderTimeout, type RazorpayClient } from "./razorpay-client.js";
 import { requireSameOrigin } from "./csrf.js";
@@ -41,12 +41,40 @@ export interface WebsiteRouteOptions {
   beginTeacherWriteAuthorization?: (input: { mcpUserId: string; state: string; verifier: string; nonce: string }) => Promise<string>;
   completeTeacherWriteAuthorization?: (input: { mcpUserId: string; expectedGoogleSubject: string; code: string; verifier: string; nonce: string }) => Promise<void>;
   createTeacherCourseworkDraft?: (websiteUserId: string, courseId: string, input: TeacherCourseworkDraftInput) => Promise<unknown>;
+  /** Test seam only; production leaves this unset and validates Google's signed OIDC token. */
+  completeRecoveryGoogleIdentity?: (input: { code: string; verifier: string; nonce: string }) => Promise<VerifiedWebsiteGoogleIdentity>;
 }
 
 const WEBSITE_LOGIN_STATE_KIND = "website_login";
 const WEBSITE_LOGIN_STATE_OWNER = "website-login";
 const WEBSITE_LOGIN_STATE_TTL_MS = 10 * 60 * 1000;
 const loginCookie = (secure: boolean, state = "") => `${secure ? "__Host-" : ""}cd_login_state=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${state ? 600 : 0}${secure ? "; Secure" : ""}`;
+const RECOVERY_LOGIN_STATE_KIND = "legacy_recovery_login";
+const RECOVERY_LOGIN_STATE_OWNER = "legacy-recovery-login";
+const RECOVERY_LOGIN_STATE_TTL_MS = 10 * 60 * 1000;
+const RECOVERY_SESSION_COOKIE_TTL_SECONDS = 30 * 60;
+const recoveryLoginCookie = (secure: boolean, state = "") => `${secure ? "__Host-" : ""}cd_recovery_login_state=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${state ? 600 : 0}${secure ? "; Secure" : ""}`;
+const recoverySessionCookie = (token: string, secure: boolean) => `${secure ? "__Host-" : ""}cd_recovery_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${RECOVERY_SESSION_COOKIE_TTL_SECONDS}${secure ? "; Secure" : ""}`;
+const clearRecoverySessionCookie = (secure: boolean) => `${secure ? "__Host-" : ""}cd_recovery_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? "; Secure" : ""}`;
+
+function readRecoverySessionCookie(header: string | undefined, secure: boolean): string | null {
+  const prefix = `${secure ? "__Host-" : ""}cd_recovery_session=`;
+  const value = header?.split(";").map(item => item.trim()).find(item => item.startsWith(prefix))?.slice(prefix.length) ?? "";
+  return /^[A-Za-z0-9_-]{40,}$/.test(value) ? value : null;
+}
+
+function browserStartedRecoveryLogin(header: string | undefined, state: string, secure: boolean): boolean {
+  const prefix = `${secure ? "__Host-" : ""}cd_recovery_login_state=`;
+  const value = header?.split(";").map(item => item.trim()).find(item => item.startsWith(prefix))?.slice(prefix.length) ?? "";
+  return /^[A-Za-z0-9_-]{32}$/.test(state) && value.length === state.length && timingSafeEqual(Buffer.from(value), Buffer.from(state));
+}
+
+function recoveryHtmlEscape(value: string): string { return value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char); }
+function renderLegacyRecoveryPage(input: { authenticated: boolean; requests: Array<{ id: string; status: string; expiresAt: Date; createdAt: Date }>; notice?: string }): string {
+  const states = input.requests.map(item => `<li><code>${recoveryHtmlEscape(item.id)}</code> · ${recoveryHtmlEscape(item.status)} · expires ${recoveryHtmlEscape(item.expiresAt.toISOString())}</li>`).join("") || `<li>No recovery requests for this Google identity.</li>`;
+  const form = input.authenticated ? `<section><h2>Submit a recovery request</h2><p>Enter the exact legacy account ID and a reference to a pre-existing, independently verifiable record. Do not use email matching, upload documents, or include passwords, tokens, or payment-card data. The owner reviews the evidence against the original account record. Approval does not change billing or account ownership until a fresh Google authorization completes.</p><form method="post" action="/account/recovery/request"><label>Legacy account ID<input name="accountId" required maxlength="36" pattern="[0-9a-fA-F-]{36}" autocomplete="off"></label><label>Evidence source<select name="evidenceType" required><option value="">Choose a source</option><option value="preexisting_support_record">Pre-existing support record</option><option value="billing_provider_record">Billing provider record</option><option value="account_specific_recovery_material">Account-specific recovery material</option><option value="other_independent_record">Other independent record</option></select></label><label>Reference ID<input name="evidenceReference" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9._:/#-]{7,255}" autocomplete="off"></label><button type="submit">Send for owner review</button></form><h2>Your requests</h2><ul>${states}</ul><form method="post" action="/account/recovery/logout"><button type="submit">End recovery session</button></form></section>` : `<section><h2>Verify the Google identity you want to reconnect</h2><p>This short-lived recovery-only sign-in does not create an account or grant Classroom access. Email equality alone cannot recover an account.</p><a class="button" href="/account/recovery/start">Continue with Google</a></section>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Legacy account recovery · Classroom Desk</title><style>body{margin:0;background:#f7f8f4;color:#202923;font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}main{max-width:720px;margin:48px auto;padding:0 20px}section{background:#fff;border:1px solid #dce4dd;border-radius:12px;padding:24px;margin:22px 0}h1{letter-spacing:-.035em}label{display:grid;gap:6px;margin:14px 0;font-weight:650}input,select,button,.button{font:inherit;border:1px solid #cbd7cf;border-radius:8px;padding:10px 12px}button,.button{display:inline-block;background:#207a55;color:#fff;text-decoration:none;font-weight:700;cursor:pointer}small,p{color:#58665d}code{overflow-wrap:anywhere}</style></head><body><main><p>Classroom Desk / Account help</p><h1>Recover a legacy account</h1><p>Recovery keeps the original account ID and existing billing history. A fresh Google sign-in or matching email is not proof of ownership. An owner reviews independent evidence before approving a one-time, expiring Google reconnect.</p>${input.notice ? `<p role="status">${recoveryHtmlEscape(input.notice)}</p>` : ""}${form}<p><a href="/">Return to Classroom Desk</a></p></main></body></html>`;
+}
 
 function teacherReadFailure(error: unknown, resource: "course" | "submissions"):
   { status: 401 | 403 | 503; title: string; detail: string } {
@@ -84,6 +112,12 @@ export function safeWebsiteReturnPath(value: unknown): string {
 
 export function registerWebsiteRoutes(app: express.Express, options: WebsiteRouteOptions): void {
   const pending = new Map<string, ReturnType<typeof createLoginState> & { returnTo: string }>();
+  app.use("/account/recovery", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    next();
+  });
   app.use("/api", requireSameOrigin);
   const requireTeacherMutationAccount = async (req: express.Request, res: express.Response): Promise<string | undefined> => {
     if (options.teacherDraftWritesEnabled !== true) { res.status(503).type("html").send(message("Teacher draft creation is unavailable", "This feature is not available right now.")); return undefined; }
@@ -98,6 +132,59 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
     } catch { res.status(503).type("html").send(message("Teacher access is unavailable", "Account access could not be verified. No Classroom changes were made.")); return undefined; }
     return user.id;
   };
+  app.get("/account/recovery", async (req, res) => {
+    const token = readRecoverySessionCookie(req.get("cookie"), options.secureCookies);
+    if (!token) {
+      res.setHeader("Cache-Control", "no-store");
+      return res.type("html").send(renderLegacyRecoveryPage({ authenticated: false, requests: [], notice: req.query.submitted === "1" ? "Sign in again to check your recovery request." : undefined }));
+    }
+    try {
+      const requests = await options.store.listOwnLegacyRecoveryIntakes(token);
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      return res.type("html").send(renderLegacyRecoveryPage({ authenticated: true, requests,
+        notice: req.query.submitted === "1" ? "Your request was submitted for owner review. You will need to complete a fresh Google authorization after approval." : undefined }));
+    } catch {
+      res.setHeader("Set-Cookie", clearRecoverySessionCookie(options.secureCookies));
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(401).type("html").send(renderLegacyRecoveryPage({ authenticated: false, requests: [], notice: "Your recovery sign-in expired. Start again." }));
+    }
+  });
+  app.get("/account/recovery/start", async (_req, res) => {
+    if (!options.oauth || !options.oauthStateStore) return res.status(503).type("html").send(message("Recovery sign-in is unavailable.", "Try again later. No account or billing data was changed."));
+    const login = createLoginState();
+    try {
+      await options.oauthStateStore.putEphemeral(RECOVERY_LOGIN_STATE_KIND, login.state,
+        { verifier: login.verifier, nonce: login.nonce }, RECOVERY_LOGIN_STATE_OWNER, login.createdAt + RECOVERY_LOGIN_STATE_TTL_MS);
+    } catch { return res.status(503).type("html").send(message("Recovery sign-in is temporarily unavailable.", "Try again later. No account or billing data was changed.")); }
+    res.setHeader("Set-Cookie", recoveryLoginCookie(options.secureCookies, login.state));
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    return res.redirect(302, buildWebsiteGoogleUrl(options.oauth, login));
+  });
+  app.post("/account/recovery/request", requireSameOrigin, async (req, res) => {
+    const token = readRecoverySessionCookie(req.get("cookie"), options.secureCookies);
+    if (!token) return res.status(401).type("html").send(message("Recovery sign-in required.", "Verify the Google identity you want to reconnect, then try again."));
+    try {
+      await options.store.submitLegacyRecoveryIntake({
+        sessionToken: token,
+        accountId: typeof req.body?.accountId === "string" ? req.body.accountId.trim() : "",
+        evidenceType: typeof req.body?.evidenceType === "string" ? req.body.evidenceType : "",
+        evidenceReference: typeof req.body?.evidenceReference === "string" ? req.body.evidenceReference.trim() : "",
+      });
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(303, "/account/recovery?submitted=1");
+    } catch {
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(400).type("html").send(message("Recovery request could not be submitted.", "Check the account ID and evidence reference, or contact support. For privacy, the response does not confirm whether an account exists."));
+    }
+  });
+  app.post("/account/recovery/logout", requireSameOrigin, async (req, res) => {
+    const token = readRecoverySessionCookie(req.get("cookie"), options.secureCookies);
+    if (token) await options.store.revokeLegacyRecoveryAccessSession(token);
+    res.setHeader("Set-Cookie", clearRecoverySessionCookie(options.secureCookies));
+    return res.redirect(303, "/account/recovery");
+  });
   app.get("/login", async (req, res) => {
     if (!options.oauth) return res.status(503).type("html").send(message("Google sign-in is unavailable", "Try again later or contact support."));
     const login = createLoginState();
@@ -115,6 +202,25 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   app.get("/auth/google/callback", async (req, res) => {
     const state = typeof req.query.state === "string" ? req.query.state : "";
     const code = typeof req.query.code === "string" ? req.query.code : "";
+    if (browserStartedRecoveryLogin(req.get("cookie"), state, options.secureCookies)) {
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.setHeader("Set-Cookie", recoveryLoginCookie(options.secureCookies));
+      let recoveryFlow: { verifier: string; nonce: string } | undefined;
+      try { recoveryFlow = options.oauthStateStore ? await options.oauthStateStore.takeEphemeral<{ verifier: string; nonce: string }>(RECOVERY_LOGIN_STATE_KIND, state) : undefined; }
+      catch { return res.status(400).type("html").send(message("Recovery sign-in could not be completed.", "Return to account recovery and start again.")); }
+      if (!recoveryFlow || !code || typeof req.query.error === "string" || !options.oauth) return res.status(400).type("html").send(message("Recovery sign-in could not be completed.", "Return to account recovery and start again."));
+      try {
+        const identity = options.completeRecoveryGoogleIdentity
+          ? await options.completeRecoveryGoogleIdentity({ code, verifier: recoveryFlow.verifier, nonce: recoveryFlow.nonce })
+          : await completeWebsiteGoogleIdentity(options.oauth, code, recoveryFlow.verifier, recoveryFlow.nonce);
+        const session = await options.store.createLegacyRecoveryAccessSession(identity.googleSubject);
+        res.setHeader("Set-Cookie", [recoveryLoginCookie(options.secureCookies), recoverySessionCookie(session.token, options.secureCookies)]);
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Referrer-Policy", "no-referrer");
+        return res.redirect(303, "/account/recovery");
+      } catch { return res.status(400).type("html").send(message("Recovery sign-in could not be verified.", "Use the Google account whose ownership you want to verify. No account or billing data was changed.")); }
+    }
     if (!browserStartedLogin(req.get("cookie"),state,options.secureCookies)) return res.status(400).type("html").send(message("Sign-in could not be completed.","Start sign-in again in this browser. Your account was not changed."));
     res.setHeader("Set-Cookie",loginCookie(options.secureCookies));
     let teacherFlow: { mcpUserId: string; userId: string; verifier: string; nonce: string; authorizationType?: "read" | "write" } | undefined;
@@ -170,7 +276,14 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
       res.setHeader("Set-Cookie", [sessionCookie(session.token, options.secureCookies),loginCookie(options.secureCookies)]);
       res.setHeader("Cache-Control", "no-store");
       return res.redirect(303, login.returnTo);
-    } catch { return res.status(400).type("html").send(message("Google sign-in could not be verified.", "No Classroom or billing access was changed. Try again.")); }
+    } catch (error) {
+      const recoveryRequired = error instanceof Error && error.message === "stored_profile_unavailable";
+      return res.status(recoveryRequired ? 409 : 400).type("html").send(message(
+        recoveryRequired ? "Your existing account needs recovery." : "Google sign-in could not be verified.",
+        recoveryRequired ? "We could not open the existing account profile. No account or billing data was changed. Use the protected recovery process." : "No Classroom or billing access was changed. Try again.",
+        recoveryRequired,
+      ));
+    }
   });
   const endSession = async (req: express.Request, res: express.Response) => { const token = readSessionCookie(req.get("cookie")); if (token) await options.store.sessions.revoke(token); res.setHeader("Set-Cookie", clearSessionCookie); return res.redirect(303, "/"); };
   // Both backward-compatible paths are POST-only with identical origin checks.
@@ -543,4 +656,4 @@ async function currentSession(cookie: string | undefined, store: SaaSStore) {
   return user?.status === "active" ? session : null;
 }
 
-function message(title: string, detail: string): string { return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex, nofollow"><title>${html(title)} · Classroom Desk</title></head><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:24px;color:#202923"><p style="color:#207a55;font-weight:700">Classroom Desk</p><h1>${html(title)}</h1><p>${html(detail)}</p><a href="/">Return home</a></body></html>`; }
+function message(title: string, detail: string, showRecoveryLink = false): string { return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex, nofollow"><title>${html(title)} · Classroom Desk</title></head><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:24px;color:#202923"><p style="color:#207a55;font-weight:700">Classroom Desk</p><h1>${html(title)}</h1><p>${html(detail)}</p>${showRecoveryLink ? `<p><a href="/account/recovery">Start protected legacy-account recovery</a></p>` : ""}<a href="/">Return home</a></body></html>`; }

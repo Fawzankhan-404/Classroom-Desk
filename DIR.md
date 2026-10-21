@@ -1,8 +1,15 @@
-# Classroom Desk — Release Readiness Worktree
+# Classroom Desk — PR #11 Recovery Workflow Worktree
 
-This is the dedicated, isolated release-readiness worktree on branch
-`codex/release-readiness-20261020`, based on main commit
-`069e6e6fdea189c9925f45ba7896a6b80aae1a45`.
+This is the dedicated, isolated recovery workflow worktree on branch
+`codex/recovery-admin-workflow-20261021`, based on PR #11 head
+`77259efb3447d93918dae4aea5f32b4f38cf8c3d`.
+
+The candidate adds claimant recovery intake, an owner-only active
+`SUPER_ADMIN` review queue, single-use expiring decisions, and integration
+with the existing OAuth recovery transaction. Migration `0014` is candidate
+only and has not been applied to production. Production Worker v22, D1,
+secrets, billing, and OAuth settings remain unchanged. The workflow and
+verification limits are in `docs/release/LEGACY_ACCOUNT_RECOVERY.md`.
 
 - Release-gate evidence and route compatibility matrix: [`docs/release/PRODUCTION_READINESS_ASSESSMENT_2026-10-21.md`](docs/release/PRODUCTION_READINESS_ASSESSMENT_2026-10-21.md)
 - Production-target configuration prepared from verified Cloudflare metadata: [`wrangler.production-candidate.jsonc`](wrangler.production-candidate.jsonc). Dry-run only; do not deploy until all gates pass and the owner approves.

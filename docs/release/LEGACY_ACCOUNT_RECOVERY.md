@@ -1,81 +1,78 @@
 # Legacy account recovery
 
-## State and safety rules
+## Scope and authority
 
-Migration 0013 adds an account-scoped `ready` / `recovery_pending` state and a
-short-lived recovery request. A request stores only the stable Google subject
-lookup hash, the fingerprint of the existing profile ciphertext, and a hash of
-the independent review case reference. It does not store a new profile or an
-OAuth token before Google authorization succeeds. The original account UUID,
-legacy pairing row, payment history, subscriptions, trials, and entitlements
-remain attached to the same account.
+This flow is for an existing account whose encrypted profile cannot be opened.
+It does not create a replacement account, change billing, transfer an
+entitlement, or expose the legacy ciphertext. It requires migration `0014`
+after `0013`; neither migration has been applied to production by this work.
 
-The public application does not expose a recovery-request endpoint. Recovery
-creation requires an internal `LegacyRecoveryOwnershipProofVerifier`; it must
-return the exact verified account UUID and stable Google subject, attest that
-the reviewer is independent, and provide a case reference. Without that
-explicitly configured verifier the operation fails closed. Do not enable or
-expose this interface until the verifier is implemented, access-controlled,
-and reviewed.
+The recovery review page is `/admin/account-recovery`. It accepts only an
+existing website session whose user record has the active `SUPER_ADMIN` role.
+The role is read from the stored account row after session validation. Email,
+display name, and username are not used to grant administrator access. The
+owner reviews the queue and remains responsible for verifying evidence.
 
-## Owner and support workflow
+## Recovery steps
 
-1. The user starts a fresh Google sign-in with the Google account they believe
-   owns the existing Classroom Desk account. Google ID-token validation must
-   verify issuer, audience, expiry, nonce, stable `sub`, and `email_verified`.
-   Email is not an account-linking key.
-2. If the stored profile cannot be decrypted, the sign-in does not create a
-   second account or move entitlements. The account remains unavailable until
-   recovery is approved.
-3. A support reviewer verifies ownership using evidence independent of the
-   current Google email (for example, a pre-existing account recovery case and
-   independently controlled account evidence). The reviewer must not be the
-   account owner. Email equality, a newly supplied email, or possession of the
-   new Google session alone is insufficient. If evidence is ambiguous, stop
-   and escalate; do not merge accounts.
-4. The internal verifier issues a request bound to the original account UUID
-   and verified Google `sub`. Requests expire within 24 hours. The review case
-   reference is stored only as a hash. One account and one subject can each
-   have only one pending request.
-5. The user completes a fresh Google authorization. The callback must validate
-   Google identity and the approved scopes and must receive a fresh refresh
-   token. It does not decrypt or reuse an old-key OAuth grant. If Google does
-   not return a refresh token, keep recovery pending and ask the user to
-   re-consent through the supported offline-access flow; do not complete
-   recovery with an access token alone.
-6. In one database transaction/batch, the server checks that the original
-   ciphertext is unchanged, that the subject still has exactly one approved
-   request, and that account mappings are not claimed elsewhere. It then
-   encrypts the verified profile and fresh OAuth grant with the configured key,
-   stores the profile, mapping, grant, MCP authorization code, and one-time
-   completion claim. A failure rolls all of these writes back. Repeated or
-   expired callbacks cannot reuse the completed request.
-7. The user signs in again and reconnects any Google/ChatGPT connection that
-   needs fresh consent. Billing, subscriptions, historical payments, and the
-   original account ID are not changed by this process.
+1. The claimant opens `/account/recovery` and completes a fresh Google OIDC
+   sign-in. The callback verifies Google's signed ID token, audience, issuer,
+   expiry, nonce, verified email, and stable subject, and uses PKCE. The flow
+   creates only a short-lived recovery session; it does not upsert an account
+   or grant Classroom/MCP access.
+2. The claimant submits the exact legacy account UUID and a reference to an
+   existing independent ownership record. Email equality, a new Google login,
+   knowledge of the UUID, and a claimant-supplied name are insufficient by
+   themselves. The request does not confirm whether an account exists.
+3. The owner inspects the evidence reference and verifies from an authoritative
+   record created before the request that this claimant owns that exact legacy
+   account and that the newly verified Google identity is the one to bind. A
+   matching email or Google sign-in alone is not independent evidence. If the
+   record is absent, ambiguous, or identifies another account, reject the
+   request. Do not approve by guessing.
+4. Approval records the owner account ID, evidence category, and a keyed hash
+   of the evidence reference. The reference itself is encrypted at rest. The
+   approval creates a request bound to the stable Google subject and a hash of
+   the unchanged legacy ciphertext. It expires after 24 hours and can be
+   reviewed only once. Rejection is also a single-use, audited decision.
+5. After approval, the claimant completes a fresh Google authorization. The
+   existing recovery resolver checks the exact account, subject, ciphertext,
+   expiry, and identity conflicts. The existing OAuth persistence transaction
+   re-encrypts the profile and stores the fresh grant and authorization code
+   together. A failed or interrupted transaction leaves the old ciphertext,
+   account ID, and billing rows unchanged. Completion has a separate
+   single-use database claim.
+6. The claimant signs in and reconnects Classroom/ChatGPT if the relevant
+   grants need renewal. Recovery does not automatically restore lost Google
+   grants or write grades.
 
-## Manual intervention and limits
+## Data, audit, and limits
 
-- No independently verifiable ownership evidence: leave the account pending
-  and escalate to the owner. Never use email-only matching.
-- A stable Google subject already bound to another account, multiple pending
-  requests, a changed legacy ciphertext, conflicting legacy/unified MCP maps,
-  or a suspended/deleted account: stop for manual investigation. Do not merge
-  or transfer subscriptions.
-- An old OAuth grant encrypted with an unavailable key cannot be decrypted or
-  re-encrypted. Recovery requires a new Google authorization that returns a
-  fresh refresh token. The old encrypted record is not read or copied by this
-  flow; preserve backups under the existing retention policy.
-- Migration 0013 and the service path are not production-authorized by this
-  document. Production source compatibility, protected-record verification,
-  D1 recovery, reviewer tooling, and owner release approval remain separate
-  gates. Do not apply the migration or activate a replacement key in production
-  until those gates pass.
+- Recovery sessions expire after 30 minutes; claimant requests expire after 7
+  days; approved reconnect requests expire after 24 hours.
+- Stable Google subjects and evidence references are encrypted at rest; their
+  lookup/audit fingerprints use purpose-specific HMAC keys. No email is stored
+  in the recovery intake.
+- Owner approvals and rejections create admin audit entries. The decision
+  claim table prevents a second review action. The existing completion claim
+  prevents reuse of an approved recovery.
+- Original account IDs, payment history, trial records, subscriptions, and
+  entitlement rows are preserved. No recovery path changes those records.
+- A subject already bound to another visible account, multiple requests,
+  changed ciphertext, suspended/deleted account, or ambiguous evidence stops
+  recovery. The owner must resolve the conflict through a separately verified
+  process; never merge accounts or move subscriptions.
+- If old ciphertext cannot be decrypted with the configured key, its former
+  profile and old encrypted Google grants cannot be restored by this flow.
+  Recovery requires independent ownership evidence and a fresh authorization.
 
-## Verification boundary
+## Validation boundary
 
-Synthetic tests cover successful same-account recovery, wrong-account proof,
-same-email/different-subject rejection, duplicate identity, ambiguous pending
-requests, transaction interruption, and preservation of trial, subscription,
-entitlement, and payment rows. These tests do not verify production ciphertext,
-keys, Google consent, or live Cloudflare D1 behavior.
+The isolated Worker/D1 tests exercise recovery-only Google callback handling,
+owner-role authorization, request submission, owner approval/rejection,
+audit and one-time claims, recovery completion through the existing OAuth
+transaction, expiry, interruption rollback, and billing preservation. They use
+synthetic records and an injected Google identity test seam. They do not prove
+production encryption-key compatibility, live Google consent, production D1
+migration safety, Worker v22 parity, or production rollback. Production remains
+unchanged and deployment remains separately gated.

@@ -16,7 +16,7 @@ describe("website Google identity nonce", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getTokenMock.mockResolvedValue({ tokens: { id_token: "synthetic-id-token" } });
-    verifyIdTokenMock.mockResolvedValue({ getPayload: () => ({ sub: "google-subject", email: "user@example.test", email_verified: true, name: "Synthetic User", nonce: "expected-nonce" }) });
+    verifyIdTokenMock.mockResolvedValue({ getPayload: () => ({ sub: "google-subject", email: "user@example.test", email_verified: true, name: "Synthetic User", nonce: "expected-nonce", iss: "https://accounts.google.com", exp: Math.floor(Date.now() / 1000) + 3600 }) });
   });
 
   it("requires a matching nonce from the verified ID token before linking identity", async () => {
