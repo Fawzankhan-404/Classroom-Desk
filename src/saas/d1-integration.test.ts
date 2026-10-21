@@ -1,4 +1,884 @@
-YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíßví:-jZ.¶›­–)Þ³V–×÷'B²FF&6U7–æ2Òg&öÒ&æöFS§7Æ—FR#°Ð¦–×÷'B²7&VFU6W'fW"27&VFT‡GG6W'fW"Òg&öÒ&æöFS¦‡GG#°Ð¦–×÷'B²&VDf–ÆU7–æ2Òg&öÒ&æöFS¦g2#°Ð¦–×÷'B²&æFöÔ'—FW2Òg&öÒ&æöFS¦7'—Fò#°Ð¦–×÷'B²gFW$V6‚ÂFW67&–&RÂW‡V7BÂ—BÂf’Òg&öÒ'f—FW7B#°Ð¦–×÷'B²C7ÄFF&6RÂG—RC&F6…VW'’Òg&öÒ"ââ÷V&Æ–2öCÖFF&6Ræ§2#°Ð¦–×÷'BG—R²VW'•&W7VÇE&÷rÒg&öÒ'r#°Ð¦–×÷'BG—R²7Ä6öææV7F–öâÂ7ÄFF&6RÒg&öÒ"ââ÷V&Æ–2÷÷7Fw&W2æ§2#°Ð¦–×÷'B²66÷VçDÆ–æµ6W'f–6RÒg&öÒ"âöÆ–æ¶–æræ§2#°Ð¦–×÷'B²÷7Fw&W5V&Æ–4WF…7F÷&RÒg&öÒ"ââ÷V&Æ–2÷÷7Fw&W2æ§2#°Ð¦–×÷'B²&VfW'&Å6W'f–6RÒg&öÒ"â÷&VfW'&Â×6W'f–6Ræ§2#°Ð¦–×÷'B²657F÷&RÒg&öÒ"â÷7F÷&Ræ§2#°Ð¦–×÷'B²&V6öæ6–ÆU&V6VçE–ÖVçG2Òg&öÒ"â÷&V6öæ6–Æ–F–öâæ§2#°Ð¦–×÷'B²ôWFƒ$6Æ–VçBÒg&öÒ&vöövÆV—2Ö6öÖÖöâ#°Ð¦–×÷'B²V&Æ–4ôWF…&÷f–FW"ÂÔ5õ44õRÂÔ5ôôddÄ”äUõ44õRÒg&öÒ"ââ÷V&Æ–2ööWF‚æ§2#°Ð¦–×÷'B²T$Ä”5ô4Ä55$ôôÕõ44õU2Òg&öÒ"ââ÷66÷W2æ§2#°Ð¦–×÷'B²7&VFUV&Æ–4Òg&öÒ"ââ÷V&Æ–2ö‡GGæ§2#°Ð¦–×÷'B²&W6öÇfTÖ766W72Òg&öÒ"âöÖ7Ö66W72æ§2#°Ð¦–×÷'B²65&öf–ÆT6—†W"Òg&öÒ"â÷&—f7’æ§2#°Ð Ð¦gVæ7F–öâ7Æ—FTC†÷F–öç3¢°Ð¢–æ6ÇVFUV&Æ–4ôWF„Ö–w&F–öç3ó¢&ööÆVã°Ð¢–æ6ÇVFTW‡W&–Væ6TÖ–w&F–öãó¢&ööÆVã°Ð¢–æ6ÇVFU7V'67&—F–öä7&VF–öäÖ–w&F–öãó¢&ööÆVã°Ð¢–æ6ÇVFU&VgVæEF÷FÇ4Ö–w&F–öãó¢&ööÆVã°Ð¢–æ6ÇVFTÆVv7”66÷VçE&V6÷fW'”Ö–w&F–öãó¢&ööÆVã°Ð§ÒÒ·Ò’°Ð¢6öç7B7Æ—FRÒæWrFF&6U7–æ2‚#¦ÖVÖ÷'“¢"“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2óö6Æ77&ööÕöFW6²ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó%öCöÆ–æµö6Æ–×2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó5öCöFÖ–åö÷W&F–öåöÖ&¶W'2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2óEöC÷Væ—VU÷G&–Åö÷&FW'2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2óUöCö&–ÆÆ–æuö÷W&F–öåöÖ&¶W'2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2óeöC÷&V6öæ6–Æ–F–öåö6Æ–×2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2óu÷65÷&öf–ÆU÷&—f7’ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢–b†÷F–öç2æ–æ6ÇVFUV&Æ–4ôWF„Ö–w&F–öç2ÓÒfÇ6R’°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó…÷Væ–f–VEööWF…ö66÷VçG2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó•öF6†&ö&E÷&VfW&Væ6Rç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢ÐÐ¢–b†÷F–öç2æ–æ6ÇVFTW‡W&–Væ6TÖ–w&F–öâÓÒfÇ6R’7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó÷W6W%öW‡W&–Væ6U÷&VfW&Væ6W2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢–b†÷F–öç2æ–æ6ÇVFU7V'67&—F–öä7&VF–öäÖ–w&F–öâÓÒfÇ6R’7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó÷7V'67&—F–öåö7&VF–öå÷&W6W'fF–öç2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢–b†÷F–öç2æ–æ6ÇVFU&VgVæEF÷FÇ4Ö–w&F–öâÓÒfÇ6R’7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó%÷–ÖVçE÷&VgVæE÷F÷FÇ2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢–b†÷F–öç2æ–æ6ÇVFTÆVv7”66÷VçE&V6÷fW'”Ö–w&F–öâÓÒfÇ6R’7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó5öÆVv7•ö66÷VçE÷&V6÷fW'’ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢6öç7B7FFVÖVçBÒ‡7Ã¢7G&–ærÂfÇVW3¢Væ¶æ÷våµÒÒµÒ’Óâ‡°Ð¢ÆÃ¢7–æ2ÅCâ‚’Óâ°Ð¢6öç7BVW'’Ò7Æ—FRç&W&R‡7Â“°Ð¢6öç7B&÷w2ÒVW'’æ6öÇVÖç2‚’æÆVæwF‚òVW'’æÆÂ‚ââçfÇVW2’¢‡VW'’ç'Vâ‚ââçfÇVW2’ÂµÒ“°Ð¢&WGW&â²7V66W73¢G'VRÂ&W7VÇG3¢&÷w22EµÒÓ°Ð¢ÒÀÐ¢Ò“°Ð¢ÆWB&F6…F–ÂÒ&öÖ—6Rç&W6öÇfR‚“°Ð¢6öç7B&–æF–ærÒ°Ð¢&W&S¢‡7Ã¢7G&–ær’Óâ‡²&–æC¢‚ââçfÇVW3¢Væ¶æ÷våµÒ’Óâ7FFVÖVçB‡7ÂÂfÇVW2’Ò’ÀÐ¢&F6ƒ¢ÅCâ‡7FFVÖVçG3¢&WGW&åG—SÇG—Vöb7FFVÖVçCåµÒ’Óâ°Ð¢6öç7B7W'&VçBÒ&F6…F–ÂçF†Vâ†7–æ2‚’Óâ°Ð¢7Æ—FRæW†V2‚$$Tt”â"“°Ð¢G'’°Ð¢6öç7B&W7VÇG2ÒµÓ°Ð¢f÷"†6öç7B—FVÒöb7FFVÖVçG2’&W7VÇG2çW6‚†v—B—FVÒæÆÃÅCâ‚’“°Ð¢7Æ—FRæW†V2‚$4ôÔÔ•B"“°Ð¢&WGW&â&W7VÇG3°Ð¢Ò6F6‚†W'&÷"’°Ð¢7Æ—FRæW†V2‚%$ôÄÄ$4²"“°Ð¢F‡&÷rW'&÷#°Ð¢ÐÐ¢Ò“°Ð¢&F6…F–ÂÒ7W'&VçBçF†Vâ‚‚’ÓâVæFVf–æVBÂ‚’ÓâVæFVf–æVB“°Ð¢&WGW&â7W'&VçC°Ð¢ÒÀÐ¢Ó°Ð¢&WGW&â²7Æ—FRÂFF&6S¢æWrC7ÄFF&6R†&–æF–ær’Ó°Ð§ÐÐ Ð¦gVæ7F–öâv—F„&Vf÷&TC&F6‚†FF&6S¢C7ÄFF&6RÂ&Vf÷&T&F6ƒ¢‚’Óâ&öÖ—6SÇfö–Câ“¢7ÄFF&6R°Ð¢&WGW&â°Ð¢VW'“¢ÅBW‡FVæG2VW'•&W7VÇE&÷rÒ&V6÷&CÇ7G&–ærÂVæ¶æ÷vããâ‡7Ã¢7G&–ærÂfÇVW3ó¢Væ¶æ÷våµÒ’ÓâFF&6RçVW'“ÅCâ‡7ÂÂfÇVW2’ÀÐ¢G&ç67F–öã¢ÅCâ‡'Vã¢‡Gƒ¢7Ä6öææV7F–öâ’Óâ&öÖ—6SÅCâ’ÓâFF&6RçG&ç67F–öâ‡'Vâ’ÀÐ¢&F6ƒ¢7–æ2ÅBW‡FVæG2VW'•&W7VÇE&÷rÒ&V6÷&CÇ7G&–ærÂVæ¶æ÷vããâ‡VW&–W3¢C&F6…VW'•µÒ’Óâ°Ð¢v—B&Vf÷&T&F6‚‚“°Ð¢&WGW&âFF&6Ræ&F6ƒÅCâ‡VW&–W2“°Ð¢ÒÀÐ¢Ó°Ð§ÐÐ Ð¦7–æ2gVæ7F–öâFÖ–äCf—‡GW&R†7F÷%&öÆS¢%5UU%ôDÔ”â"Â%5Uõ%EôDÔ”â"Ò%5UU%ôDÔ”â"’°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‚“°Ð¢6öç7BFEW6W"Ò7–æ2‡7V&¦V7C¢7G&–ærÂ&öÆRÒ%5ETDTåB"’Óâ†v—BFF&6RçVW'“Ç²–C¢7G&–ærÓâ€Ð¢”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†vöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖRÇ&öÆR’dÅTU2‚CÂC"ÂC2ÂCB’$UEU$ä”är–FÀÐ¢·7V&¦V7BÂG·7V&¦V7GÔW†×ÆRæ–çfÆ–FÂ7V&¦V7BÂ&öÆUÒÀÐ¢’’ç&÷w5³Òæ–C°Ð¢6öç7B7F÷$–BÒv—BFEW6W"‚&FÖ–â×&6RÖ7F÷""Â7F÷%&öÆR“°Ð¢6öç7BF&vWD–BÒv—BFEW6W"‚&FÖ–â×&6R×F&vWB"“°Ð¢&WGW&â²7Æ—FRÂFF&6RÂ7F÷$–BÂF&vWD–BÂ7F÷&S¢æWr657F÷&R†FF&6R’Ó°Ð§ÐÐ Ð¦gFW$V6‚‚‚’Óâf’ç&W7F÷&TÆÄÖö6·2‚’“°Ð Ð¦FW67&–&R‚$CÖ–w&F–öâæB66÷VçBÖÆ–æ²FöÖ–6—G’"Â‚’Óâ°Ð¢—B‚'&W6W'fW27V'67&—F–öâ7&VF–öâöæ6RÂW'6—7G2F†R&÷f–FW"”BFöÖ–6ÆÇ’ÂæB&W7VÖW2F†R6ÖRVæF–ær7V'67&—F–öâ"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‚“°Ð¢6öç7BW6W$–BÒ#ÓÓCÓƒÓ“r#°Ð¢6öç7B7F÷&RÒæWr657F÷&R†FF&6R“°Ð¢G'’°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖR’dÅTU2‚CÂC"ÂC2ÂCB–Â·W6W$–BÂ'7–çF†WF–2×7V'67&—F–öâ×&W6W'fF–öâ"Â'&W6W'fF–öäW†×ÆRæ–çfÆ–B"Â%7–çF†WF–2&W6W'fF–öâ%Ò“°Ð¢6öç7B&W6W'fF–öç2Òv—B&öÖ—6RæÆÂ…·7F÷&Rç&W6W'fU7V'67&—F–öä7&VF–öâ‡W6W$–BÂ'7GVFVçB"’Â7F÷&Rç&W6W'fU7V'67&—F–öä7&VF–öâ‡W6W$–BÂ'7GVFVçB"•Ò“°Ð¢W‡V7B‡&W6W'fF–öç2æf–ÇFW"†—FVÒÓâ—FVÒæ¶–æBÓÓÒ'&W6W'fVB"’’çFô†fTÆVæwF‚ƒ“°Ð¢W‡V7B‡&W6W'fF–öç2æf–ÇFW"†—FVÒÓâ—FVÒæ¶–æBÓÓÒ&&Æö6¶VB"bb—FVÒç&V6öâÓÓÒ&7&VF–öåö–å÷&öw&W72"’’çFô†fTÆVæwF‚ƒ“°Ð¢6öç7B7&VFVBÒ&W6W'fF–öç2æf–æB†—FVÒÓâ—FVÒæ¶–æBÓÓÒ'&W6W'fVB"“°Ð¢–b‚7&VFVBÇÂ7&VFVBæ¶–æBÓÒ'&W6W'fVB"’F‡&÷ræWrW'&÷"‚'&W6W'fF–öåöÖ—76–ær"“°Ð¢v—B7F÷&Ræ6ö×ÆWFU7V'67&—F–öä7&VF–öâ‡W6W$–BÂ'7GVFVçB"Â7&VFVBç&WVW7D–BÂ'7V%öC÷&W6W'fF–öâ"“°Ð¢W‡V7B‚†v—BFF&6RçVW'’†4TÄT5BÆâÇ7FGW2Ç&÷f–FW%÷7V'67&—F–öåö–Be$ôÒ6Æ77&ööÕöFW6µ÷7V'67&—F–öç2t„U$RW6W%ö–CÒCÂ·W6W$–EÒ’’ç&÷w2’çFôWVÂ…·²Æã¢'7GVFVçB"Â7FGW3¢'VæF–ær"Â&÷f–FW%÷7V'67&—F–öåö–C¢'7V%öC÷&W6W'fF–öâ"ÕÒ“°Ð¢W‡V7B‚†v—BFF&6RçVW'’†4TÄT5B6÷VçB‚¢’26÷VçBe$ôÒ6Æ77&ööÕöFW6µ÷7V'67&—F–öåö7&VF–öå÷&W6W'fF–öç2t„U$RW6W%ö–CÒCÂ·W6W$–EÒ’’ç&÷w2’çFôWVÂ…·²6÷VçC¢ÕÒ“°Ð¢v—BW‡V7B‡7F÷&Rç&W6W'fU7V'67&—F–öä7&VF–öâ‡W6W$–BÂ'7GVFVçB"’’ç&W6öÇfW2çFôWVÂ‡²¶–æC¢'&W7VÖR"Â7V'67&—F–öä–C¢'7V%öC÷&W6W'fF–öâ"Ò“°Ð¢v—BFF&6RçVW'’†UDDR6Æ77&ööÕöFW6µ÷7V'67&—F–öç24UB7FGW3Òv6æ6VÆÆVBrt„U$R&÷f–FW%÷7V'67&—F–öåö–CÒCÂ²'7V%öC÷&W6W'fF–öâ%Ò“°Ð¢6öç7BæW‡BÒv—B7F÷&Rç&W6W'fU7V'67&—F–öä7&VF–öâ‡W6W$–BÂ'FV6†W""“°Ð¢W‡V7B†æW‡Bæ¶–æB’çFô&R‚'&W6W'fVB"“°Ð¢–b†æW‡Bæ¶–æBÓÓÒ'&W6W'fVB"’°Ð¢v—B7F÷&RæÖ&µ7V'67&—F–öä7&VF–öåVæ¶æ÷vâ‡W6W$–BÂæW‡Bç&WVW7D–B“°Ð¢v—BW‡V7B‡7F÷&RæFÖ–å7V'67&—F–öä7&VF–öå&W6W'fF–öç2‚’’ç&W6öÇfW2çFôÖF6„ö&¦V7B…·²W6W$–BÂ&WVW7D–C¢æW‡Bç&WVW7D–BÂÆã¢'FV6†W""Â7FFS¢'Væ¶æ÷vâ"ÕÒ“°Ð¢ÐÐ¢v—BW‡V7B‡7F÷&Rç&W6W'fU7V'67&—F–öä7&VF–öâ‡W6W$–BÂ'FV6†W""’’ç&W6öÇfW2çFôWVÂ‡²¶–æC¢&&Æö6¶VB"Â&V6öã¢&7&VF–öå÷&WV—&W5÷&V6öæ6–Æ–F–öâ"Ò“°Ð¢Òf–æÆÇ’²7Æ—FRæ6Æ÷6R‚“²ÐÐ¢Ò“°Ð Ð¢—B‚'&W6W'fW2F†RV&Æ–2‚Ó’†—7F÷'’æBFG2F6†&ö&B7F÷&vRv—F†÷WB6†æv–ær66÷VçB÷"&–ÆÆ–ær&÷w2"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‡²–æ6ÇVFUV&Æ–4ôWF„Ö–w&F–öç3¢fÇ6RÂ–æ6ÇVFTW‡W&–Væ6TÖ–w&F–öã¢fÇ6RÂ–æ6ÇVFU7V'67&—F–öä7&VF–öäÖ–w&F–öã¢fÇ6RÂ–æ6ÇVFU&VgVæEF÷FÇ4Ö–w&F–öã¢fÇ6RÒ“°Ð¢6öç7BW6W$–BÒ#ÓÓCÓƒÓr#°Ð¢6öç7Bæ÷rÒ###bÓÓ…C££ã¢#°Ð¢G'’°Ð¢W‡V7B‡7Æ—FRç&W&R†4TÄT5BæÖRe$ôÒ7Æ—FUöÖ7FW"t„U$RG—SÒwF&ÆRräBæÖSÒv6Æ77&ööÕöFW6µ÷W6W%÷&VfW&Væ6W2v’ævWB‚’’çFô&UVæFVf–æVB‚“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖR’dÅTU2‚CÂC"ÂC2ÂCB–Â·W6W$–BÂ'7–çF†WF–2ÖÖ–w&F–öâ×7V&¦V7B"Â&Ö–w&F–öäW†×ÆRæ–çfÆ–B"Â%7–çF†WF–2Ö–w&F–öâW6W"%Ò“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷G&–Ç2‡W6W%ö–BÇ–ÖVçEö–BÇ–EöBÇ7F'G5öBÆW‡—&W5öBÇ7FGW2’dÅTU2‚CÂC"ÂC2ÂCBÂCRÂv7F—fRr–Â·W6W$–BÂ'7–çF†WF–2×G&–Â×–ÖVçB"Âæ÷rÂæ÷rÂ###bÓÓ#UC££ã¢%Ò“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷7V'67&—F–öç2†–BÇW6W%ö–BÇÆâÇ7FGW2Ç–E÷F‡&÷Vv‚Ç&÷f–FW%÷7V'67&—F–öåö–BÆ7&VFVEöB’dÅTU2‚CÂC"Âw7GVFVçBrÂv7F—fRrÂC2ÂCBÂCR–Â²#ÓÓCÓƒÓ‚"ÂW6W$–BÂ###bÓÓ…C££ã¢"Â'7–çF†WF–2×7V'67&—F–öâ"Âæ÷uÒ“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷–ÖVçG2†–BÇW6W%ö–BÆ¶–æBÇÆâÆÖ÷VçE÷—6RÇ&÷f–FW%÷–ÖVçEö–BÇ&÷f–FW%÷7V'67&—F–öåö–BÇ7FGW2Æ7&VFVEöB’dÅTU2‚CÂC"Âw7V'67&—F–öârÂw7GVFVçBrÃ““ÂC2ÂCBÂv6GW&VBrÂCR–Â²#ÓÓCÓƒÓ’"ÂW6W$–BÂ'7–çF†WF–2×–ÖVçB"Â'7–çF†WF–2×7V'67&—F–öâ"Âæ÷uÒ“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µö6öææV7F–öç2‡vV'6—FU÷W6W%ö–BÆÖ7÷W6W%ö–BÆ6öææV7FVEöB’dÅTU2‚CÂC"ÂC2–Â·W6W$–BÂ'7–çF†WF–2ÖÖ7Ö–FVçF—G’"Âæ÷uÒ“°Ð Ð¢6öç7B&VDW†—7F–æu&÷w2Ò7–æ2‚’Óâ&öÖ—6RæÆÂ…°Ð¢FF&6RçVW'’†4TÄT5B–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖRÇ&öÆRÇ7FGW2e$ôÒ6Æ77&ööÕöFW6µ÷W6W'2t„U$R–CÒCÂ·W6W$–EÒ’ÀÐ¢FF&6RçVW'’†4TÄT5BW6W%ö–BÇ–ÖVçEö–BÇ–EöBÇ7F'G5öBÆW‡—&W5öBÇ7FGW2e$ôÒ6Æ77&ööÕöFW6µ÷G&–Ç2t„U$RW6W%ö–CÒCÂ·W6W$–EÒ’ÀÐ¢FF&6RçVW'’†4TÄT5B–BÇW6W%ö–BÇÆâÇ7FGW2Ç–E÷F‡&÷Vv‚Ç&÷f–FW%÷7V'67&—F–öåö–Be$ôÒ6Æ77&ööÕöFW6µ÷7V'67&—F–öç2t„U$RW6W%ö–CÒCÂ·W6W$–EÒ’ÀÐ¢FF&6RçVW'’†4TÄT5B–BÇW6W%ö–BÆ¶–æBÇÆâÆÖ÷VçE÷—6RÇ&÷f–FW%÷–ÖVçEö–BÇ&÷f–FW%÷7V'67&—F–öåö–BÇ7FGW2e$ôÒ6Æ77&ööÕöFW6µ÷–ÖVçG2t„U$RW6W%ö–CÒCÂ·W6W$–EÒ’ÀÐ¢FF&6RçVW'’†4TÄT5BvV'6—FU÷W6W%ö–BÆÖ7÷W6W%ö–BÆ6öææV7FVEöBe$ôÒ6Æ77&ööÕöFW6µö6öææV7F–öç2t„U$RvV'6—FU÷W6W%ö–CÒCÂ·W6W$–EÒ’ÀÐ¢Ò“°Ð¢6öç7B&Vf÷&RÒv—B&VDW†—7F–æu&÷w2‚“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó…÷Væ–f–VEööWF…ö66÷VçG2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó•öF6†&ö&E÷&VfW&Væ6Rç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢v—BFF&6RçVW'’†UDDR6Æ77&ööÕöFW6µ÷W6W'24UBF6†&ö&E÷&VfW&Væ6SÒwFV6†W"rt„U$R–CÒCÂ·W6W$–EÒ“°Ð¢6öç7BÖ–w&F–öâÒ&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó÷W6W%öW‡W&–Væ6U÷&VfW&Væ6W2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"“°Ð¢7Æ—FRæW†V2†Ö–w&F–öâ“°Ð¢W‡V7B†v—B&VDW†—7F–æu&÷w2‚’’çFôWVÂ†&Vf÷&R“°Ð Ð¢6öç7B7F÷&RÒæWr657F÷&R†FF&6R“°Ð¢W‡V7B†v—B7F÷&RævWDF6†&ö&DW‡W&–Væ6R‡W6W$–B’’çFô&R‚'FV6†W""“°Ð¢v—B7F÷&Rç6WDF6†&ö&DW‡W&–Væ6R‡W6W$–BÂ'7GVFVçB"“°Ð¢W‡V7B†v—B7F÷&RævWDF6†&ö&DW‡W&–Væ6R‡W6W$–B’’çFô&R‚'7GVFVçB"“°Ð¢7Æ—FRæW†V2†Ö–w&F–öâ“°Ð¢W‡V7B‚†v—B&VDW†—7F–æu&÷w2‚’’’çFôWVÂ†&Vf÷&R“°Ð¢W‡V7B†v—B7F÷&RævWDF6†&ö&DW‡W&–Væ6R‡W6W$–B’’çFô&R‚'7GVFVçB"“°Ð¢Òf–æÆÇ’²7Æ—FRæ6Æ÷6R‚“²ÐÐ¢Ò“°Ð Ð¢—B‚&FG2Ö–w&F–öâgFW"F†RV&Æ–2‚Ó66†VÖv—F†÷WB6†æv–ærW†—7F–ær&–ÆÆ–ær&÷w2æB—2&W'Vææ&ÆR"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‡²–æ6ÇVFU7V'67&—F–öä7&VF–öäÖ–w&F–öã¢fÇ6RÒ“°Ð¢6öç7BW6W$–BÒ#ÓÓCÓƒÓ“‚#°Ð¢G'’°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖR’dÅTU2‚CÂC"ÂC2ÂCB–Â·W6W$–BÂ'7–çF†WF–2ÖÖ–w&F–öâÓ’"Â&Ö–w&F–öâÓ”W†×ÆRæ–çfÆ–B"Â%7–çF†WF–2Ö–w&F–öâ’%Ò“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷7V'67&—F–öç2†–BÇW6W%ö–BÇÆâÇ7FGW2Ç&÷f–FW%÷7V'67&—F–öåö–B’dÅTU2‚CÂC"Âw7GVFVçBrÂv7F—fRrÂC2–Â²#ÓÓCÓƒÓ“’"ÂW6W$–BÂ'7V%öÖ–w&F–öåó’%Ò“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷–ÖVçG2†–BÇW6W%ö–BÆ¶–æBÇÆâÆÖ÷VçE÷—6RÇ&÷f–FW%÷–ÖVçEö–BÇ&÷f–FW%÷7V'67&—F–öåö–BÇ7FGW2’dÅTU2‚CÂC"Âw7V'67&—F–öârÂw7GVFVçBrÃ““ÂC2ÂCBÂv6GW&VBr–Â²#ÓÓCÓƒÓ"ÂW6W$–BÂ'•öÖ–w&F–öåó’"Â'7V%öÖ–w&F–öåó’%Ò“°Ð¢W‡V7B‡7Æ—FRç&W&R†4TÄT5BæÖRe$ôÒ7Æ—FUöÖ7FW"t„U$RG—SÒwF&ÆRräBæÖSÒv6Æ77&ööÕöFW6µ÷7V'67&—F–öåö7&VF–öå÷&W6W'fF–öç2v’ævWB‚’’çFô&UVæFVf–æVB‚“°Ð¢6öç7B&Vf÷&RÒv—BFF&6RçVW'’†4TÄT5BW6W%ö–BÇÆâÇ7FGW2Ç&÷f–FW%÷7V'67&—F–öåö–Be$ôÒ6Æ77&ööÕöFW6µ÷7V'67&—F–öç2t„U$RW6W%ö–CÒCÂ·W6W$–EÒ“°Ð¢6öç7B&Vf÷&U–ÖVçG2Òv—BFF&6RçVW'’†4TÄT5BW6W%ö–BÆ¶–æBÆÖ÷VçE÷—6RÇ&÷f–FW%÷–ÖVçEö–BÇ7FGW2e$ôÒ6Æ77&ööÕöFW6µ÷–ÖVçG2t„U$RW6W%ö–CÒCÂ·W6W$–EÒ“°Ð¢6öç7BÖ–w&F–öâÒ&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó÷7V'67&—F–öåö7&VF–öå÷&W6W'fF–öç2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"“°Ð¢7Æ—FRæW†V2†Ö–w&F–öâ“²7Æ—FRæW†V2†Ö–w&F–öâ“°Ð¢W‡V7B‡7Æ—FRç&W&R†4TÄT5BæÖRe$ôÒ7Æ—FUöÖ7FW"t„U$RG—SÒwF&ÆRräBæÖSÒv6Æ77&ööÕöFW6µ÷7V'67&—F–öåö7&VF–öå÷&W6W'fF–öç2v’ævWB‚’’çFô&TFVf–æVB‚“°Ð¢W‡V7B†v—BFF&6RçVW'’†4TÄT5BW6W%ö–BÇÆâÇ7FGW2Ç&÷f–FW%÷7V'67&—F–öåö–Be$ôÒ6Æ77&ööÕöFW6µ÷7V'67&—F–öç2t„U$RW6W%ö–CÒCÂ·W6W$–EÒ’’çFôWVÂ†&Vf÷&R“°Ð¢W‡V7B†v—BFF&6RçVW'’†4TÄT5BW6W%ö–BÆ¶–æBÆÖ÷VçE÷—6RÇ&÷f–FW%÷–ÖVçEö–BÇ7FGW2e$ôÒ6Æ77&ööÕöFW6µ÷–ÖVçG2t„U$RW6W%ö–CÒCÂ·W6W$–EÒ’’çFôWVÂ†&Vf÷&U–ÖVçG2“°Ð¢W‡V7B‚†v—BFF&6RçVW'’†4TÄT5B6÷VçB‚¢’26÷VçBe$ôÒ6Æ77&ööÕöFW6µ÷7V'67&—F–öåö7&VF–öå÷&W6W'fF–öç6’’ç&÷w2’çFôWVÂ…·²6÷VçC¢ÕÒ“°Ð¢Òf–æÆÇ’²7Æ—FRæ6Æ÷6R‚“²ÐÐ¢Ò“°Ð Ð¢—B‚&&6¶f–ÆÇ2¶æ÷vâgVÆÂ&VgVæG2v†VâFF–ærÖ–w&F–öâ"æBÆVfW26GW&VB–ÖVçG2B¦W&ò"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‡²–æ6ÇVFTW‡W&–Væ6TÖ–w&F–öã¢fÇ6RÂ–æ6ÇVFU&VgVæEF÷FÇ4Ö–w&F–öã¢fÇ6RÒ“°Ð¢6öç7BW6W$–BÒ#ÓÓCÓƒÓ#°Ð¢G'’°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖR’dÅTU2‚CÂC"ÂC2ÂCB–Â·W6W$–BÂ'7–çF†WF–2×&VgVæBÖÖ–w&F–öâ"Â'&VgVæBÖÖ–w&F–öäW†×ÆRæ–çfÆ–B"Â%7–çF†WF–2&VgVæBÖ–w&F–öâ%Ò“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷–ÖVçG2†–BÇW6W%ö–BÆ¶–æBÇÆâÆÖ÷VçE÷—6RÇ&÷f–FW%÷–ÖVçEö–BÇ7FGW2’dÅTU2‚CÂC"Âw7V'67&—F–öârÂw7GVFVçBrÃ““ÂC2Âw&VgVæFVBr–Â²#ÓÓCÓƒÓ"ÂW6W$–BÂ'•÷7–çF†WF–5ögVÆÅ÷&VgVæB%Ò“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷–ÖVçG2†–BÇW6W%ö–BÆ¶–æBÇÆâÆÖ÷VçE÷—6RÇ&÷f–FW%÷–ÖVçEö–BÇ7FGW2’dÅTU2‚CÂC"Âw7V'67&—F–öârÂw7GVFVçBrÃ““ÂC2Âv6GW&VBr–Â²#ÓÓCÓƒÓ""ÂW6W$–BÂ'•÷7–çF†WF–5ö6GW&VB%Ò“°Ð Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó%÷–ÖVçE÷&VgVæE÷F÷FÇ2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð Ð¢W‡V7B‚†v—BFF&6RçVW'“Ç²7FGW3¢7G&–æs²Ö÷VçE÷&VgVæFVE÷—6S¢çVÖ&W"Óâ†4TÄT5B7FGW2ÆÖ÷VçE÷&VgVæFVE÷—6Re$ôÒ6Æ77&ööÕöFW6µ÷–ÖVçG2t„U$RW6W%ö–CÒCõ$DU"%’7FGW6Â·W6W$–EÒ’’ç&÷w2’çFôWVÂ…°Ð¢²7FGW3¢&6GW&VB"ÂÖ÷VçE÷&VgVæFVE÷—6S¢ÒÀÐ¢²7FGW3¢'&VgVæFVB"ÂÖ÷VçE÷&VgVæFVE÷—6S¢““ÒÀÐ¢Ò“°Ð¢Òf–æÆÇ’²7Æ—FRæ6Æ÷6R‚“²ÐÐ¢Ò“°Ð Ð¢—B‚'7F÷&W2â66÷VçB×66÷VBF6†&ö&B&VfW&Væ6Rv—F†÷WB6†æv–ærvöövÆR÷"ÆFf÷&Ò&öÆW2"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‚“°Ð¢6öç7B7F÷&RÒæWr657F÷&R†FF&6R“°Ð¢6öç7BW6W"Òv—B7F÷&RçW6W'DvöövÆT–FVçF—G’‡²vöövÆU7V&¦V7C¢'7F&ÆR×7V&¦V7BÓ"ÂVÖ–Ã¢'7GVFVçDW†×ÆRçFW7B"ÂF—7Æ”æÖS¢%7GVFVçB"Âæ÷s¢æWrFFR‚’Ò“°Ð¢W‡V7B†v—B7F÷&RævWDF6†&ö&DW‡W&–Væ6R‡W6W"æ–B’’çFô&TçVÆÂ‚“°Ð¢W‡V7B†v—B7F÷&RævWD6Æ77&ööÔÖ7W6W$–B‡W6W"æ–B’’çFô&R‡W6W"æ–B“°Ð¢v—B7F÷&Rç6WDF6†&ö&DW‡W&–Væ6R‡W6W"æ–BÂ'FV6†W""“°Ð¢W‡V7B†v—B7F÷&RævWDF6†&ö&DW‡W&–Væ6R‡W6W"æ–B’’çFô&R‚'FV6†W""“°Ð¢6öç7B&öÆTgFW%FV6†W%6VÆV7F–öâÒv—B7F÷&RævWEW6W"‡W6W"æ–B“°Ð¢W‡V7B‡&öÆTgFW%FV6†W%6VÆV7F–öãòç&öÆR’çFô&R‚%5ETDTåB"“°Ð¢v—B7F÷&Rç6WDF6†&ö&DW‡W&–Væ6R‡W6W"æ–BÂ'7GVFVçB"“°Ð¢W‡V7B†v—B7F÷&RævWDF6†&ö&DW‡W&–Væ6R‡W6W"æ–B’’çFô&R‚'7GVFVçB"“°Ð¢7Æ—FRæW†V2‡&VDf–ÆU7–æ2†æWrU$Â‚"ââòââöÖ–w&F–öç2ó÷W6W%öW‡W&–Væ6U÷&VfW&Væ6W2ç7Â"Â–×÷'BæÖWFçW&Â’Â'WFc‚"’“°Ð¢W‡V7B†v—B7F÷&RævWDF6†&ö&DW‡W&–Væ6R‡W6W"æ–B’’çFô&R‚'7GVFVçB"“°Ð¢Ò“°Ð Ð¢—B‚'W'6—7G2G–æÖ–2ôWF‚6Æ–VçG2–âCæBfÆ–FFW2WF†÷&—¦F–öâ&Vf÷&R7F'F–ærvöövÆR6öç6VçB"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‚“°Ð¢6öç7B¶W’Ò&æFöÔ'—FW2ƒ3"’çFõ7G&–ær‚&&6ScB"“°Ð¢6öç7BWF…7F÷&RÒæWr÷7Fw&W5V&Æ–4WF…7F÷&R†FF&6RÂ¶W’Â&6Æ77&ööÕöFW6µöWF…÷&V6÷&G2"“°Ð¢v—BWF…7F÷&RæÖ–w&FR‚“°Ð¢6öç7B6öæf–rÒ°Ð¢÷&–v–ã¢æWrU$Â‚&‡GG¢òó#rããã"’ÂÖ7&W6÷W&6S¢æWrU$Â‚&‡GG¢òó#rãããöÖ7"’ÀÐ¢vöövÆT6ÆÆ&6µW&Ã¢&‡GG¢òó#rãããööWF‚övöövÆRö6ÆÆ&6²"ÂvöövÆT6Æ–VçD–C¢'7–çF†WF–2ÖvöövÆRÖ6Æ–VçB"ÀÐ¢vöövÆT6Æ–VçE6V7&WC¢'7–çF†WF–2ÖvöövÆR×6V7&WB"Â÷'C¢Â&öGV7F–öã¢fÇ6RÀÐ¢Ó°Ð¢6öç7B&÷f–FW"ÒæWrV&Æ–4ôWF…&÷f–FW"†WF…7F÷&RÂ6öæf–r“°Ð¢6öç7BÒ7&VFUV&Æ–4†6öæf–rÂWF…7F÷&RÂ&÷f–FW"Â‚’ÓâWF…7F÷&Rç&VG’‚’’æ°Ð¢6öç7B6W'fW"Ò7&VFT‡GG6W'fW"†“°Ð¢v—BæWr&öÖ—6SÇfö–Câ‡&W6öÇfRÓâ6W'fW"æÆ—7FVâƒÂ##rããã"Â&W6öÇfR’“°Ð¢6öç7BFG&W72Ò6W'fW"æFG&W72‚’2²÷'C¢çVÖ&W"Ó°Ð¢6öç7B÷&–v–âÒ‡GG¢òó#rããã¢G¶FG&W72ç÷'GÖ°Ð¢6öç7B&VF—&V7EW&’Ò&‡GG3¢òö6†FwBæ6öÒö6öææV7F÷"ööWF‚÷7–çF†WF–2ÖCÖ6ÆÆ&6²#°Ð¢G'’°Ð¢6öç7B&Vv—7FW&VBÒv—BfWF6‚†G¶÷&–v–çÒ÷&Vv—7FW&Â°Ð¢ÖWF†öC¢%õ5B"Â†VFW'3¢²&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ"ÒÀÐ¢&öG“¢¥4ôâç7G&–æv–g’‡°Ð¢6Æ–VçEöæÖS¢%7–çF†WF–26†DuBC&Vv—7G&F–öâFW7B"Â&VF—&V7E÷W&—3¢·&VF—&V7EW&•ÒÀÐ¢w&çE÷G—W3¢²&WF†÷&—¦F–öåö6öFR"Â'&Vg&W6…÷Fö¶Vâ%ÒÂ&W7öç6U÷G—W3¢²&6öFR%ÒÀÐ¢Fö¶VåöVæGö–çEöWF…öÖWF†öC¢&æöæR"Â66÷S¢&Ö7§FööÇ2öffÆ–æUö66W72"ÀÐ¢Ò’ÀÐ¢Ò“°Ð¢W‡V7B‡&Vv—7FW&VBç7FGW2’çFô&Rƒ#“°Ð¢6öç7B6Æ–VçBÒv—B&Vv—7FW&VBæ§6öâ‚’2²6Æ–VçEö–C¢7G&–ærÓ°Ð¢W‡V7B†6Æ–VçBæ6Æ–VçEö–B’çFôÖF6‚‚õå³Ó–ÖbÕ×³3gÒBö’“°Ð¢W‡V7B†v—BWF…7F÷&RævWD6Æ–VçB†6Æ–VçBæ6Æ–VçEö–B’’çFôÖF6„ö&¦V7B‡²6Æ–VçEö–C¢6Æ–VçBæ6Æ–VçEö–BÂ&VF—&V7E÷W&—3¢·&VF—&V7EW&•ÒÒ“°Ð Ð¢6öç7BWF†÷&—¦RÒ7–æ2†÷fW'&–FW3¢&V6÷&CÇ7G&–ærÂ7G&–æsâÒ·Ò’Óâ°Ð¢6öç7B&×2ÒæWrU$Å6V&6…&×2‡°Ð¢&W7öç6U÷G—S¢&6öFR"Â6Æ–VçEö–C¢6Æ–VçBæ6Æ–VçEö–BÂ&VF—&V7E÷W&“¢&VF—&V7EW&’ÀÐ¢6öFUö6†ÆÆVævS¢'7–çF†WF–2×3#SbÖ6†ÆÆVævR"Â6öFUö6†ÆÆVævUöÖWF†öC¢%3#Sb"ÀÐ¢7FFS¢'7–çF†WF–2ÖöWF‚×7FFR"Â&W6÷W&6S¢6öæf–ræÖ7&W6÷W&6Ræ‡&VbÂ66÷S¢G´Ô5õ44õWÒG´Ô5ôôddÄ”äUõ44õWÖÀÐ¢ââæ÷fW'&–FW2ÀÐ¢Ò“°Ð¢&WGW&âfWF6‚†G¶÷&–v–çÒöWF†÷&—¦SòG·&×7ÖÂ²&VF—&V7C¢&ÖçVÂ"Ò“°Ð¢Ó°Ð Ð¢6öç7B66WFVBÒv—BWF†÷&—¦R‚“°Ð¢W‡V7B†66WFVBç7FGW2’çFô&Rƒ3"“°Ð¢W‡V7B†æWrU$Â†66WFVBæ†VFW'2ævWB‚&Æö6F–öâ"’’çF†æÖR’çFô&R‚"ö6öææV7BövöövÆR"“°Ð Ð¢6öç7BVæ¶æ÷vä6Æ–VçBÒv—BWF†÷&—¦R‡²6Æ–VçEö–C¢'Vç&Vv—7FW&VB×7–çF†WF–2Ö6Æ–VçB"Ò“°Ð¢W‡V7B‡Væ¶æ÷vä6Æ–VçBç7FGW2’çFô&RƒC“°Ð¢W‡V7B†v—BVæ¶æ÷vä6Æ–VçBæ§6öâ‚’’çFôÖF6„ö&¦V7B‡²W'&÷#¢&–çfÆ–Eö6Æ–VçB"Ò“°Ð Ð¢6öç7Bw&öæu&VF—&V7BÒv—BWF†÷&—¦R‡²&VF—&V7E÷W&“¢&‡GG3¢òö6†FwBæ6öÒö6öææV7F÷"ööWF‚öæ÷B×&Vv—7FW&VB"Ò“°Ð¢W‡V7B‡w&öæu&VF—&V7Bç7FGW2’çFô&RƒC“°Ð¢W‡V7B†v—Bw&öæu&VF—&V7Bæ§6öâ‚’’çFôÖF6„ö&¦V7B‡²W'&÷#¢&–çfÆ–E÷&WVW7B"Ò“°Ð Ð¢6öç7BvVµ¶6RÒv—BWF†÷&—¦R‡²6öFUö6†ÆÆVævUöÖWF†öC¢'Æ–â"Ò“°Ð¢W‡V7B‡vVµ¶6Rç7FGW2’çFô&Rƒ3"“°Ð¢W‡V7B†æWrU$Â‡vVµ¶6Ræ†VFW'2ævWB‚&Æö6F–öâ"’’ç6V&6…&×2ævWB‚&W'&÷""’’çFô&R‚&–çfÆ–E÷&WVW7B"“°Ð Ð¢6öç7Bw&öæu&W6÷W&6RÒv—BWF†÷&—¦R‡²&W6÷W&6S¢&‡GG3¢òö÷F†W"æW†×ÆRöÖ7"Ò“°Ð¢W‡V7B‡w&öæu&W6÷W&6Rç7FGW2’çFô&Rƒ3"“°Ð¢W‡V7B†æWrU$Â‡w&öæu&W6÷W&6Ræ†VFW'2ævWB‚&Æö6F–öâ"’’çF†æÖR’çFô&R‡&VF—&V7EW&’ç&WÆ6R‚&‡GG3¢òö6†FwBæ6öÒ"Â""’“°Ð¢W‡V7B†æWrU$Â‡w&öæu&W6÷W&6Ræ†VFW'2ævWB‚&Æö6F–öâ"’’ç6V&6…&×2ævWB‚&W'&÷""’’çFô&R‚'6W'fW%öW'&÷""“°Ð¢Òf–æÆÇ’°Ð¢v—BæWr&öÖ—6SÇfö–Câ‚‡&W6öÇfRÂ&V¦V7B’Óâ6W'fW"æ6Æ÷6R†W'&÷"ÓâW'&÷"ò&V¦V7B†W'&÷"’¢&W6öÇfR‚’’“°Ð¢7Æ—FRæ6Æ÷6R‚“°Ð¢ÐÐ¢Ò“°Ð Ð¢—B‚&&6¶f–ÆÇ2f—fR7–çF†WF–2ÆVv7’&öf–ÆW2–FV×÷FVçFÇ’æB¶VW2Æ–çFW‡B÷WBöbFF&6R&VG2"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‚“°Ð¢6öç7B¶W’Ò&æFöÔ'—FW2ƒ3"’çFõ7G&–ær‚&&6ScB"“°Ð¢6öç7B7F÷&RÒæWr657F÷&R†FF&6RÂ²&öf–ÆTVæ7'—F–öä¶W”&6ScC¢¶W’Â&WV—&U&öf–ÆTVæ7'—F–öã¢G'VRÒ“°Ð¢6öç7Bf—‡GW&RÒ'&’æg&öÒ‡²ÆVæwFƒ¢RÒÂ…òÂ–æFW‚’Óâ‡°Ð¢–C¢ÓÓCÓƒÒGµ7G&–ær†–æFW‚²’çE7F'Bƒ"Â#"—ÖÀÐ¢vöövÆU7V&¦V7C¢7–çF†WF–2ÖÆVv7’×7V&¦V7BÒG¶–æFW‚²ÖÀÐ¢VÖ–Ã¢ÆVv7’ÒG¶–æFW‚²ÔW†×ÆRæ–çfÆ–FÀÐ¢F—7Æ”æÖS¢7–çF†WF–2ÆVv7’G¶–æFW‚²ÖÀÐ¢Ò’“°Ð¢G'’°Ð¢f÷"†6öç7B&÷röbf—‡GW&R’v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖR’dÅTU2‚CÂC"ÂC2ÂCB–Â·&÷ræ–BÇ&÷rævöövÆU7V&¦V7BÇ&÷ræVÖ–ÂÇ&÷ræF—7Æ”æÖUÒ“°Ð¢6öç7B&Vf÷&UG&–Ç2Òv—BFF&6RçVW'“Ç²6÷VçC¢çVÖ&W"Óâ†4TÄT5B6÷VçB‚¢’26÷VçBe$ôÒ6Æ77&ööÕöFW6µ÷G&–Ç6“°Ð¢6öç7B&Vf÷&U–ÖVçG2Òv—BFF&6RçVW'“Ç²6÷VçC¢çVÖ&W"Óâ†4TÄT5B6÷VçB‚¢’26÷VçBe$ôÒ6Æ77&ööÕöFW6µ÷–ÖVçG6“°Ð Ð¢W‡V7B†v—B7F÷&Ræ&6¶f–ÆÄÆVv7•&öf–ÆW2‚’’çFô&RƒR“°Ð¢6öç7BVæ7'—FVBÒv—BFF&6RçVW'“Ç²–C¢7G&–æs²vöövÆU÷7V&¦V7C¢7G&–æs²VÖ–Ã¢7G&–æs²F—7Æ•öæÖS¢7G&–æs²&öf–ÆUö6—†W'FW‡C¢7G&–æs²vöövÆU÷7V&¦V7Eö†6ƒ¢7G&–æs²VÖ–Åö†6ƒ¢7G&–æs²F—7Æ•öæÖUö†6ƒ¢7G&–ærÓâ€Ð¢4TÄT5B–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖRÇ&öf–ÆUö6—†W'FW‡BÆvöövÆU÷7V&¦V7Eö†6‚ÆVÖ–Åö†6‚ÆF—7Æ•öæÖUö†6‚e$ôÒ6Æ77&ööÕöFW6µ÷W6W'2õ$DU"%’–F“°Ð¢W‡V7B†Væ7'—FVBç&÷w2’çFô†fTÆVæwF‚ƒR“°Ð¢f÷"†6öç7B&÷röbVæ7'—FVBç&÷w2’°Ð¢W‡V7B‡&÷rævöövÆU÷7V&¦V7B’çFôÖF6‚‚õæVæ3¥¶ÖcÓ•×³cGÒBò“°Ð¢W‡V7B‡&÷ræVÖ–Â’çFôÖF6‚‚õæVæ3¥¶ÖcÓ•×³cGÒBò“°Ð¢W‡V7B‡&÷ræF—7Æ•öæÖR’çFôÖF6‚‚õæVæ3¥¶ÖcÓ•×³cGÒBò“°Ð¢W‡V7B‡&÷rç&öf–ÆUö6—†W'FW‡B’çFôÖF6‚‚õçcÂâò“°Ð¢W‡V7B‡&÷rævöövÆU÷7V&¦V7Eö†6‚’çFôÖF6‚‚õå¶ÖcÓ•×³cGÒBò“°Ð¢W‡V7B‡&÷ræVÖ–Åö†6‚’çFôÖF6‚‚õå¶ÖcÓ•×³cGÒBò“°Ð¢W‡V7B‡&÷ræF—7Æ•öæÖUö†6‚’çFôÖF6‚‚õå¶ÖcÓ•×³cGÒBò“°Ð¢ÐÐ¢W‡V7B„¥4ôâç7G&–æv–g’†Væ7'—FVBç&÷w2’’ææ÷BçFô6öçF–â‚&W†×ÆRæ–çfÆ–B"“°Ð¢W‡V7B„¥4ôâç7G&–æv–g’†Væ7'—FVBç&÷w2’’ææ÷BçFô6öçF–â‚%7–çF†WF–2ÆVv7’"“°Ð¢f÷"†6öç7B&÷röbf—‡GW&R’W‡V7B†v—B7F÷&RævWEW6W"‡&÷ræ–B’’çFôÖF6„ö&¦V7B‡²–C¢&÷ræ–BÂvöövÆU7V&¦V7C¢&÷rævöövÆU7V&¦V7BÂVÖ–Ã¢&÷ræVÖ–ÂÂF—7Æ”æÖS¢&÷ræF—7Æ”æÖRÒ“°Ð Ð¢6öç7B6—†W'FW‡D&Vf÷&U&WG'’ÒVæ7'—FVBç&÷w2æÖ‡&÷rÓâ&÷rç&öf–ÆUö6—†W'FW‡B“°Ð¢W‡V7B†v—B7F÷&Ræ&6¶f–ÆÄÆVv7•&öf–ÆW2‚’’çFô&Rƒ“°Ð¢6öç7B6—†W'FW‡DgFW%&WG'’Òv—BFF&6RçVW'“Ç²&öf–ÆUö6—†W'FW‡C¢7G&–ærÓâ†4TÄT5B&öf–ÆUö6—†W'FW‡Be$ôÒ6Æ77&ööÕöFW6µ÷W6W'2õ$DU"%’–F“°Ð¢W‡V7B†6—†W'FW‡DgFW%&WG'’ç&÷w2æÖ‡&÷rÓâ&÷rç&öf–ÆUö6—†W'FW‡B’’çFôWVÂ†6—†W'FW‡D&Vf÷&U&WG'’“°Ð¢W‡V7B‚†v—BFF&6RçVW'’†4TÄT5B6÷VçB‚¢’26÷VçBe$ôÒ6Æ77&ööÕöFW6µ÷G&–Ç6’’ç&÷w2’çFôWVÂ†&Vf÷&UG&–Ç2ç&÷w2“°Ð¢W‡V7B‚†v—BFF&6RçVW'’†4TÄT5B6÷VçB‚¢’26÷VçBe$ôÒ6Æ77&ööÕöFW6µ÷–ÖVçG6’’ç&÷w2’çFôWVÂ†&Vf÷&U–ÖVçG2ç&÷w2“°Ð¢Òf–æÆÇ’²7Æ—FRæ6Æ÷6R‚“²ÐÐ¢Ò“°Ð Ð¢—B‚'&W—'2öæÇ’F†RfW&–f–VBvöövÆR7V&¦V7BÖöærf—fRÆVv7’Æ–çFW‡B&öf–ÆW2"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‚“°Ð¢6öç7B¶W’Ò&æFöÔ'—FW2ƒ3"’çFõ7G&–ær‚&&6ScB"“°Ð¢6öç7B7F÷&RÒæWr657F÷&R†FF&6RÂ²&öf–ÆTVæ7'—F–öä¶W”&6ScC¢¶W’Â&WV—&U&öf–ÆTVæ7'—F–öã¢G'VRÒ“°Ð¢6öç7Bf—‡GW&RÒ'&’æg&öÒ‡²ÆVæwFƒ¢RÒÂ…òÂ–æFW‚’Óâ‡°Ð¢–C¢#ÓÓCÓƒÒ"²7G&–ær†–æFW‚²’çE7F'Bƒ"Â#"’ÀÐ¢vöövÆU7V&¦V7C¢'7–çF†WF–2ÖÆVv7’×7V&¦V7BÒ"²†–æFW‚²’ÀÐ¢VÖ–Ã¢&ÆVv7’Ò"²†–æFW‚²’²$W†×ÆRæ–çfÆ–B"ÀÐ¢F—7Æ”æÖS¢%7–çF†WF–2ÆVv7’"²†–æFW‚²’ÀÐ¢Ò’“°Ð¢G'’°Ð¢f÷"†6öç7B&÷röbf—‡GW&R’°Ð¢v—BFF&6RçVW'’‚$”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖRÇ&öÆRÇ7FGW2’dÅTU2‚CÂC"ÂC2ÂCBÂu5ETDTåBrÂv7F—fRr’"ÀÐ¢·&÷ræ–BÂ&÷rævöövÆU7V&¦V7BÂ&÷ræVÖ–ÂÂ&÷ræF—7Æ”æÖUÒ“°Ð¢ÐÐ¢6öç7B–G2Òf—‡GW&RæÖ‡&÷rÓâ&÷ræ–B“°Ð¢6öç7B&Vf÷&RÒv—BFF&6RçVW'“Ç°Ð¢–C¢7G&–æs²vöövÆU÷7V&¦V7C¢7G&–æs²VÖ–Ã¢7G&–æs²F—7Æ•öæÖS¢7G&–æs°Ð¢&öf–ÆUö6—†W'FW‡C¢7G&–ærÂçVÆÃ²vöövÆU÷7V&¦V7Eö†6ƒ¢7G&–ærÂçVÆÃ°Ð¢VÖ–Åö†6ƒ¢7G&–ærÂçVÆÃ²F—7Æ•öæÖUö†6ƒ¢7G&–ærÂçVÆÃ°Ð¢Óâ‚%4TÄT5B–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖRÇ&öf–ÆUö6—†W'FW‡BÆvöövÆU÷7V&¦V7Eö†6‚ÆVÖ–Åö†6‚ÆF—7Æ•öæÖUö†6‚e$ôÒ6Æ77&ööÕöFW6µ÷W6W'2t„U$R–B”â‚CÂC"ÂC2ÂCBÂCR’õ$DU"%’–B"Â–G2“°Ð Ð¢6öç7BF&vWBÒf—‡GW&U³%Ò°Ð¢6öç7B&–æF–ærÒv—B7F÷&Rç&W6öÇfTvöövÆT–FVçF—G”&–æF–ær‡°Ð¢vöövÆU7V&¦V7C¢F&vWBævöövÆU7V&¦V7BÀÐ¢VÖ–Ã¢F&vWBæVÖ–ÂÀÐ¢F—7Æ”æÖS¢F&vWBæF—7Æ”æÖRÀÐ¢æ÷s¢æWrFFR‚###bÓÓ#C££ã¢"’ÀÐ¢Ò“°Ð¢W‡V7B†&–æF–ær’çFôWVÂ‡²66÷VçD–C¢F&vWBæ–BÂÖ7W6W$–C¢F&vWBæ–BÒ“°Ð Ð¢6öç7BgFW"Òv—BFF&6RçVW'“Ç°Ð¢–C¢7G&–æs²vöövÆU÷7V&¦V7C¢7G&–æs²VÖ–Ã¢7G&–æs²F—7Æ•öæÖS¢7G&–æs°Ð¢&öf–ÆUö6—†W'FW‡C¢7G&–ærÂçVÆÃ²vöövÆU÷7V&¦V7Eö†6ƒ¢7G&–ærÂçVÆÃ°Ð¢VÖ–Åö†6ƒ¢7G&–ærÂçVÆÃ²F—7Æ•öæÖUö†6ƒ¢7G&–ærÂçVÆÃ°Ð¢Óâ‚%4TÄT5B–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖRÇ&öf–ÆUö6—†W'FW‡BÆvöövÆU÷7V&¦V7Eö†6‚ÆVÖ–Åö†6‚ÆF—7Æ•öæÖUö†6‚e$ôÒ6Æ77&ööÕöFW6µ÷W6W'2t„U$R–B”â‚CÂC"ÂC2ÂCBÂCR’õ$DU"%’–B"Â–G2“°Ð¢W‡V7B†gFW"ç&÷w2’çFô†fTÆVæwF‚ƒR“°Ð¢W‡V7B†gFW"ç&÷w2æf–ÇFW"‡&÷rÓâ&÷rç&öf–ÆUö6—†W'FW‡BÓÒçVÆÂ’’çFô†fTÆVæwF‚ƒ“°Ð¢6öç7BÖ–w&FVBÒgFW"ç&÷w2æf–æB‡&÷rÓâ&÷ræ–BÓÓÒF&vWBæ–B’°Ð¢W‡V7B†Ö–w&FVBævöövÆU÷7V&¦V7B’çFôÖF6‚‚õæVæ3¢ò“°Ð¢W‡V7B†Ö–w&FVBæVÖ–Â’çFôÖF6‚‚õæVæ3¢ò“°Ð¢W‡V7B†Ö–w&FVBæF—7Æ•öæÖR’çFôÖF6‚‚õæVæ3¢ò“°Ð¢W‡V7B†Ö–w&FVBç&öf–ÆUö6—†W'FW‡B’çFôÖF6‚‚õçcÂâò“°Ð¢W‡V7B†v—B7F÷&RævWEW6W"‡F&vWBæ–B’’çFôÖF6„ö&¦V7B‡²–C¢F&vWBæ–BÂââçF&vWBÒ“°Ð¢f÷"†6öç7B&÷röb&Vf÷&Rç&÷w2’°Ð¢–b‡&÷ræ–BÓÒF&vWBæ–B’W‡V7B†gFW"ç&÷w2æf–æB†6æF–FFRÓâ6æF–FFRæ–BÓÓÒ&÷ræ–B’’çFôWVÂ‡&÷r“°Ð¢ÐÐ¢W‡V7B‚†v—BFF&6RçVW'’‚%4TÄT5B6÷VçB‚¢’26÷VçBe$ôÒ6Æ77&ööÕöFW6µ÷W6W'2"’’ç&÷w2’çFôWVÂ…·²6÷VçC¢RÕÒ“°Ð¢Òf–æÆÇ’²7Æ—FRæ6Æ÷6R‚“²ÐÐ¢Ò“°Ð Ð¢—B‚&f–Ç26Æ÷6VBöâ'F–ÆÇ’Ö&¶VBÆVv7’&öf–ÆRv—F†÷WB6†æv–ær—B"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‚“°Ð¢6öç7B7F÷&RÒæWr657F÷&R†FF&6RÂ²&öf–ÆTVæ7'—F–öä¶W”&6ScC¢&æFöÔ'—FW2ƒ3"’çFõ7G&–ær‚&&6ScB"’Â&WV—&U&öf–ÆTVæ7'—F–öã¢G'VRÒ“°Ð¢G'’°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖR’dÅTU2‚CÂC"ÂC2ÂCB–Â°Ð¢#ÓÓCÓƒÓ“’"Â&Væ3§'F–ÂÖÖ&¶W""Â&ÆVv7”W†×ÆRæ–çfÆ–B"Â%7–çF†WF–2'F–Â"ÀÐ¢Ò“°Ð¢v—BW‡V7B‡7F÷&Ræ&6¶f–ÆÄÆVv7•&öf–ÆW2‚’’ç&V¦V7G2çFõF‡&÷r‚&ÆVv7•÷&öf–ÆU÷&V6÷&E÷Vç&VF&ÆR"“°Ð¢W‡V7B‚†v—BFF&6RçVW'“Ç²&öf–ÆUö6—†W'FW‡C¢7G&–ærÂçVÆÃ²vöövÆU÷7V&¦V7C¢7G&–æs²VÖ–Ã¢7G&–æs²F—7Æ•öæÖS¢7G&–ærÓâ€Ð¢4TÄT5B&öf–ÆUö6—†W'FW‡BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖRe$ôÒ6Æ77&ööÕöFW6µ÷W6W'2t„U$R–CÒCÂ²#ÓÓCÓƒÓ“’%ÐÐ¢’’ç&÷w5³Ò’çFôWVÂ‡²&öf–ÆUö6—†W'FW‡C¢çVÆÂÂvöövÆU÷7V&¦V7C¢&Væ3§'F–ÂÖÖ&¶W""ÂVÖ–Ã¢&ÆVv7”W†×ÆRæ–çfÆ–B"ÂF—7Æ•öæÖS¢%7–çF†WF–2'F–Â"Ò“°Ð¢Òf–æÆÇ’²7Æ—FRæ6Æ÷6R‚“²ÐÐ¢Ò“°Ð Ð¢—B‚&FöW2æ÷BW‡÷6RÆVv7’Æ–çFW‡B&öf–ÆW2F‡&÷Vv‚7G&–7B66÷VçB÷"FÖ–â&VG2"Â7–æ2‚’Óâ°Ð¢6öç7B²7Æ—FRÂFF&6RÒÒ7Æ—FTC‚“°Ð¢6öç7B¶W’Ò&æFöÔ'—FW2ƒ3"’çFõ7G&–ær‚&&6ScB"“°Ð¢6öç7B7G&–7E7F÷&RÒæWr657F÷&R†FF&6RÂ²&öf–ÆTVæ7'—F–öä¶W”&6ScC¢¶W’Â&WV—&U&öf–ÆTVæ7'—F–öã¢G'VRÒ“°Ð¢6öç7BÆVv7•7F÷&RÒæWr657F÷&R†FF&6R“°Ð¢6öç7Bf—'7D–BÒ#ÓÓCÓƒÓ#°Ð¢6öç7B6V6öæD–BÒ#ÓÓCÓƒÓ"#°Ð¢6öç7Bf—'7DVÖ–ÂÒ'7–çF†WF–2ÖÆVv7’ÖöæTW†×ÆRæ–çfÆ–B#°Ð¢6öç7B6V6öæDVÖ–ÂÒ'7–çF†WF–2ÖÆVv7’×GvôW†×ÆRæ–çfÆ–B#°Ð¢G'’°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖR’dÅTU2‚CÂC"ÂC2ÂCB–Â°Ð¢f—'7D–BÂ'7–çF†WF–2ÖÆVv7’×7V&¦V7BÖöæR"Âf—'7DVÖ–ÂÂ%7–çF†WF–2ÆVv7’öæR"ÀÐ¢Ò“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷W6W'2†–BÆvöövÆU÷7V&¦V7BÆVÖ–ÂÆF—7Æ•öæÖR’dÅTU2‚CÂC"ÂC2ÂCB–Â°Ð¢6V6öæD–BÂ'7–çF†WF–2ÖÆVv7’×7V&¦V7B×Gvò"Â6V6öæDVÖ–ÂÂ%7–çF†WF–2ÆVv7’Gvò"ÀÐ¢Ò“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷–ÖVçG2‡W6W%ö–BÆ¶–æBÇÆâÆÖ÷VçE÷—6RÇ7FGW2’dÅTU2‚CÂw7V'67&—F–öârÂw7GVFVçBrÃ““Âw–Br–Â¶f—'7D–EÒ“°Ð¢v—BFF&6RçVW'’†”å4U%B”åDò6Æ77&ööÕöFW6µ÷&VfW'&Ç2‡&VfW'&W%÷W6W%ö–BÇ&VfW'&VE÷W6W%ö–BÆ6öFR’dÅTU2‚CÂC"Âu5”åD„UD”2Ô4ôDRr–Â¶f—'7D–BÂ6V6öæD–EÒ“°Ð Ð¢v—BW‡V7B‡7G&–7E7F÷&RævWEW6W"†f—'7D–B’’ç&V¦V7G2çFõF‡&÷r‚'7F÷&VE÷&öf–ÆU÷Væf–Æ&ÆR"“°Ð¢v—BW‡V7B†ÆVv7•7F÷&RævWEW6W"†f—'7D–B’’ç&W6öÇfW2çFôÖF6„ö&¦V7B‡²VÖ–Ã¢f—'7DVÖ–ÂÂF—7Æ”æÖS¢%7w÷ní¢G§²ÚîÆ­yÜ [actorId])).rows.map(row => row.action))
+import { DatabaseSync } from "node:sqlite";
+import { createServer as createHttpServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { D1SqlDatabase, type D1BatchQuery } from "../public/d1-database.js";
+import type { QueryResultRow } from "pg";
+import type { SqlConnection, SqlDatabase } from "../public/postgres.js";
+import { AccountLinkService } from "./linking.js";
+import { PostgresPublicAuthStore } from "../public/postgres.js";
+import { ReferralService } from "./referral-service.js";
+import { SaaSStore } from "./store.js";
+import { reconcileRecentPayments } from "./reconciliation.js";
+import { OAuth2Client } from "googleapis-common";
+import { PublicOAuthProvider, MCP_SCOPE, MCP_OFFLINE_SCOPE } from "../public/oauth.js";
+import { PUBLIC_CLASSROOM_SCOPES } from "../scopes.js";
+import { createPublicApp } from "../public/http.js";
+import { resolveMcpAccess } from "./mcp-access.js";
+import { SaaSProfileCipher } from "./privacy.js";
+
+function sqliteD1(options: {
+  includePublicOAuthMigrations?: boolean;
+  includeExperienceMigration?: boolean;
+  includeSubscriptionCreationMigration?: boolean;
+  includeRefundTotalsMigration?: boolean;
+  includeLegacyAccountRecoveryMigration?: boolean;
+} = {}) {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(readFileSync(new URL("../../migrations/0001_classroom_desk.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../../migrations/0002_d1_link_claims.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../../migrations/0003_d1_admin_operation_markers.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../../migrations/0004_d1_unique_trial_orders.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../../migrations/0005_d1_billing_operation_markers.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../../migrations/0006_d1_reconciliation_claims.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../../migrations/0007_saas_profile_privacy.sql", import.meta.url), "utf8"));
+  if (options.includePublicOAuthMigrations !== false) {
+    sqlite.exec(readFileSync(new URL("../../migrations/0008_unified_oauth_accounts.sql", import.meta.url), "utf8"));
+    sqlite.exec(readFileSync(new URL("../../migrations/0009_dashboard_preference.sql", import.meta.url), "utf8"));
+  }
+  if (options.includeExperienceMigration !== false) sqlite.exec(readFileSync(new URL("../../migrations/0010_user_experience_preferences.sql", import.meta.url), "utf8"));
+  if (options.includeSubscriptionCreationMigration !== false) sqlite.exec(readFileSync(new URL("../../migrations/0011_subscription_creation_reservations.sql", import.meta.url), "utf8"));
+  if (options.includeRefundTotalsMigration !== false) sqlite.exec(readFileSync(new URL("../../migrations/0012_payment_refund_totals.sql", import.meta.url), "utf8"));
+  if (options.includeLegacyAccountRecoveryMigration !== false) sqlite.exec(readFileSync(new URL("../../migrations/0013_legacy_account_recovery.sql", import.meta.url), "utf8"));
+  const statement = (sql: string, values: unknown[] = []) => ({
+    all: async <T>() => {
+      const query = sqlite.prepare(sql);
+      const rows = query.columns().length ? query.all(...values) : (query.run(...values), []);
+      return { success: true, results: rows as T[] };
+    },
+  });
+  let batchTail = Promise.resolve();
+  const binding = {
+    prepare: (sql: string) => ({ bind: (...values: unknown[]) => statement(sql, values) }),
+    batch: <T>(statements: ReturnType<typeof statement>[]) => {
+      const current = batchTail.then(async () => {
+        sqlite.exec("BEGIN");
+        try {
+          const results = [];
+          for (const item of statements) results.push(await item.all<T>());
+          sqlite.exec("COMMIT");
+          return results;
+        } catch (error) {
+          sqlite.exec("ROLLBACK");
+          throw error;
+        }
+      });
+      batchTail = current.then(() => undefined, () => undefined);
+      return current;
+    },
+  };
+  return { sqlite, database: new D1SqlDatabase(binding) };
+}
+
+function withBeforeD1Batch(database: D1SqlDatabase, beforeBatch: () => Promise<void>): SqlDatabase {
+  return {
+    query: <T extends QueryResultRow = Record<string, unknown>>(sql: string, values?: unknown[]) => database.query<T>(sql, values),
+    transaction: <T>(run: (tx: SqlConnection) => Promise<T>) => database.transaction(run),
+    batch: async <T extends QueryResultRow = Record<string, unknown>>(queries: D1BatchQuery[]) => {
+      await beforeBatch();
+      return database.batch<T>(queries);
+    },
+  };
+}
+
+async function adminD1Fixture(actorRole: "SUPER_ADMIN" | "SUPPORT_ADMIN" = "SUPER_ADMIN") {
+  const { sqlite, database } = sqliteD1();
+  const addUser = async (subject: string, role = "STUDENT") => (await database.query<{ id: string }>(
+    `INSERT INTO classroom_desk_users (google_subject,email,display_name,role) VALUES ($1,$2,$3,$4) RETURNING id`,
+    [subject, `${subject}@example.invalid`, subject, role],
+  )).rows[0]!.id;
+  const actorId = await addUser("admin-race-actor", actorRole);
+  const targetId = await addUser("admin-race-target");
+  return { sqlite, database, actorId, targetId, store: new SaaSStore(database) };
+}
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("D1 migration and account-link atomicity", () => {
+  it("reserves subscription creation once, persists the provider ID atomically, and resumes the same pending subscription", async () => {
+    const { sqlite, database } = sqliteD1();
+    const userId = "00000000-0000-4000-8000-000000000097";
+    const store = new SaaSStore(database);
+    try {
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [userId, "synthetic-subscription-reservation", "reservation@example.invalid", "Synthetic Reservation"]);
+      const reservations = await Promise.all([store.reserveSubscriptionCreation(userId, "student"), store.reserveSubscriptionCreation(userId, "student")]);
+      expect(reservations.filter(item => item.kind === "reserved")).toHaveLength(1);
+      expect(reservations.filter(item => item.kind === "blocked" && item.reason === "creation_in_progress")).toHaveLength(1);
+      const created = reservations.find(item => item.kind === "reserved");
+      if (!created || created.kind !== "reserved") throw new Error("reservation_missing");
+      await store.completeSubscriptionCreation(userId, "student", created.requestId, "sub_d1_reservation");
+      expect((await database.query(`SELECT plan,status,provider_subscription_id FROM classroom_desk_subscriptions WHERE user_id=$1`, [userId])).rows).toEqual([{ plan: "student", status: "pending", provider_subscription_id: "sub_d1_reservation" }]);
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_subscription_creation_reservations WHERE user_id=$1`, [userId])).rows).toEqual([{ count: 0 }]);
+      await expect(store.reserveSubscriptionCreation(userId, "student")).resolves.toEqual({ kind: "resume", subscriptionId: "sub_d1_reservation" });
+      await database.query(`UPDATE classroom_desk_subscriptions SET status='cancelled' WHERE provider_subscription_id=$1`, ["sub_d1_reservation"]);
+      const next = await store.reserveSubscriptionCreation(userId, "teacher");
+      expect(next.kind).toBe("reserved");
+      if (next.kind === "reserved") {
+        await store.markSubscriptionCreationUnknown(userId, next.requestId);
+        await expect(store.adminSubscriptionCreationReservations()).resolves.toMatchObject([{ userId, requestId: next.requestId, plan: "teacher", state: "unknown" }]);
+      }
+      await expect(store.reserveSubscriptionCreation(userId, "teacher")).resolves.toEqual({ kind: "blocked", reason: "creation_requires_reconciliation" });
+    } finally { sqlite.close(); }
+  });
+
+  it("preserves the public 0008-0009 history and adds dashboard storage without changing account or billing rows", async () => {
+    const { sqlite, database } = sqliteD1({ includePublicOAuthMigrations: false, includeExperienceMigration: false, includeSubscriptionCreationMigration: false, includeRefundTotalsMigration: false });
+    const userId = "00000000-0000-4000-8000-000000000007";
+    const now = "2026-10-18T00:00:00.000Z";
+    try {
+      expect(sqlite.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='classroom_desk_user_preferences'`).get()).toBeUndefined();
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [userId, "synthetic-migration-subject", "migration@example.invalid", "Synthetic Migration User"]);
+      await database.query(`INSERT INTO classroom_desk_trials (user_id,payment_id,paid_at,starts_at,expires_at,status) VALUES ($1,$2,$3,$4,$5,'active')`, [userId, "synthetic-trial-payment", now, now, "2026-10-25T00:00:00.000Z"]);
+      await database.query(`INSERT INTO classroom_desk_subscriptions (id,user_id,plan,status,paid_through,provider_subscription_id,created_at) VALUES ($1,$2,'student','active',$3,$4,$5)`, ["00000000-0000-4000-8000-000000000008", userId, "2026-11-18T00:00:00.000Z", "synthetic-subscription", now]);
+      await database.query(`INSERT INTO classroom_desk_payments (id,user_id,kind,plan,amount_paise,provider_payment_id,provider_subscription_id,status,created_at) VALUES ($1,$2,'subscription','student',9900,$3,$4,'captured',$5)`, ["00000000-0000-4000-8000-000000000009", userId, "synthetic-payment", "synthetic-subscription", now]);
+      await database.query(`INSERT INTO classroom_desk_connections (website_user_id,mcp_user_id,connected_at) VALUES ($1,$2,$3)`, [userId, "synthetic-mcp-identity", now]);
+
+      const readExistingRows = async () => Promise.all([
+        database.query(`SELECT id,google_subject,email,display_name,role,status FROM classroom_desk_users WHERE id=$1`, [userId]),
+        database.query(`SELECT user_id,payment_id,paid_at,starts_at,expires_at,status FROM classroom_desk_trials WHERE user_id=$1`, [userId]),
+        database.query(`SELECT id,user_id,plan,status,paid_through,provider_subscription_id FROM classroom_desk_subscriptions WHERE user_id=$1`, [userId]),
+        database.query(`SELECT id,user_id,kind,plan,amount_paise,provider_payment_id,provider_subscription_id,status FROM classroom_desk_payments WHERE user_id=$1`, [userId]),
+        database.query(`SELECT website_user_id,mcp_user_id,connected_at FROM classroom_desk_connections WHERE website_user_id=$1`, [userId]),
+      ]);
+      const before = await readExistingRows();
+      sqlite.exec(readFileSync(new URL("../../migrations/0008_unified_oauth_accounts.sql", import.meta.url), "utf8"));
+      sqlite.exec(readFileSync(new URL("../../migrations/0009_dashboard_preference.sql", import.meta.url), "utf8"));
+      await database.query(`UPDATE classroom_desk_users SET dashboard_preference='teacher' WHERE id=$1`, [userId]);
+      const migration = readFileSync(new URL("../../migrations/0010_user_experience_preferences.sql", import.meta.url), "utf8");
+      sqlite.exec(migration);
+      expect(await readExistingRows()).toEqual(before);
+
+      const store = new SaaSStore(database);
+      expect(await store.getDashboardExperience(userId)).toBe("teacher");
+      await store.setDashboardExperience(userId, "student");
+      expect(await store.getDashboardExperience(userId)).toBe("student");
+      sqlite.exec(migration);
+      expect((await readExistingRows())).toEqual(before);
+      expect(await store.getDashboardExperience(userId)).toBe("student");
+    } finally { sqlite.close(); }
+  });
+
+  it("adds migration 0011 after the public 0008-0010 schema without changing existing billing rows and is rerunnable", async () => {
+    const { sqlite, database } = sqliteD1({ includeSubscriptionCreationMigration: false });
+    const userId = "00000000-0000-4000-8000-000000000098";
+    try {
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [userId, "synthetic-migration-0009", "migration-0009@example.invalid", "Synthetic Migration 0009"]);
+      await database.query(`INSERT INTO classroom_desk_subscriptions (id,user_id,plan,status,provider_subscription_id) VALUES ($1,$2,'student','active',$3)`, ["00000000-0000-4000-8000-000000000099", userId, "sub_migration_0009"]);
+      await database.query(`INSERT INTO classroom_desk_payments (id,user_id,kind,plan,amount_paise,provider_payment_id,provider_subscription_id,status) VALUES ($1,$2,'subscription','student',9900,$3,$4,'captured')`, ["00000000-0000-4000-8000-000000000100", userId, "pay_migration_0009", "sub_migration_0009"]);
+      expect(sqlite.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='classroom_desk_subscription_creation_reservations'`).get()).toBeUndefined();
+      const before = await database.query(`SELECT user_id,plan,status,provider_subscription_id FROM classroom_desk_subscriptions WHERE user_id=$1`, [userId]);
+      const beforePayments = await database.query(`SELECT user_id,kind,amount_paise,provider_payment_id,status FROM classroom_desk_payments WHERE user_id=$1`, [userId]);
+      const migration = readFileSync(new URL("../../migrations/0011_subscription_creation_reservations.sql", import.meta.url), "utf8");
+      sqlite.exec(migration); sqlite.exec(migration);
+      expect(sqlite.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='classroom_desk_subscription_creation_reservations'`).get()).toBeDefined();
+      expect(await database.query(`SELECT user_id,plan,status,provider_subscription_id FROM classroom_desk_subscriptions WHERE user_id=$1`, [userId])).toEqual(before);
+      expect(await database.query(`SELECT user_id,kind,amount_paise,provider_payment_id,status FROM classroom_desk_payments WHERE user_id=$1`, [userId])).toEqual(beforePayments);
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_subscription_creation_reservations`)).rows).toEqual([{ count: 0 }]);
+    } finally { sqlite.close(); }
+  });
+
+  it("backfills known full refunds when adding migration 0012 and leaves captured payments at zero", async () => {
+    const { sqlite, database } = sqliteD1({ includeExperienceMigration: false, includeRefundTotalsMigration: false });
+    const userId = "00000000-0000-4000-8000-000000000110";
+    try {
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [userId, "synthetic-refund-migration", "refund-migration@example.invalid", "Synthetic Refund Migration"]);
+      await database.query(`INSERT INTO classroom_desk_payments (id,user_id,kind,plan,amount_paise,provider_payment_id,status) VALUES ($1,$2,'subscription','student',9900,$3,'refunded')`, ["00000000-0000-4000-8000-000000000111", userId, "pay_synthetic_full_refund"]);
+      await database.query(`INSERT INTO classroom_desk_payments (id,user_id,kind,plan,amount_paise,provider_payment_id,status) VALUES ($1,$2,'subscription','student',9900,$3,'captured')`, ["00000000-0000-4000-8000-000000000112", userId, "pay_synthetic_captured"]);
+
+      sqlite.exec(readFileSync(new URL("../../migrations/0012_payment_refund_totals.sql", import.meta.url), "utf8"));
+
+      expect((await database.query<{ status: string; amount_refunded_paise: number }>(`SELECT status,amount_refunded_paise FROM classroom_desk_payments WHERE user_id=$1 ORDER BY status`, [userId])).rows).toEqual([
+        { status: "captured", amount_refunded_paise: 0 },
+        { status: "refunded", amount_refunded_paise: 9900 },
+      ]);
+    } finally { sqlite.close(); }
+  });
+
+  it("stores an account-scoped dashboard preference without changing Google or platform roles", async () => {
+    const { sqlite, database } = sqliteD1();
+    const store = new SaaSStore(database);
+    const user = await store.upsertGoogleIdentity({ googleSubject: "stable-subject-1", email: "student@example.test", displayName: "Student", now: new Date() });
+    expect(await store.getDashboardExperience(user.id)).toBeNull();
+    expect(await store.getClassroomMcpUserId(user.id)).toBe(user.id);
+    await store.setDashboardExperience(user.id, "teacher");
+    expect(await store.getDashboardExperience(user.id)).toBe("teacher");
+    const roleAfterTeacherSelection = await store.getUser(user.id);
+    expect(roleAfterTeacherSelection?.role).toBe("STUDENT");
+    await store.setDashboardExperience(user.id, "student");
+    expect(await store.getDashboardExperience(user.id)).toBe("student");
+    sqlite.exec(readFileSync(new URL("../../migrations/0010_user_experience_preferences.sql", import.meta.url), "utf8"));
+    expect(await store.getDashboardExperience(user.id)).toBe("student");
+  });
+
+  it("persists dynamic OAuth clients in D1 and validates authorization before starting Google consent", async () => {
+    const { sqlite, database } = sqliteD1();
+    const key = randomBytes(32).toString("base64");
+    const authStore = new PostgresPublicAuthStore(database, key, "classroom_desk_auth_records");
+    await authStore.migrate();
+    const config = {
+      origin: new URL("http://127.0.0.1"), mcpResource: new URL("http://127.0.0.1/mcp"),
+      googleCallbackUrl: "http://127.0.0.1/oauth/google/callback", googleClientId: "synthetic-google-client",
+      googleClientSecret: "synthetic-google-secret", port: 0, production: false,
+    };
+    const provider = new PublicOAuthProvider(authStore, config);
+    const app = createPublicApp(config, authStore, provider, () => authStore.ready()).app;
+    const server = createHttpServer(app);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as { port: number };
+    const origin = `http://127.0.0.1:${address.port}`;
+    const redirectUri = "https://chatgpt.com/connector/oauth/synthetic-d1-callback";
+    try {
+      const registered = await fetch(`${origin}/register`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_name: "Synthetic ChatGPT D1 registration test", redirect_uris: [redirectUri],
+          grant_types: ["authorization_code", "refresh_token"], response_types: ["code"],
+          token_endpoint_auth_method: "none", scope: "mcp:tools offline_access",
+        }),
+      });
+      expect(registered.status).toBe(201);
+      const client = await registered.json() as { client_id: string };
+      expect(client.client_id).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(await authStore.getClient(client.client_id)).toMatchObject({ client_id: client.client_id, redirect_uris: [redirectUri] });
+
+      const authorize = async (overrides: Record<string, string> = {}) => {
+        const params = new URLSearchParams({
+          response_type: "code", client_id: client.client_id, redirect_uri: redirectUri,
+          code_challenge: "synthetic-s256-challenge", code_challenge_method: "S256",
+          state: "synthetic-oauth-state", resource: config.mcpResource.href, scope: `${MCP_SCOPE} ${MCP_OFFLINE_SCOPE}`,
+          ...overrides,
+        });
+        return fetch(`${origin}/authorize?${params}`, { redirect: "manual" });
+      };
+
+      const accepted = await authorize();
+      expect(accepted.status).toBe(302);
+      expect(new URL(accepted.headers.get("location")!).pathname).toBe("/connect/google");
+
+      const unknownClient = await authorize({ client_id: "unregistered-synthetic-client" });
+      expect(unknownClient.status).toBe(400);
+      expect(await unknownClient.json()).toMatchObject({ error: "invalid_client" });
+
+      const wrongRedirect = await authorize({ redirect_uri: "https://chatgpt.com/connector/oauth/not-registered" });
+      expect(wrongRedirect.status).toBe(400);
+      expect(await wrongRedirect.json()).toMatchObject({ error: "invalid_request" });
+
+      const weakPkce = await authorize({ code_challenge_method: "plain" });
+      expect(weakPkce.status).toBe(302);
+      expect(new URL(weakPkce.headers.get("location")!).searchParams.get("error")).toBe("invalid_request");
+
+      const wrongResource = await authorize({ resource: "https://other.example/mcp" });
+      expect(wrongResource.status).toBe(302);
+      expect(new URL(wrongResource.headers.get("location")!).pathname).toBe(redirectUri.replace("https://chatgpt.com", ""));
+      expect(new URL(wrongResource.headers.get("location")!).searchParams.get("error")).toBe("server_error");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      sqlite.close();
+    }
+  });
+
+  it("backfills five synthetic legacy profiles idempotently and keeps plaintext out of database reads", async () => {
+    const { sqlite, database } = sqliteD1();
+    const key = randomBytes(32).toString("base64");
+    const store = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const fixture = Array.from({ length: 5 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      googleSubject: `synthetic-legacy-subject-${index + 1}`,
+      email: `legacy-${index + 1}@example.invalid`,
+      displayName: `Synthetic Legacy ${index + 1}`,
+    }));
+    try {
+      for (const row of fixture) await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [row.id,row.googleSubject,row.email,row.displayName]);
+      const beforeTrials = await database.query<{ count: number }>(`SELECT count(*) AS count FROM classroom_desk_trials`);
+      const beforePayments = await database.query<{ count: number }>(`SELECT count(*) AS count FROM classroom_desk_payments`);
+
+      expect(await store.backfillLegacyProfiles()).toBe(5);
+      const encrypted = await database.query<{ id: string; google_subject: string; email: string; display_name: string; profile_ciphertext: string; google_subject_hash: string; email_hash: string; display_name_hash: string }>(
+        `SELECT id,google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users ORDER BY id`);
+      expect(encrypted.rows).toHaveLength(5);
+      for (const row of encrypted.rows) {
+        expect(row.google_subject).toMatch(/^enc:[a-f0-9]{64}$/);
+        expect(row.email).toMatch(/^enc:[a-f0-9]{64}$/);
+        expect(row.display_name).toMatch(/^enc:[a-f0-9]{64}$/);
+        expect(row.profile_ciphertext).toMatch(/^v1\./);
+        expect(row.google_subject_hash).toMatch(/^[a-f0-9]{64}$/);
+        expect(row.email_hash).toMatch(/^[a-f0-9]{64}$/);
+        expect(row.display_name_hash).toMatch(/^[a-f0-9]{64}$/);
+      }
+      expect(JSON.stringify(encrypted.rows)).not.toContain("example.invalid");
+      expect(JSON.stringify(encrypted.rows)).not.toContain("Synthetic Legacy");
+      for (const row of fixture) expect(await store.getUser(row.id)).toMatchObject({ id: row.id, googleSubject: row.googleSubject, email: row.email, displayName: row.displayName });
+
+      const ciphertextBeforeRetry = encrypted.rows.map(row => row.profile_ciphertext);
+      expect(await store.backfillLegacyProfiles()).toBe(0);
+      const ciphertextAfterRetry = await database.query<{ profile_ciphertext: string }>(`SELECT profile_ciphertext FROM classroom_desk_users ORDER BY id`);
+      expect(ciphertextAfterRetry.rows.map(row => row.profile_ciphertext)).toEqual(ciphertextBeforeRetry);
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_trials`)).rows).toEqual(beforeTrials.rows);
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_payments`)).rows).toEqual(beforePayments.rows);
+    } finally { sqlite.close(); }
+  });
+
+  it("repairs only the verified Google subject among five legacy plaintext profiles", async () => {
+    const { sqlite, database } = sqliteD1();
+    const key = randomBytes(32).toString("base64");
+    const store = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const fixture = Array.from({ length: 5 }, (_, index) => ({
+      id: "00000000-0000-4000-8000-" + String(index + 1).padStart(12, "0"),
+      googleSubject: "synthetic-legacy-subject-" + (index + 1),
+      email: "legacy-" + (index + 1) + "@example.invalid",
+      displayName: "Synthetic Legacy " + (index + 1),
+    }));
+    try {
+      for (const row of fixture) {
+        await database.query("INSERT INTO classroom_desk_users (id,google_subject,email,display_name,role,status) VALUES ($1,$2,$3,$4,'STUDENT','active')",
+          [row.id, row.googleSubject, row.email, row.displayName]);
+      }
+      const ids = fixture.map(row => row.id);
+      const before = await database.query<{
+        id: string; google_subject: string; email: string; display_name: string;
+        profile_ciphertext: string | null; google_subject_hash: string | null;
+        email_hash: string | null; display_name_hash: string | null;
+      }>("SELECT id,google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users WHERE id IN ($1,$2,$3,$4,$5) ORDER BY id", ids);
+
+      const target = fixture[2]!;
+      const binding = await store.resolveGoogleIdentityBinding({
+        googleSubject: target.googleSubject,
+        email: target.email,
+        displayName: target.displayName,
+        now: new Date("2026-10-20T00:00:00.000Z"),
+      });
+      expect(binding).toEqual({ accountId: target.id, mcpUserId: target.id });
+
+      const after = await database.query<{
+        id: string; google_subject: string; email: string; display_name: string;
+        profile_ciphertext: string | null; google_subject_hash: string | null;
+        email_hash: string | null; display_name_hash: string | null;
+      }>("SELECT id,google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users WHERE id IN ($1,$2,$3,$4,$5) ORDER BY id", ids);
+      expect(after.rows).toHaveLength(5);
+      expect(after.rows.filter(row => row.profile_ciphertext !== null)).toHaveLength(1);
+      const migrated = after.rows.find(row => row.id === target.id)!;
+      expect(migrated.google_subject).toMatch(/^enc:/);
+      expect(migrated.email).toMatch(/^enc:/);
+      expect(migrated.display_name).toMatch(/^enc:/);
+      expect(migrated.profile_ciphertext).toMatch(/^v1\./);
+      expect(await store.getUser(target.id)).toMatchObject({ id: target.id, ...target });
+      for (const row of before.rows) {
+        if (row.id !== target.id) expect(after.rows.find(candidate => candidate.id === row.id)).toEqual(row);
+      }
+      expect((await database.query("SELECT count(*) AS count FROM classroom_desk_users")).rows).toEqual([{ count: 5 }]);
+    } finally { sqlite.close(); }
+  });
+
+  it("fails closed on a partially marked legacy profile without changing it", async () => {
+    const { sqlite, database } = sqliteD1();
+    const store = new SaaSStore(database, { profileEncryptionKeyBase64: randomBytes(32).toString("base64"), requireProfileEncryption: true });
+    try {
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [
+        "00000000-0000-4000-8000-000000000099", "enc:partial-marker", "legacy@example.invalid", "Synthetic Partial",
+      ]);
+      await expect(store.backfillLegacyProfiles()).rejects.toThrow("legacy_profile_record_unreadable");
+      expect((await database.query<{ profile_ciphertext: string | null; google_subject: string; email: string; display_name: string }>(
+        `SELECT profile_ciphertext,google_subject,email,display_name FROM classroom_desk_users WHERE id=$1`, ["00000000-0000-4000-8000-000000000099"]
+      )).rows[0]).toEqual({ profile_ciphertext: null, google_subject: "enc:partial-marker", email: "legacy@example.invalid", display_name: "Synthetic Partial" });
+    } finally { sqlite.close(); }
+  });
+
+  it("does not expose legacy plaintext profiles through strict account or admin reads", async () => {
+    const { sqlite, database } = sqliteD1();
+    const key = randomBytes(32).toString("base64");
+    const strictStore = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const legacyStore = new SaaSStore(database);
+    const firstId = "00000000-0000-4000-8000-000000000111";
+    const secondId = "00000000-0000-4000-8000-000000000112";
+    const firstEmail = "synthetic-legacy-one@example.invalid";
+    const secondEmail = "synthetic-legacy-two@example.invalid";
+    try {
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [
+        firstId, "synthetic-legacy-subject-one", firstEmail, "Synthetic Legacy One",
+      ]);
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [
+        secondId, "synthetic-legacy-subject-two", secondEmail, "Synthetic Legacy Two",
+      ]);
+      await database.query(`INSERT INTO classroom_desk_payments (user_id,kind,plan,amount_paise,status) VALUES ($1,'subscription','student',9900,'paid')`, [firstId]);
+      await database.query(`INSERT INTO classroom_desk_referrals (referrer_user_id,referred_user_id,code) VALUES ($1,$2,'SYNTHETIC-CODE')`, [firstId, secondId]);
+
+      await expect(strictStore.getUser(firstId)).rejects.toThrow("stored_profile_unavailable");
+      await expect(legacyStore.getUser(firstId)).resolves.toMatchObject({ email: firstEmail, displayName: "Synthetic Legacy One" });
+
+      const adminUsers = await strictStore.listUsers();
+      const adminPayments = await strictStore.adminPayments();
+      const adminReferrals = await strictStore.adminReferrals();
+      const serialized = JSON.stringify({ adminUsers, adminPayments, adminReferrals });
+      expect(serialized).not.toContain(firstEmail);
+      expect(serialized).not.toContain(secondEmail);
+      expect(serialized).not.toContain("synthetic-legacy-subject");
+      expect(serialized).not.toContain("Synthetic Legacy One");
+      expect(serialized).not.toContain("Synthetic Legacy Two");
+      expect(adminUsers.find((user) => user.id === firstId)).toMatchObject({ email: "Profile unavailable", displayName: "Profile unavailable", googleSubject: "" });
+      expect(adminPayments.find((payment) => payment.userId === firstId)?.email).toBe("Profile unavailable");
+      expect(adminReferrals[0]).toMatchObject({ referrerEmail: "Profile unavailable", referredEmail: "Profile unavailable" });
+    } finally { sqlite.close(); }
+  });
+
+  it("can scope staging backfill to synthetic subjects and preserve all other legacy rows", async () => {
+    const { sqlite, database } = sqliteD1();
+    const store = new SaaSStore(database, { profileEncryptionKeyBase64: randomBytes(32).toString("base64"), requireProfileEncryption: true });
+    try {
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [
+        "00000000-0000-4000-8000-000000000101", "real-stage-subject-redacted", "stage@example.invalid", "Preserved Existing Stage Row",
+      ]);
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name) VALUES ($1,$2,$3,$4)`, [
+        "00000000-0000-4000-8000-000000000102", "synthetic-legacy-case-1", "synthetic@example.invalid", "Synthetic Legacy Case",
+      ]);
+      expect(await store.backfillLegacyProfiles(10, "synthetic-legacy-case-")).toBe(1);
+      const rows = await database.query<{ google_subject: string; profile_ciphertext: string | null }>(`SELECT google_subject,profile_ciphertext FROM classroom_desk_users ORDER BY id`);
+      expect(rows.rows[0]).toMatchObject({ google_subject: "real-stage-subject-redacted", profile_ciphertext: null });
+      expect(rows.rows[1]).toMatchObject({ google_subject: expect.stringMatching(/^enc:/), profile_ciphertext: expect.stringMatching(/^v1\./) });
+      expect(await store.backfillLegacyProfiles(10, "synthetic-legacy-case-")).toBe(0);
+      await expect(store.backfillLegacyProfiles(10, "synthetic%_")).rejects.toThrow("profile_backfill_prefix_invalid");
+    } finally { sqlite.close(); }
+  });
+
+  it("requires a configured encryption key before legacy-profile backfill", async () => {
+    const { sqlite, database } = sqliteD1();
+    const store = new SaaSStore(database);
+    try { await expect(store.backfillLegacyProfiles()).rejects.toThrow("profile_encryption_configuration_unavailable"); }
+    finally { sqlite.close(); }
+  });
+
+  it("keeps different Google subjects isolated even when verified emails match", async () => {
+    const { sqlite, database } = sqliteD1();
+    const key = randomBytes(32).toString("base64");
+    const store = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const cipher = new SaaSProfileCipher(key);
+    try {
+      const first = await store.upsertGoogleIdentity({ googleSubject: "synthetic-subject-one", email: "same@example.invalid", displayName: "Account One", now: new Date() });
+      const second = await store.upsertGoogleIdentity({ googleSubject: "synthetic-subject-two", email: "same@example.invalid", displayName: "Account Two", now: new Date() });
+      const returning = await store.upsertGoogleIdentity({ googleSubject: "synthetic-subject-one", email: "renamed@example.invalid", displayName: "Account One Updated", now: new Date() });
+      expect(first.id).not.toBe(second.id);
+      expect(returning.id).toBe(first.id);
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_users WHERE google_subject_hash IN ($1,$2)`, [cipher.digest("synthetic-subject-one"), cipher.digest("synthetic-subject-two")])).rows).toEqual([{ count: 2 }]);
+    } finally { sqlite.close(); }
+  });
+
+  it("fails closed when the profile encryption key cannot validate an existing encrypted row", async () => {
+    const { sqlite, database } = sqliteD1();
+    try {
+      const correct = randomBytes(32).toString("base64");
+      const incorrect = randomBytes(32).toString("base64");
+      const originalStore = new SaaSStore(database, { profileEncryptionKeyBase64: correct, requireProfileEncryption: true });
+      await originalStore.upsertGoogleIdentity({ googleSubject: "synthetic-encrypted-subject", email: "encrypted@example.invalid", displayName: "Encrypted Fixture", now: new Date() });
+      const rowCount = await database.query<{ count: number }>(`SELECT count(*) AS count FROM classroom_desk_users`);
+      const wrongKeyStore = new SaaSStore(database, { profileEncryptionKeyBase64: incorrect, requireProfileEncryption: true });
+      await expect(wrongKeyStore.upsertGoogleIdentity({ googleSubject: "another-synthetic-subject", email: "other@example.invalid", displayName: "Other Fixture", now: new Date() })).rejects.toThrow("stored_profile_unavailable");
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_users`)).rows).toEqual(rowCount.rows);
+    } finally { sqlite.close(); }
+  });
+
+  it("rejects verified-subject sign-in when a legacy row has a conflicting subject hash", async () => {
+    const { sqlite, database } = sqliteD1();
+    const key = randomBytes(32).toString("base64");
+    const store = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const cipher = new SaaSProfileCipher(key);
+    const userId = "00000000-0000-4000-8000-000000000154";
+    try {
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name,role,status)
+        VALUES ($1,'synthetic-legacy-subject','legacy-conflict@example.invalid','Synthetic Conflict','STUDENT','active')`, [userId]);
+      await database.query(`UPDATE classroom_desk_users SET google_subject_hash=$2 WHERE id=$1`, [userId, cipher.digest("different-synthetic-subject")]);
+      const before = await database.query(`SELECT id,google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash,role,status FROM classroom_desk_users WHERE id=$1`, [userId]);
+
+      await expect(store.upsertGoogleIdentity({
+        googleSubject: "synthetic-legacy-subject",
+        email: "legacy-conflict@example.invalid",
+        displayName: "Synthetic Conflict",
+        now: new Date("2026-10-18T00:00:00.000Z"),
+      })).rejects.toThrow("google_subject_account_conflict");
+
+      expect((await database.query(`SELECT id,google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash,role,status FROM classroom_desk_users WHERE id=$1`, [userId])).rows).toEqual(before.rows);
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_users`)).rows).toEqual([{ count: 1 }]);
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_trials WHERE user_id=$1`, [userId])).rows).toEqual([{ count: 0 }]);
+    } finally { sqlite.close(); }
+  });
+
+  it("repairs a legacy plaintext profile on verified-subject sign-in without replacing account or billing links", async () => {
+    const { sqlite, database } = sqliteD1();
+    const key = randomBytes(32).toString("base64");
+    const store = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const cipher = new SaaSProfileCipher(key);
+    const userId = "00000000-0000-4000-8000-000000000155";
+    const identity = {
+      googleSubject: "synthetic-legacy-google-subject",
+      email: "legacy-recovery@example.invalid",
+      displayName: "Synthetic Legacy Recovery",
+    };
+    try {
+      await database.query(`INSERT INTO classroom_desk_users (id,google_subject,email,display_name,role,status)
+        VALUES ($1,$2,$3,$4,'STUDENT','active')`, [userId, identity.googleSubject, identity.email, identity.displayName]);
+      await database.query(`INSERT INTO classroom_desk_trials (user_id,status,starts_at,expires_at)
+        VALUES ($1,'active',$2,$3)`, [userId, "2026-10-01T00:00:00.000Z", "2026-11-01T00:00:00.000Z"]);
+      await database.query(`INSERT INTO classroom_desk_subscriptions (user_id,plan,status,paid_through,provider_subscription_id)
+        VALUES ($1,'student','active',$2,'sub_synthetic_legacy_preserved')`, [userId, "2026-11-01T00:00:00.000Z"]);
+      await database.query(`INSERT INTO classroom_desk_payments (user_id,kind,plan,amount_paise,provider_payment_id,status)
+        VALUES ($1,'subscription','student',9900,'pay_synthetic_legacy_preserved','paid')`, [userId]);
+      await database.query(`INSERT INTO classroom_desk_connections (website_user_id,mcp_user_id,connected_at)
+        VALUES ($1,'legacy-mcp-subject-preserved','2026-10-01T00:00:00.000Z')`, [userId]);
+
+      const billingBefore = {
+        trial: (await database.query(`SELECT user_id,status,starts_at,expires_at FROM classroom_desk_trials WHERE user_id=$1`, [userId])).rows,
+        subscriptions: (await database.query(`SELECT user_id,plan,status,paid_through,provider_subscription_id FROM classroom_desk_subscriptions WHERE user_id=$1`, [userId])).rows,
+        payments: (await database.query(`SELECT user_id,kind,plan,amount_paise,provider_payment_id,status FROM classroom_desk_payments WHERE user_id=$1`, [userId])).rows,
+      };
+
+      const binding = await store.resolveGoogleIdentityBinding({ ...identity, now: new Date("2026-10-18T00:00:00.000Z") });
+      expect(binding).toEqual({ accountId: userId, mcpUserId: "legacy-mcp-subject-preserved" });
+      expect(await store.getUser(userId)).toMatchObject({ id: userId, ...identity, role: "STUDENT", status: "active" });
+
+      const stored = await database.query<{
+        id: string; google_subject: string; email: string; display_name: string; profile_ciphertext: string;
+        google_subject_hash: string; email_hash: string; display_name_hash: string; role: string; status: string;
+      }>(`SELECT id,google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash,role,status
+         FROM classroom_desk_users WHERE id=$1`, [userId]);
+      expect(stored.rows[0]).toMatchObject({
+        id: userId,
+        google_subject: expect.stringMatching(/^enc:/),
+        email: expect.stringMatching(/^enc:/),
+        display_name: expect.stringMatching(/^enc:/),
+        profile_ciphertext: expect.stringMatching(/^v1\./),
+        google_subject_hash: cipher.digest(identity.googleSubject),
+        email_hash: cipher.digest(identity.email.toLowerCase()),
+        display_name_hash: cipher.digest(identity.displayName),
+        role: "STUDENT",
+        status: "active",
+      });
+      expect(JSON.stringify(stored.rows)).not.toContain(identity.googleSubject);
+      expect(JSON.stringify(stored.rows)).not.toContain(identity.email);
+      expect(JSON.stringify(stored.rows)).not.toContain(identity.displayName);
+      expect((await database.query(`SELECT id FROM classroom_desk_users WHERE google_subject_hash=$1`, [cipher.digest(identity.googleSubject)])).rows).toEqual([{ id: userId }]);
+      expect((await database.query(`SELECT website_user_id,mcp_user_id,connected_at FROM classroom_desk_connections WHERE website_user_id=$1`, [userId])).rows).toEqual([
+        { website_user_id: userId, mcp_user_id: "legacy-mcp-subject-preserved", connected_at: "2026-10-01T00:00:00.000Z" },
+      ]);
+      expect({
+        trial: (await database.query(`SELECT user_id,status,starts_at,expires_at FROM classroom_desk_trials WHERE user_id=$1`, [userId])).rows,
+        subscriptions: (await database.query(`SELECT user_id,plan,status,paid_through,provider_subscription_id FROM classroom_desk_subscriptions WHERE user_id=$1`, [userId])).rows,
+        payments: (await database.query(`SELECT user_id,kind,plan,amount_paise,provider_payment_id,status FROM classroom_desk_payments WHERE user_id=$1`, [userId])).rows,
+      }).toEqual(billingBefore);
+    } finally { sqlite.close(); }
+  });
+
+  it("binds a verified OAuth subject to an encrypted D1 account and serves MCP status and courses without a pairing row", async () => {
+    const { sqlite, database } = sqliteD1();
+    const port = 0;
+    const origin = "http://127.0.0.1";
+    const key = randomBytes(32).toString("base64");
+    const userStore = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const expectedIdentity = { googleSubject: "synthetic-google-subject-2026", email: "reviewer@example.invalid", displayName: "Synthetic Reviewer" };
+    try {
+      const user = await userStore.upsertGoogleIdentity({ ...expectedIdentity, now: new Date() });
+      await database.query(`UPDATE classroom_desk_trials SET status='active',starts_at=$2,expires_at=$3 WHERE user_id=$1`, [user.id, new Date(Date.now() - 60_000), new Date(Date.now() + 60_000)]);
+      const privateRow = await database.query<{ google_subject: string; email: string; display_name: string; profile_ciphertext: string; google_subject_hash: string }>(`SELECT google_subject,email,display_name,profile_ciphertext,google_subject_hash FROM classroom_desk_users WHERE id=$1`, [user.id]);
+      expect(privateRow.rows[0]).toMatchObject({ google_subject: expect.stringMatching(/^enc:/), email: expect.stringMatching(/^enc:/), display_name: expect.stringMatching(/^enc:/), profile_ciphertext: expect.stringMatching(/^v1\./), google_subject_hash: expect.stringMatching(/^[a-f0-9]{64}$/) });
+      expect(JSON.stringify(privateRow.rows)).not.toContain(expectedIdentity.email);
+
+      const authStore = new PostgresPublicAuthStore(database, key, "classroom_desk_auth_records");
+      await authStore.migrate();
+      const identityScopes = [...PUBLIC_CLASSROOM_SCOPES, "https://www.googleapis.com/auth/drive.file", "openid", "email"];
+      const scopeValidator = (scopes: string[]) => scopes.length === identityScopes.length && identityScopes.every(scope => scopes.includes(scope));
+      const provider = new PublicOAuthProvider(authStore, {
+        origin: new URL(origin), mcpResource: new URL(`${origin}/mcp`), googleCallbackUrl: `${origin}/oauth/google/callback`,
+        googleClientId: "synthetic-google-client", googleClientSecret: "synthetic-google-secret", googleScopes: identityScopes,
+        googleGrantValidator: scopeValidator, googleStoredGrantValidator: scopeValidator,
+        googleIdentityResolver: identity => userStore.resolveGoogleIdentityBinding({ ...identity, now: new Date() }),
+      });
+      const flow = {
+        id: "synthetic-d1-flow", userId: "temporary-mcp-subject", client: { client_id: "synthetic-mcp-client", redirect_uris: [`${origin}/callback`] } as never,
+        params: { state: "synthetic-client-state", scopes: [MCP_SCOPE, MCP_OFFLINE_SCOPE], codeChallenge: "synthetic-challenge", redirectUri: `${origin}/callback` },
+        googleState: "synthetic-google-state", googleVerifier: "synthetic-verifier", googleNonce: "synthetic-nonce", expiresAt: Date.now() + 60_000, started: false,
+      };
+      await authStore.putFlow(flow);
+      const googleUrl = new URL(await provider.beginGoogle(flow.id));
+      expect(googleUrl.searchParams.get("nonce")).toBe(flow.googleNonce);
+      const getGoogleToken = vi.spyOn(OAuth2Client.prototype, "getToken").mockResolvedValue({ tokens: { access_token: "synthetic-access", refresh_token: "synthetic-refresh", id_token: "synthetic-id-token", scope: identityScopes.join(" ") } } as never);
+      const verifyGoogleToken = vi.spyOn(OAuth2Client.prototype, "verifyIdToken").mockResolvedValue({ getPayload: () => ({ iss: "https://accounts.google.com", aud: "synthetic-google-client", exp: Math.floor(Date.now() / 1000) + 300, iat: Math.floor(Date.now() / 1000), nonce: flow.googleNonce, sub: expectedIdentity.googleSubject, email: expectedIdentity.email, email_verified: true, name: expectedIdentity.displayName }) } as never);
+      const callback = new URL(await provider.completeGoogle(flow.googleState, "synthetic-google-code", undefined));
+      const code = callback.searchParams.get("code")!;
+      const tokens = await provider.exchangeAuthorizationCode({ client_id: "synthetic-mcp-client" } as never, code, undefined, flow.params.redirectUri, new URL(`${origin}/mcp`));
+      expect(await authStore.getGrant(user.id)).toMatchObject({ refreshToken: "synthetic-refresh" });
+      expect(await provider.verifyAccessToken(tokens.access_token)).toMatchObject({ extra: { userId: user.id } });
+      const reconnect = { ...flow, id: "synthetic-d1-reconnect", googleState: "synthetic-google-state-reconnect", googleNonce: "synthetic-nonce-reconnect", started: false };
+      await authStore.putFlow(reconnect);
+      const reconnectUrl = new URL(await provider.beginGoogle(reconnect.id));
+      expect(reconnectUrl.searchParams.get("nonce")).toBe(reconnect.googleNonce);
+      getGoogleToken.mockResolvedValueOnce({ tokens: { access_token: "synthetic-access-reconnect", id_token: "synthetic-id-token-reconnect", scope: identityScopes.join(" ") } } as never);
+      verifyGoogleToken.mockResolvedValueOnce({ getPayload: () => ({ iss: "https://accounts.google.com", aud: "synthetic-google-client", exp: Math.floor(Date.now() / 1000) + 300, iat: Math.floor(Date.now() / 1000), nonce: reconnect.googleNonce, sub: expectedIdentity.googleSubject, email: expectedIdentity.email, email_verified: true, name: expectedIdentity.displayName }) } as never);
+      const reconnectRedirect = new URL(await provider.completeGoogle(reconnect.googleState, "synthetic-google-code-reconnect", undefined));
+      await provider.exchangeAuthorizationCode({ client_id: "synthetic-mcp-client" } as never, reconnectRedirect.searchParams.get("code")!, undefined, reconnect.params.redirectUri, new URL(`${origin}/mcp`));
+      expect(await authStore.getGrant(user.id)).toMatchObject({ refreshToken: "synthetic-refresh" });
+      expect(await resolveMcpAccess(userStore, user.id)).toMatchObject({ allowed: true, reason: "active_trial" });
+      expect((await userStore.accountStatusForMcpUser(user.id, origin)).state).toBe("TRIAL_ACTIVE");
+      expect((await database.query<{ website_user_id: string; mcp_user_id: string }>(`SELECT website_user_id,mcp_user_id FROM classroom_desk_connections WHERE website_user_id=$1`, [user.id])).rows).toEqual([{ website_user_id: user.id, mcp_user_id: user.id }]);
+
+      const app = createPublicApp({ origin: new URL(origin), mcpResource: new URL(`${origin}/mcp`), googleCallbackUrl: `${origin}/oauth/google/callback`, googleClientId: "synthetic-google-client", googleClientSecret: "synthetic-google-secret", port, production: true, saasFlags: { enforceEntitlements: true } } as never,
+        authStore, provider, undefined,
+        () => ({ classroom: { courses: { list: async () => ({ data: { courses: [{ id: "synthetic-course-1", name: "Synthetic D1 Course" }] } }) } } } as never),
+        { entitlementCheck: subject => resolveMcpAccess(userStore, subject) }).app;
+      const server = createHttpServer(app);
+      await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address() as { port: number };
+      const testOrigin = `http://127.0.0.1:${address.port}`;
+      const headers = { authorization: `Bearer ${tokens.access_token}`, "content-type": "application/json", accept: "application/json, text/event-stream" };
+      try {
+        const initialize = await fetch(`${testOrigin}/mcp`, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "d1-oauth-test", version: "1" } } }) });
+        expect(initialize.status).toBe(200);
+        const status = await fetch(`${testOrigin}/mcp`, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "classroom_desk_status", arguments: {} } }) });
+        expect(await status.text()).toContain('"allowed":true');
+        const courses = await fetch(`${testOrigin}/mcp`, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "list_courses", arguments: {} } }) });
+        expect(courses.status).toBe(200);
+        expect(await courses.text()).toContain("Synthetic D1 Course");
+      } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+    } finally { sqlite.close(); }
+  });
+
+  it("reuses a legacy MCP connection mapping and rejects a conflicting account binding without writing grants or codes", async () => {
+    const { sqlite, database } = sqliteD1();
+    const key = randomBytes(32).toString("base64");
+    const users = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const authStore = new PostgresPublicAuthStore(database, key, "classroom_desk_auth_records");
+    try {
+      const user = await users.upsertGoogleIdentity({ googleSubject: "legacy-google-subject", email: "legacy@example.invalid", displayName: "Legacy", now: new Date() });
+      await database.query(`INSERT INTO classroom_desk_connections (website_user_id,mcp_user_id,connected_at) VALUES ($1,$2,$3)`, [user.id, "legacy-mcp-subject", new Date()]);
+      const entitlementNow = new Date("2026-10-20T00:00:00.000Z");
+      await database.query(`INSERT INTO classroom_desk_entitlement_grants (user_id,plan,source,starts_at,expires_at) VALUES ($1,'teacher','manual',$2,$3)`, [user.id, new Date("2026-10-19T00:00:00.000Z"), new Date("2026-11-20T00:00:00.000Z")]);
+      expect(await users.resolveGoogleIdentityBinding({ googleSubject: "legacy-google-subject", email: "legacy@example.invalid", displayName: "Legacy", now: new Date() })).toEqual({ accountId: user.id, mcpUserId: "legacy-mcp-subject" });
+      expect(await users.entitlementForMcpUser("legacy-mcp-subject", entitlementNow)).toMatchObject({ allowed: true, reason: "active_grant", plan: "teacher" });
+      expect(await users.entitlement("legacy-mcp-subject", entitlementNow)).toMatchObject({ allowed: false, reason: "none", plan: null });
+
+      await authStore.migrate();
+      await expect(authStore.putGrantAndCode(
+        { userId: "replacement-mcp-subject", refreshToken: "synthetic-refresh", scopes: ["openid"], createdAt: Date.now(), updatedAt: Date.now() },
+        { code: "synthetic-conflicting-code", clientId: "synthetic-client", userId: "replacement-mcp-subject", redirectUri: "https://example.invalid/callback", challenge: "synthetic-challenge", scopes: ["mcp"], expiresAt: Date.now() + 30_000 },
+        { accountId: user.id, mcpUserId: "replacement-mcp-subject" },
+      )).rejects.toThrow("oauth_account_binding_conflict");
+
+      expect((await database.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_connections WHERE website_user_id=$1`, [user.id])).rows).toEqual([{ mcp_user_id: "legacy-mcp-subject" }]);
+      expect(await authStore.getGrant("replacement-mcp-subject")).toBeUndefined();
+      expect(await authStore.getCode("synthetic-conflicting-code")).toBeUndefined();
+    } finally { sqlite.close(); }
+  });
+
+  it("prefers the existing unified OAuth mapping while preserving a distinct legacy pairing mapping", async () => {
+    const { sqlite, database } = sqliteD1();
+    const key = randomBytes(32).toString("base64");
+    const users = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const authStore = new PostgresPublicAuthStore(database, key, "classroom_desk_auth_records");
+    try {
+      const user = await users.upsertGoogleIdentity({ googleSubject: "synthetic-dual-map-google", email: "dual-map@example.invalid", displayName: "Synthetic Dual Map", now: new Date() });
+      const unifiedId = `cd-account:${user.id}`;
+      await database.query(`INSERT INTO classroom_desk_connections (website_user_id,mcp_user_id,connected_at) VALUES ($1,$2,$3)`, [user.id, "legacy-opaque-subject", new Date()]);
+      await database.query(`INSERT INTO classroom_desk_oauth_accounts (website_user_id,mcp_user_id,connected_at) VALUES ($1,$2,$3)`, [user.id, unifiedId, new Date()]);
+      expect(await users.resolveGoogleIdentityBinding({ googleSubject: user.googleSubject, email: user.email, displayName: user.displayName, now: new Date() })).toEqual({ accountId: user.id, mcpUserId: unifiedId });
+      expect(await users.getLinkedMcpUserId(user.id)).toBe(unifiedId);
+      expect(await users.getLegacyMcpUserId(user.id)).toBe("legacy-opaque-subject");
+
+      await authStore.migrate();
+      await authStore.putGrantAndCode(
+        { userId: unifiedId, refreshToken: "synthetic-refresh", scopes: ["openid", "email"], createdAt: Date.now(), updatedAt: Date.now(), googleSubject: "synthetic-dual-map-google" },
+        { code: "synthetic-dual-map-code", clientId: "synthetic-client", userId: unifiedId, redirectUri: "https://chatgpt.com/connector/oauth/callback", challenge: "synthetic-pkce-challenge", scopes: ["mcp:tools"], expiresAt: Date.now() + 30_000 },
+        { accountId: user.id, mcpUserId: unifiedId },
+      );
+
+      expect(await authStore.getGrant(unifiedId)).toMatchObject({ userId: unifiedId, refreshToken: "synthetic-refresh", googleSubject: "synthetic-dual-map-google" });
+      expect(await authStore.getCode("synthetic-dual-map-code")).toMatchObject({ userId: unifiedId });
+      expect((await database.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_connections WHERE website_user_id=$1`, [user.id])).rows).toEqual([{ mcp_user_id: "legacy-opaque-subject" }]);
+      expect((await database.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_oauth_accounts WHERE website_user_id=$1`, [user.id])).rows).toEqual([{ mcp_user_id: unifiedId }]);
+      expect(await users.accountStatusForMcpUser(unifiedId, "https://classroom.jarvis404.com")).not.toMatchObject({ state: "ACCOUNT_SETUP_REQUIRED" });
+    } finally { sqlite.close(); }
+  });
+
+  it("supports OAuth account binding on the 0001-0007 schema without the optional unified mapping table", async () => {
+    const { sqlite, database } = sqliteD1({ includePublicOAuthMigrations: false });
+    const key = randomBytes(32).toString("base64");
+    const users = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
+    const authStore = new PostgresPublicAuthStore(database, key, "classroom_desk_auth_records");
+    try {
+      const user = await users.upsertGoogleIdentity({ googleSubject: "synthetic-legacy-schema", email: "legacy-schema@example.invalid", displayName: "Synthetic Legacy Schema", now: new Date() });
+      const binding = await users.resolveGoogleIdentityBinding({ googleSubject: user.googleSubject, email: user.email, displayName: user.displayName, now: new Date() });
+      expect(binding).toEqual({ accountId: user.id, mcpUserId: user.id });
+      await authStore.migrate();
+      await authStore.putGrantAndCode(
+        { userId: binding.mcpUserId, refreshToken: "synthetic-legacy-refresh", scopes: ["openid"], createdAt: Date.now(), updatedAt: Date.now(), googleSubject: "synthetic-legacy-schema" },
+        { code: "synthetic-legacy-schema-code", clientId: "synthetic-client", userId: binding.mcpUserId, redirectUri: "https://chatgpt.com/connector/oauth/callback", challenge: "synthetic-pkce-challenge", scopes: ["mcp:tools"], expiresAt: Date.now() + 30_000 },
+        binding,
+      );
+      expect((await database.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_connections WHERE website_user_id=$1`, [user.id])).rows).toEqual([{ mcp_user_id: user.id }]);
+      expect(await authStore.getGrant(user.id)).toMatchObject({ refreshToken: "synthetic-legacy-refresh", googleSubject: "synthetic-legacy-schema" });
+      expect(await users.accountStatusForMcpUser(user.id, "https://classroom.jarvis404.com")).not.toMatchObject({ state: "ACCOUNT_SETUP_REQUIRED" });
+    } finally { sqlite.close(); }
+  });
+  it("creates a user, consumes one pairing code once, and rejects cross-account reassignment", async () => {
+    const { sqlite, database } = sqliteD1();
+    try {
+      const first = await database.query<{ id: string }>(`INSERT INTO classroom_desk_users (google_subject,email,display_name) VALUES ($1,$2,$3) RETURNING id`, ["synthetic-one", "one@example.invalid", "One"]);
+      const second = await database.query<{ id: string }>(`INSERT INTO classroom_desk_users (google_subject,email,display_name) VALUES ($1,$2,$3) RETURNING id`, ["synthetic-two", "two@example.invalid", "Two"]);
+      const service = new AccountLinkService(database);
+      const code = await service.start(first.rows[0]!.id, new Date("2026-10-14T00:00:00.000Z"));
+      expect(await service.consume(code.code, "same-mcp-user", new Date("2026-10-14T00:01:00.000Z"))).toBe(true);
+      expect(await service.consume(code.code, "same-mcp-user", new Date("2026-10-14T00:02:00.000Z"))).toBe(false);
+      const secondCode = await service.start(second.rows[0]!.id, new Date("2026-10-14T00:00:00.000Z"));
+      expect(await service.consume(secondCode.code, "same-mcp-user", new Date("2026-10-14T00:01:00.000Z"))).toBe(false);
+      expect((await database.query<{ website_user_id: string }>(`SELECT website_user_id FROM classroom_desk_connections WHERE mcp_user_id=$1`, ["same-mcp-user"])).rows).toEqual([{ website_user_id: first.rows[0]!.id }]);
+    } finally { sqlite.close(); }
+  });
+
+  it("allows exactly one concurrent consumer for the same pairing code", async () => {
+    const { sqlite, database } = sqliteD1();
+    try {
+      const user = await database.query<{ id: string }>(`INSERT INTO classroom_desk_users (google_subject,email,display_name) VALUES ($1,$2,$3) RETURNING id`, ["synthetic-race", "race@example.invalid", "Race"]);
+      const service = new AccountLinkService(database);
+      const code = await service.start(user.rows[0]!.id, new Date("2026-10-14T00:00:00.000Z"));
+      const outcomes = await Promise.all([
+        service.consume(code.code, "race-mcp-user", new Date("2026-10-14T00:01:00.000Z")),
+        service.consume(code.code, "race-mcp-user", new Date("2026-10-14T00:01:00.001Z")),
+      ]);
+      expect(outcomes.filter(Boolean)).toHaveLength(1);
+      expect((await database.query(`SELECT website_user_id FROM classroom_desk_connections WHERE mcp_user_id=$1`, ["race-mcp-user"])).rows).toHaveLength(1);
+    } finally { sqlite.close(); }
+  });
+
+  it("stores encrypted OAuth tokens and rotates a refresh token once with D1 batches", async () => {
+    const { sqlite, database } = sqliteD1();
+    try {
+      const key = randomBytes(32).toString("base64");
+      const store = new PostgresPublicAuthStore(database, key, "classroom_desk_auth_records");
+      await store.migrate();
+      const now = Date.now();
+      await store.putTokenPair(
+        { token: "d1-access-old", clientId: "client-a", userId: "user-a", scopes: ["mcp:tools"], expiresAt: now + 60_000 },
+        { token: "d1-refresh-old", clientId: "client-a", userId: "user-a", scopes: ["mcp:tools"], expiresAt: now + 600_000 },
+      );
+      const rotations = await Promise.all([
+        store.rotateTokenPair("d1-refresh-old", "client-a", { token: "d1-access-a", clientId: "client-a", userId: "user-a", scopes: ["mcp:tools"], expiresAt: now + 90_000 }, { token: "d1-refresh-a", clientId: "client-a", userId: "user-a", scopes: ["mcp:tools"], expiresAt: now + 900_000 }),
+        store.rotateTokenPair("d1-refresh-old", "client-a", { token: "d1-access-b", clientId: "client-a", userId: "user-a", scopes: ["mcp:tools"], expiresAt: now + 90_000 }, { token: "d1-refresh-b", clientId: "client-a", userId: "user-a", scopes: ["mcp:tools"], expiresAt: now + 900_000 }),
+      ]);
+      expect(rotations.filter(Boolean)).toHaveLength(1);
+      expect(await store.getRefresh("d1-refresh-old")).toBeUndefined();
+      const winner = rotations[0] ? "a" : "b";
+      expect((await store.getRefresh(`d1-refresh-${winner}`))?.userId).toBe("user-a");
+      expect(await store.rotateTokenPair("d1-refresh-old", "client-a", { token: "d1-access-replay", clientId: "client-a", userId: "user-a", scopes: ["mcp:tools"], expiresAt: now + 90_000 }, { token: "d1-refresh-replay", clientId: "client-a", userId: "user-a", scopes: ["mcp:tools"], expiresAt: now + 900_000 })).toBe(false);
+      const stored = await database.query<{ payload: string }>(`SELECT payload FROM classroom_desk_auth_records`);
+      expect(JSON.stringify(stored.rows)).not.toContain("d1-refresh-");
+      expect(JSON.stringify(stored.rows)).not.toContain("d1-access-");
+    } finally { sqlite.close(); }
+  });
+
+  it("attributes referrals atomically and enforces new-customer eligibility", async () => {
+    const { sqlite, database } = sqliteD1();
+    try {
+      const makeUser = async (subject: string) => (await database.query<{ id: string }>(`INSERT INTO classroom_desk_users (google_subject,email,display_name) VALUES ($1,$2,$3) RETURNING id`, [subject, `${subject}@example.invalid`, subject])).rows[0]!.id;
+      const referrerId = await makeUser("referrer");
+      const referredId = await makeUser("referred");
+      const paidId = await makeUser("paid-customer");
+      const referrals = new ReferralService(database);
+      const code = await referrals.ensureCode(referrerId);
+      const concurrent = await Promise.allSettled([referrals.attribute(code, referredId), referrals.attribute(code, referredId)]);
+      expect(concurrent.filter(result => result.status === "fulfilled")).toHaveLength(1);
+      expect(concurrent.filter(result => result.status === "rejected" && (result.reason as Error).message === "referral_already_attributed")).toHaveLength(1);
+      await expect(referrals.attribute(code, referrerId)).rejects.toThrow("invalid_referral");
+      await database.query(`INSERT INTO classroom_desk_payments (user_id,kind,plan,amount_paise,status) VALUES ($1,'subscription','student',9900,'refunded')`, [paidId]);
+      await expect(referrals.attribute(code, paidId)).rejects.toThrow("referral_requires_new_customer");
+      await expect(referrals.attribute("CD-UNKNOWN", await makeUser("unknown-referral"))).rejects.toThrow("invalid_referral");
+    } finally { sqlite.close(); }
+  });
+
+  it("keeps D1 admin access, role, status, and audit writes in atomic batches", async () => {
+    const { sqlite, database } = sqliteD1();
+    try {
+      const addUser = async (subject: string, role = "STUDENT") => (await database.query<{ id: string }>(`INSERT INTO classroom_desk_users (google_subject,email,display_name,role) VALUES ($1,$2,$3,$4) RETURNING id`, [subject, `${subject}@example.invalid`, subject, role])).rows[0]!.id;
+      const actorId = await addUser("admin", "SUPER_ADMIN");
+      const targetId = await addUser("target");
+      const store = new SaaSStore(database);
+      const grantId = await store.adminGrantAccess(actorId, targetId, "teacher", 60_000, "synthetic test", new Date("2026-10-14T00:00:00.000Z"));
+      expect((await database.query(`SELECT id,source,plan FROM classroom_desk_entitlement_grants WHERE id=$1`, [grantId])).rows).toEqual([{ id: grantId, source: "manual", plan: "teacher" }]);
+      await store.adminChangeRole(actorId, targetId, "TEACHER", "synthetic role change", new Date("2026-10-14T00:01:00.000Z"));
+      await store.adminSetStatus(actorId, targetId, "suspended", "synthetic suspension", new Date("2026-10-14T00:02:00.000Z"));
+      await store.adminExtendAccess(actorId, grantId, 60_000, "synthetic extension", new Date("2026-10-14T00:03:00.000Z"));
+      await store.adminRevokeAccess(actorId, grantId, "synthetic revocation", new Date("2026-10-14T00:04:00.000Z"));
+      expect((await store.getUser(targetId))?.role).toBe("TEACHER");
+      expect((await store.getUser(targetId))?.status).toBe("suspended");
+      const grant = await database.query<{ revoked_at: string | null; expires_at: string }>(`SELECT revoked_at,expires_at FROM classroom_desk_entitlement_grants WHERE id=$1`, [grantId]);
+      expect(grant.rows[0]?.revoked_at).toBe("2026-10-14T00:04:00.000Z");
+      expect(grant.rows[0]?.expires_at).toBe("2026-10-14T00:04:00.000Z");
+      const audit = await database.query<{ action: string }>(`SELECT action FROM classroom_desk_admin_audit WHERE target_user_id=$1`, [targetId]);
+      expect(audit.rows.map(row => row.action).sort()).toEqual(["change_role", "extend_access", "grant_access", "revoke_access", "suspend_user"]);
+    } finally { sqlite.close(); }
+  });
+
+  it("prevents D1 demotion of the last active super admin without writing an audit row", async () => {
+    const { sqlite, database, actorId } = await adminD1Fixture();
+    try {
+      const store = new SaaSStore(database);
+      await expect(store.adminChangeRole(actorId, actorId, "STUDENT", "synthetic last-admin demotion"))
+        .rejects.toThrow("last_super_admin_required");
+      expect((await store.getUser(actorId))?.role).toBe("SUPER_ADMIN");
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_admin_audit WHERE target_user_id=$1`, [actorId])).rows)
+        .toEqual([{ count: 0 }]);
+    } finally { sqlite.close(); }
+  });
+
+  it("allows D1 self-demotion when another active super admin remains", async () => {
+    const { sqlite, database, actorId } = await adminD1Fixture();
+    try {
+      const otherId = (await database.query<{ id: string }>(`INSERT INTO classroom_desk_users (google_subject,email,display_name,role) VALUES ($1,$2,$3,'SUPER_ADMIN') RETURNING id`, ["second-super-admin", "second@example.invalid", "Second admin"])).rows[0]!.id;
+      const store = new SaaSStore(database);
+      await store.adminChangeRole(actorId, actorId, "STUDENT", "synthetic two-admin demotion");
+      expect((await store.getUser(actorId))?.role).toBe("STUDENT");
+      expect((await store.getUser(otherId))?.role).toBe("SUPER_ADMIN");
+      expect((await database.query(`SELECT action FROM classroom_desk_admin_audit WHERE target_user_id=$1`, [actorId])).rows)
+        .toEqual([{ action: "change_role" }]);
+    } finally { sqlite.close(); }
+  });
+
+  it("rechecks active admin status when a grant actor is suspended after precheck", async () => {
+    const { sqlite, database, actorId, targetId } = await adminD1Fixture();
+    try {
+      const interleaved = withBeforeD1Batch(database, async () => {
+        await database.query(`UPDATE classroom_desk_users SET status='suspended' WHERE id=$1`, [actorId]);
+      });
+      await expect(new SaaSStore(interleaved).adminGrantAccess(actorId, targetId, "student", 60_000, "synthetic race"))
+        .rejects.toThrow("admin_permission_required");
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_entitlement_grants WHERE user_id=$1`, [targetId])).rows).toEqual([{ count: 0 }]);
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_admin_audit WHERE actor_user_id=$1`, [actorId])).rows).toEqual([{ count: 0 }]);
+    } finally { sqlite.close(); }
+  });
+
+  it("rechecks active support-admin status before extending a grant", async () => {
+    const { sqlite, database, actorId, targetId, store } = await adminD1Fixture("SUPPORT_ADMIN");
+    try {
+      const at = new Date("2026-10-14T00:00:00.000Z");
+      const grantId = await store.adminGrantAccess(actorId, targetId, "student", 60_000, "synthetic setup", at);
+      const interleaved = withBeforeD1Batch(database, async () => {
+        await database.query(`UPDATE classroom_desk_users SET status='suspended' WHERE id=$1`, [actorId]);
+      });
+      await expect(new SaaSStore(interleaved).adminExtendAccess(actorId, grantId, 60_000, "synthetic race", new Date(at.getTime() + 60_000)))
+        .rejects.toThrow("admin_permission_required");
+      expect((await database.query<{ expires_at: string }>(`SELECT expires_at FROM classroom_desk_entitlement_grants WHERE id=$1`, [grantId])).rows[0]?.expires_at)
+        .toBe("2026-10-14T00:01:00.000Z");
+      expect((await database.query<{ action: string }>(`SELECT action FROM classroom_desk_admin_audit WHERE actor_user_id=$1`, [actorId])).rows.map(row => row.action))
+        .toEqual(["grant_access"]);
+    } finally { sqlite.close(); }
+  });
+
+  it("rechecks active super-admin status before revoking a grant", async () => {
+    const { sqlite, database, actorId, targetId, store } = await adminD1Fixture();
+    try {
+      const grantId = await store.adminGrantAccess(actorId, targetId, "student", 60_000, "synthetic setup");
+      const interleaved = withBeforeD1Batch(database, async () => {
+        await database.query(`UPDATE classroom_desk_users SET status='suspended' WHERE id=$1`, [actorId]);
+      });
+      await expect(new SaaSStore(interleaved).adminRevokeAccess(actorId, grantId, "synthetic race"))
+        .rejects.toThrow("admin_permission_required");
+      expect((await database.query<{ revoked_at: string | null }>(`SELECT revoked_at FROM classroom_desk_entitlement_grants WHERE id=$1`, [grantId])).rows[0]?.revoked_at).toBeNull();
+      expect((await database.query<{ action: string }>(`SELECT action FROM classroom_desk_admin_audit WHERE actor_user_id=$1`, [actorId])).rows.map(row => row.action))
         .toEqual(["grant_access"]);
     } finally { sqlite.close(); }
   });
