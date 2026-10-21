@@ -1,15 +1,11 @@
 import { createCipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto";
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { verifyEncryptedSnapshot, verifyEncryptedSnapshotFile } from "../../scripts/verify-encrypted-records.mjs";
+import { readWindowsCredentialKey, runVerifierCli, verifyEncryptedSnapshot, verifyEncryptedSnapshotFile } from "../../scripts/verify-encrypted-records.mjs";
 
 const TEST_KEY = Buffer.from(Array.from({ length: 32 }, (_, i) => i)).toString("base64");
-const execFileAsync = promisify(execFile);
 
 function seal(value: unknown, key: Buffer, aad?: string, iv = Buffer.alloc(12, 0x2a)): string {
   const cipher = createCipheriv("aes-256-gcm", key, iv);
@@ -112,23 +108,60 @@ describe("encrypted record compatibility verifier", () => {
   it("prints only aggregate verification results from the owner-invoked CLI", async () => {
     const directory = await mkdtemp(join(tmpdir(), "classroom-desk-encrypted-snapshot-"));
     const snapshotPath = join(directory, "synthetic-snapshot.json");
-    const scriptPath = fileURLToPath(new URL("../../scripts/verify-encrypted-records.mjs", import.meta.url));
     const sample = fixture();
     try {
       await writeFile(snapshotPath, JSON.stringify({ profiles: [{ ciphertext: sample.profile }], oauthRecords: [sample.grant] }));
-      const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath, snapshotPath], {
-        env: { ...process.env, V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64: TEST_KEY },
-        windowsHide: true,
+      let stdout = "";
+      const exitCode = await runVerifierCli([snapshotPath, "--windows-credential-target", "synthetic-test-key"], {
+        credentialReader: (target) => target === "synthetic-test-key" ? TEST_KEY : undefined,
+        stdout: { write: (value: string) => { stdout += value; return true; } } as NodeJS.WriteStream,
       });
+      expect(exitCode).toBe(0);
       expect(stdout).toBe("PASS profiles=1/1 oauth_records=1/1\n");
-      expect(stderr).toBe("");
       for (const sensitive of [TEST_KEY, "synthetic-subject", "synthetic@example.invalid", "synthetic-only", sample.profile, sample.grant.payload]) {
         expect(stdout).not.toContain(sensitive);
-        expect(stderr).not.toContain(sensitive);
       }
       expect(await readFile(snapshotPath, "utf8")).toContain(sample.profile);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("reads only a named Windows credential through a captured child-process pipe", () => {
+    const calls: Array<{ command: string; args: string[]; options: Record<string, unknown> }> = [];
+    const value = readWindowsCredentialKey("synthetic-key-target", {
+      platform: "win32",
+      spawn: (command, args, options) => {
+        calls.push({ command, args: [...args], options });
+        return { status: 0, error: undefined, stdout: Buffer.from(TEST_KEY, "ascii"), stderr: Buffer.alloc(0) } as never;
+      },
+    });
+    expect(value).toBe(TEST_KEY);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.command).toBe("powershell.exe");
+    expect(calls[0]!.args.join(" ")).toContain("synthetic-key-target");
+    expect(calls[0]!.args.join(" ")).not.toContain(TEST_KEY);
+    expect(calls[0]!.options).toMatchObject({ windowsHide: true, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] });
+  });
+
+  it("does not start a credential reader for non-Windows hosts or unsafe targets", () => {
+    let calls = 0;
+    const spawn = () => { calls += 1; return { status: 0, stdout: Buffer.from(TEST_KEY) } as never; };
+    expect(readWindowsCredentialKey("safe-target", { platform: "linux", spawn })).toBeUndefined();
+    expect(readWindowsCredentialKey("bad'; Write-Output 'injected", { platform: "win32", spawn })).toBeUndefined();
+    expect(calls).toBe(0);
+  });
+
+  it("does not accept an environment-only key source", async () => {
+    let output = "";
+    let calls = 0;
+    const exitCode = await runVerifierCli(["snapshot.json"], {
+      credentialReader: () => { calls += 1; return TEST_KEY; },
+      stdout: { write: (value: string) => { output += value; return true; } } as NodeJS.WriteStream,
+    });
+    expect(exitCode).toBe(2);
+    expect(calls).toBe(0);
+    expect(output).toContain("--windows-credential-target");
+    expect(output).not.toContain(TEST_KEY);
   });
 });

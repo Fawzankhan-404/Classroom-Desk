@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createDecipheriv, hkdfSync } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
@@ -10,6 +11,7 @@ const PROFILE_LOOKUP_INFO = "classroom-saas-profile-lookups-v1";
 const AUTH_ENCRYPTION_INFO = "classroom-auth-records-v1";
 const AUTH_LOOKUP_INFO = "classroom-auth-lookups-v1";
 const AUTH_KINDS = new Set(["client", "flow", "grant", "code", "access", "refresh"]);
+const CREDENTIAL_TARGET_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,255}$/;
 
 function decodeKey(keyBase64) {
   if (typeof keyBase64 !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(keyBase64)) return undefined;
@@ -115,19 +117,115 @@ export async function verifyEncryptedSnapshotFile(filePath, keyBase64) {
   }
 }
 
+/**
+ * Read a named Generic Credential from the current Windows user's Credential
+ * Manager. The key crosses only a captured child-process pipe; it is never
+ * placed in process arguments, environment variables, or terminal output.
+ */
+export function readWindowsCredentialKey(targetName, {
+  platform = process.platform,
+  spawn = spawnSync,
+} = {}) {
+  if (platform !== "win32" || typeof targetName !== "string" || !CREDENTIAL_TARGET_PATTERN.test(targetName)) return undefined;
+
+  const source = String.raw`
+$ErrorActionPreference = 'Stop'
+$WarningPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::ASCII
+$credentialSource = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class ClassroomDeskCredentialReader {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  private struct Credential {
+    public UInt32 Flags; public UInt32 Type; public IntPtr TargetName; public IntPtr Comment;
+    public Int64 LastWritten; public UInt32 CredentialBlobSize; public IntPtr CredentialBlob;
+    public UInt32 Persist; public UInt32 AttributeCount; public IntPtr Attributes;
+    public IntPtr TargetAlias; public IntPtr UserName;
+  }
+  [DllImport("Advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern bool CredRead(string target, UInt32 type, UInt32 flags, out IntPtr credential);
+  [DllImport("Advapi32.dll", EntryPoint = "CredFree")]
+  private static extern void CredFree(IntPtr credential);
+  public static string Read(string target) {
+    IntPtr pointer = IntPtr.Zero;
+    if (!CredRead(target, 1, 0, out pointer) || pointer == IntPtr.Zero) throw new InvalidOperationException();
+    try {
+      Credential credential = (Credential)Marshal.PtrToStructure(pointer, typeof(Credential));
+      int length = checked((int)credential.CredentialBlobSize);
+      if (length <= 0 || length > 512 || credential.CredentialBlob == IntPtr.Zero) throw new InvalidOperationException();
+      byte[] bytes = new byte[length];
+      Marshal.Copy(credential.CredentialBlob, bytes, 0, length);
+      try {
+        if (length == 44) return Encoding.ASCII.GetString(bytes);
+        if (length % 2 == 0) return Encoding.Unicode.GetString(bytes).TrimEnd((char)0);
+        throw new InvalidOperationException();
+      } finally { Array.Clear(bytes, 0, bytes.Length); }
+    } finally { CredFree(pointer); }
+  }
+}
+'@
+try {
+  Add-Type -TypeDefinition $credentialSource -ErrorAction Stop
+  [Console]::Out.Write([ClassroomDeskCredentialReader]::Read('${targetName}'))
+} catch {
+  [Console]::Error.WriteLine('Credential unavailable')
+  exit 1
+}
+`;
+
+  let result;
+  try {
+    result = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", source], {
+      encoding: "buffer",
+      windowsHide: true,
+      maxBuffer: 4096,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
+  if (result.error || result.status !== 0 || !Buffer.isBuffer(result.stdout)
+    || result.stdout.length === 0 || result.stdout.length > 256
+    || [...result.stdout].some((byte) => byte > 0x7f)) return undefined;
+  const value = result.stdout.toString("ascii");
+  const key = decodeKey(value);
+  if (!key) return undefined;
+  key.fill(0);
+  return value;
+}
+
+export async function runVerifierCli(args, {
+  credentialReader = readWindowsCredentialKey,
+  stdout = process.stdout,
+} = {}) {
+  if (args.length !== 3 || args[1] !== "--windows-credential-target" || args.includes("--help") || args.includes("-h")) {
+    stdout.write("Usage: node scripts/verify-encrypted-records.mjs <protected-snapshot.json> --windows-credential-target <credential-target>\n");
+    stdout.write("The key is read from the current Windows user's Credential Manager and is never printed.\n");
+    return args.includes("--help") || args.includes("-h") ? 0 : 2;
+  }
+  let keyBase64;
+  try {
+    keyBase64 = await credentialReader(args[2]);
+  } catch {
+    keyBase64 = undefined;
+  }
+  const decodedKey = decodeKey(keyBase64);
+  if (!decodedKey) {
+    stdout.write("FAIL credential_unavailable_or_invalid\n");
+    return 2;
+  }
+  decodedKey.fill(0);
+  const result = await verifyEncryptedSnapshotFile(args[0], keyBase64);
+  keyBase64 = undefined;
+  stdout.write(`${result.passed ? "PASS" : "FAIL"} profiles=${result.profiles.valid}/${result.profiles.valid + result.profiles.invalid} oauth_records=${result.oauthRecords.valid}/${result.oauthRecords.valid + result.oauthRecords.invalid}\n`);
+  return result.passed ? 0 : 1;
+}
+
 function isCli() {
   return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 }
 
-if (isCli()) {
-  const filePath = process.argv[2];
-  if (!filePath || filePath === "--help" || filePath === "-h") {
-    process.stdout.write("Usage: V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64=<securely supplied> node scripts/verify-encrypted-records.mjs <protected-snapshot.json>\n");
-    process.exit(filePath ? 0 : 2);
-  }
-  const keyBase64 = process.env.V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64;
-  delete process.env.V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64;
-  const result = await verifyEncryptedSnapshotFile(filePath, keyBase64);
-  process.stdout.write(`${result.passed ? "PASS" : "FAIL"} profiles=${result.profiles.valid}/${result.profiles.valid + result.profiles.invalid} oauth_records=${result.oauthRecords.valid}/${result.oauthRecords.valid + result.oauthRecords.invalid}\n`);
-  process.exit(result.passed ? 0 : 1);
-}
+if (isCli()) process.exitCode = await runVerifierCli(process.argv.slice(2));

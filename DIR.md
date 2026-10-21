@@ -39,3 +39,12 @@ data, or production ciphertext in source control or diagnostic output.
 Run `npm test`, `npm run check`, and `npm run build` for local validation.
 Synthetic and local Worker tests do not establish live Google OAuth, production
 encryption compatibility, or production deployment safety.
+
+### Isolated D1 recovery rehearsal — 2026-10-21
+
+On the existing synthetic-only release-readiness D1, migration 0014 was
+applied, restored to a pre-0014 Time Travel bookmark, and reapplied. The
+synthetic fixture counts (5 users and 2 payments) were preserved, and
+`PRAGMA foreign_key_check` returned no violations. This did not use production
+data or verify production backup restoration, v22 behavior parity, or the
+production encryption key. No Worker was deployed.
