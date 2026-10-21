@@ -5,6 +5,7 @@ import type { SaaSUser } from "./types.js";
 export const WEBSITE_IDENTITY_SCOPES = ["openid", "email", "profile"] as const;
 export interface WebsiteOAuthConfig { clientId: string; clientSecret: string; callbackUrl: string; origin: string; }
 export interface WebsiteIdentityStore { upsertGoogleIdentity(input: { googleSubject: string; email: string; displayName: string; now: Date }): Promise<SaaSUser>; }
+export type VerifiedWebsiteGoogleIdentity = { googleSubject: string; email: string; displayName: string };
 export interface LoginState { state: string; verifier: string; nonce: string; createdAt: number; }
 
 export function createLoginState(now = Date.now()): LoginState { return { state: randomBytes(24).toString("base64url"), verifier: randomBytes(32).toString("base64url"), nonce: randomBytes(24).toString("base64url"), createdAt: now }; }
@@ -19,12 +20,19 @@ export function buildWebsiteGoogleUrl(config: WebsiteOAuthConfig, login: LoginSt
   return url.toString();
 }
 
-export async function completeWebsiteGoogleLogin(config: WebsiteOAuthConfig, store: WebsiteIdentityStore, code: string, verifier: string, expectedNonce: string, now = new Date()): Promise<SaaSUser> {
+export async function completeWebsiteGoogleIdentity(config: WebsiteOAuthConfig, code: string, verifier: string, expectedNonce: string): Promise<VerifiedWebsiteGoogleIdentity> {
   const client = new OAuth2Client(config.clientId, config.clientSecret, config.callbackUrl);
   const { tokens } = await client.getToken({ code, codeVerifier: verifier });
   if (!tokens.id_token) throw new Error("Google identity token missing.");
   const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: config.clientId });
   const payload = ticket.getPayload();
-  if (!payload?.sub || !payload.email || payload.email_verified !== true || !expectedNonce || payload.nonce !== expectedNonce) throw new Error("Verified Google identity required.");
-  return store.upsertGoogleIdentity({ googleSubject: payload.sub, email: payload.email, displayName: payload.name?.trim() || payload.email, now });
+  if (!payload?.sub || !payload.email || payload.email_verified !== true || !expectedNonce || payload.nonce !== expectedNonce
+    || payload.iss !== "https://accounts.google.com" && payload.iss !== "accounts.google.com"
+    || typeof payload.exp !== "number" || payload.exp * 1000 <= Date.now()) throw new Error("Verified Google identity required.");
+  return { googleSubject: payload.sub, email: payload.email, displayName: payload.name?.trim() || payload.email };
+}
+
+export async function completeWebsiteGoogleLogin(config: WebsiteOAuthConfig, store: WebsiteIdentityStore, code: string, verifier: string, expectedNonce: string, now = new Date()): Promise<SaaSUser> {
+  const identity = await completeWebsiteGoogleIdentity(config, code, verifier, expectedNonce);
+  return store.upsertGoogleIdentity({ ...identity, now });
 }

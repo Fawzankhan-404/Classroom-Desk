@@ -1,6 +1,6 @@
 import type express from "express";
 import { readSessionCookie } from "./sessions.js";
-import { renderAdminAudit, renderAdminBilling, renderAdminCRM, renderAdminReferrals, renderAdminSubscriptionReconciliation, renderAdminUser } from "./admin.js";
+import { renderAdminAudit, renderAdminBilling, renderAdminCRM, renderAdminLegacyRecovery, renderAdminReferrals, renderAdminSubscriptionReconciliation, renderAdminUser } from "./admin.js";
 import type { SaaSStore } from "./store.js";
 import { requireSameOrigin } from "./csrf.js";
 
@@ -25,7 +25,7 @@ export function registerAdminRoutes(app: express.Express, store: SaaSStore): voi
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
     const subscription = typeof req.query.subscription === "string" ? req.query.subscription : undefined;
     const [metrics, users] = await Promise.all([store.adminMetrics(), store.listUsers(search, role, status, subscription)]);
-    return res.type("html").send(renderAdminCRM(metrics, users, { search, role, status, subscription }));
+    return res.type("html").send(renderAdminCRM(metrics, users, { search, role, status, subscription }, actor.role === "SUPER_ADMIN"));
   });
   app.get("/admin/billing", async (req, res) => {
     const actor = await currentAdmin(req.get("cookie"), store);
@@ -41,6 +41,44 @@ export function registerAdminRoutes(app: express.Express, store: SaaSStore): voi
     const actor = await currentSuperAdmin(req.get("cookie"), store);
     if (!actor) return res.status(403).type("text").send("Super administrator access required.");
     return res.type("html").send(renderAdminReferrals(await store.adminReferrals()));
+  });
+  app.get("/admin/account-recovery", async (req, res) => {
+    const actor = await currentRecoveryAdmin(req.get("cookie"), store);
+    if (!actor) return res.status(403).type("text").send("Super administrator access required.");
+    try {
+      const requests = await store.listLegacyRecoveryIntakesForAdmin(actor.id);
+      return res.type("html").send(renderAdminLegacyRecovery(requests, typeof req.query.result === "string" ? req.query.result : undefined));
+    } catch { return res.status(503).type("text").send("Recovery review is temporarily unavailable."); }
+  });
+  app.post(/^\/admin\/account-recovery\/([0-9a-f-]{36})\/approve$/, async (req, res) => {
+    const actor = await currentRecoveryAdmin(req.get("cookie"), store);
+    if (!actor) return res.status(403).json({ error: "super_admin_required" });
+    try {
+      await store.approveLegacyRecoveryIntake({
+        requestId: String(req.params[0] ?? ""), reviewerId: actor.id,
+        evidenceType: typeof req.body?.evidenceType === "string" ? req.body.evidenceType as import("./store.js").LegacyRecoveryEvidenceType : "" as import("./store.js").LegacyRecoveryEvidenceType,
+        evidenceReference: typeof req.body?.evidenceReference === "string" ? req.body.evidenceReference.trim() : "",
+        confirmedIndependentEvidence: req.body?.confirmedIndependentEvidence === "yes",
+      });
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(303, "/admin/account-recovery?result=approved");
+    } catch {
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(303, "/admin/account-recovery?result=error");
+    }
+  });
+  app.post(/^\/admin\/account-recovery\/([0-9a-f-]{36})\/reject$/, async (req, res) => {
+    const actor = await currentRecoveryAdmin(req.get("cookie"), store);
+    if (!actor) return res.status(403).json({ error: "super_admin_required" });
+    try {
+      await store.rejectLegacyRecoveryIntake({ requestId: String(req.params[0] ?? ""), reviewerId: actor.id,
+        reason: typeof req.body?.reason === "string" ? req.body.reason : "" });
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(303, "/admin/account-recovery?result=rejected");
+    } catch {
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(303, "/admin/account-recovery?result=error");
+    }
   });
   app.get(/^\/admin\/users\/([0-9a-f-]{36})$/, async (req, res) => {
     const actor = await currentAdmin(req.get("cookie"), store);
@@ -105,4 +143,10 @@ async function currentAdmin(cookie: string | undefined, store: SaaSStore) {
 async function currentSuperAdmin(cookie: string | undefined, store: SaaSStore) {
   const actor = await currentAdmin(cookie, store);
   return actor?.role === "SUPER_ADMIN" ? actor : null;
+}
+
+async function currentRecoveryAdmin(cookie: string | undefined, store: SaaSStore) {
+  const token = readSessionCookie(cookie); if (!token) return null;
+  const session = await store.sessions.find(token); if (!session) return null;
+  return await store.getRecoveryAdminActor(session.userId) ?? null;
 }

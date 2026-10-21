@@ -1,19 +1,41 @@
-# Classroom Desk — Release Readiness Worktree
+# Classroom Desk repository index
 
-This is the dedicated, isolated release-readiness worktree on branch
-`codex/release-readiness-20261020`, based on main commit
-`069e6e6fdea189c9925f45ba7896a6b80aae1a45`.
+Classroom Desk connects Google Classroom with ChatGPT through an authenticated
+website and MCP service. The repository contains the server-rendered website,
+Google OAuth and Classroom integrations, subscription support, and isolated
+synthetic demonstrations.
 
-- Release-gate evidence and route compatibility matrix: [`docs/release/PRODUCTION_READINESS_ASSESSMENT_2026-10-21.md`](docs/release/PRODUCTION_READINESS_ASSESSMENT_2026-10-21.md)
-- Production-target configuration prepared from verified Cloudflare metadata: [`wrangler.production-candidate.jsonc`](wrangler.production-candidate.jsonc). Dry-run only; do not deploy until all gates pass and the owner approves.
-- Isolated D1 test database configuration: [`wrangler.release-readiness-test.jsonc`](wrangler.release-readiness-test.jsonc). It points only to the separate release-readiness database and contains no production secrets.
-- `.release-readiness/` contains only temporary synthetic fixtures, schema copies, and local verification scripts/exports; it is not part of the release commit.
+## Source map
 
-The primary checkout and its working-tree changes remain untouched.
+- `src/public/` — public OAuth, MCP, storage adapters, and provider interfaces.
+- `src/saas/` — website routes, sessions, account data, administration, billing,
+  referrals, and account recovery.
+- `migrations/` — versioned database changes. Review and rehearse migrations
+  before applying them to production.
+- `docs/` — setup, architecture, security, release, and feature documentation.
+- `scripts/` — reviewed operational and local verification tools.
+- `wrangler*.jsonc` — Worker configurations; inspect bindings and target names
+  before running Wrangler commands.
 
-## Verification checkpoint — 2026-10-21
+## Account recovery
 
-- Release-readiness changes are on `codex/release-readiness-20261020`; the local branch includes the trial-cutoff patch and the later dependency security updates. Main is still the base commit `069e6e6fdea189c9925f45ba7896a6b80aae1a45`.
-- The protected 2026-10-17 SQL export matched its recorded SHA-256. Migrations 0008–0012 and restore-from-original were rehearsed in memory with SQLite; 17 tables/147 rows and the opaque encrypted-profile column were preserved. No copy was written or sent to Cloudflare.
-- Release validation: 561/561 tests, typecheck, build, Wrangler dry run, source secret check, Gitleaks tree scan, and npm audit passed. Git history alerts were verified as synthetic test fixtures.
-- Production remains NO-GO: exact Worker v22 source parity, DPAPI/key compatibility, and a Cloudflare D1 restore using the protected backup remain unverified. See the release assessment.
+The owner-reviewed legacy-account recovery flow and its manual evidence
+standard are documented in
+[`docs/release/LEGACY_ACCOUNT_RECOVERY.md`](docs/release/LEGACY_ACCOUNT_RECOVERY.md).
+The recovery flow is an additive release candidate and requires migrations
+0013–0014. It has not been applied to production. Existing Worker compatibility,
+encrypted-record compatibility, and coordinated recovery remain separate
+production release gates. See
+[`docs/release/PRODUCTION_RELEASE_PREFLIGHT.md`](docs/release/PRODUCTION_RELEASE_PREFLIGHT.md)
+for the release checks.
+
+The encrypted-record verifier procedure is in
+[`docs/release/ENCRYPTED_RECORD_VERIFICATION.md`](docs/release/ENCRYPTED_RECORD_VERIFICATION.md).
+It has not been run against production records. Never put keys, tokens, account
+data, or production ciphertext in source control or diagnostic output.
+
+## Validation
+
+Run `npm test`, `npm run check`, and `npm run build` for local validation.
+Synthetic and local Worker tests do not establish live Google OAuth, production
+encryption compatibility, or production deployment safety.

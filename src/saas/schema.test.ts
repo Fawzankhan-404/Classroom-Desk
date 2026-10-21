@@ -48,7 +48,7 @@ describe("SaaS schema upgrade compatibility", () => {
     ]);
 
     await pg.exec(SaaSMigration);
-    expect(SAAS_SCHEMA_VERSION).toBe(5);
+    expect(SAAS_SCHEMA_VERSION).toBe(8);
     expect((await pg.query(`SELECT google_subject FROM classroom_desk_users`)).rows).toEqual([{ google_subject: "synthetic-legacy-subject" }]);
     expect((await pg.query<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_name='classroom_desk_payments' AND column_name='amount_refunded_paise'`)).rows).toEqual([{ column_name: "amount_refunded_paise" }]);
     const operationColumns=await pg.query<{table_name:string;column_name:string}>(`SELECT table_name,column_name FROM information_schema.columns WHERE (table_name,column_name) IN (('classroom_desk_entitlement_grants','last_operation_id'),('classroom_desk_payments','last_operation_id'),('classroom_desk_referrals','qualified_operation_id')) ORDER BY table_name,column_name`);

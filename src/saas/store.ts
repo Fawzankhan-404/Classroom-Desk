@@ -6,12 +6,46 @@ import { resolveEntitlement } from "./entitlements.js";
 import type { EffectiveEntitlement, EntitlementGrant, SubscriptionRecord, TrialRecord } from "./types.js";
 import type { AdminAuditEvent, AdminMetrics, AdminAction, AdminPayment, AdminReferral, AdminSubscriptionCreationReservation, AdminUserHistory } from "./admin.js";
 import { assertCanPerform, validateRoleChange } from "./admin.js";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { BillingEvent } from "./billing-events.js";
 import { ReferralService } from "./referral-service.js";
 import { AccountLinkService } from "./linking.js";
 import { isTrialPurchaseOpen, planPricePaise } from "./campaign.js";
 import { SaaSProfileCipher, type PrivateSaaSProfile } from "./privacy.js";
+
+export interface LegacyRecoveryOwnershipProofVerifier {
+  /** Must independently verify account ownership and bind the approved stable subject. */
+  verify(input: { accountId: string; googleSubject: string; proof: string }): Promise<{
+    verifiedAccountId: string;
+    verifiedGoogleSubject: string;
+    reviewerIndependent: true;
+    verifiedBy: string;
+    caseReference: string;
+  } | undefined>;
+}
+
+export type LegacyRecoveryRequestInput = {
+  accountId: string;
+  identity: PrivateSaaSProfile;
+  proof: string;
+  expiresAt: Date;
+};
+
+export const LEGACY_RECOVERY_EVIDENCE_TYPES = [
+  "preexisting_support_record", "billing_provider_record", "account_specific_recovery_material", "other_independent_record",
+] as const;
+export type LegacyRecoveryEvidenceType = typeof LEGACY_RECOVERY_EVIDENCE_TYPES[number];
+export type LegacyRecoveryIntake = {
+  id: string; accountId: string; googleSubjectFingerprint: string; expectedCiphertextFingerprint: string;
+  claimEvidenceType: LegacyRecoveryEvidenceType; claimEvidenceReference: string; createdAt: Date; expiresAt: Date;
+};
+export type LegacyRecoveryApprovalInput = {
+  requestId: string; reviewerId: string; evidenceType: LegacyRecoveryEvidenceType; evidenceReference: string;
+  confirmedIndependentEvidence: boolean; now?: Date;
+};
+const RECOVERY_SESSION_TTL_MS = 30 * 60 * 1000;
+const RECOVERY_INTAKE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const RECOVERY_APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 
 const BILLING_OWNER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function requireProviderId(value: string, prefix: "pay" | "order" | "sub"): void {
@@ -59,7 +93,7 @@ export class SaaSStore implements WebsiteIdentityStore {
   readonly linking: AccountLinkService;
   private readonly profileCipher?: SaaSProfileCipher;
   private profileCompatibilityCheck?: Promise<number>;
-  constructor(readonly db: SqlDatabase, private readonly options: { referralRewardsEnabled?: boolean; profileEncryptionKeyBase64?: string; requireProfileEncryption?: boolean } = {}) {
+  constructor(readonly db: SqlDatabase, private readonly options: { referralRewardsEnabled?: boolean; profileEncryptionKeyBase64?: string; requireProfileEncryption?: boolean; legacyRecoveryOwnershipVerifier?: LegacyRecoveryOwnershipProofVerifier } = {}) {
     this.sessions = new WebsiteSessionStore(db); this.referrals = new ReferralService(db); this.linking = new AccountLinkService(db);
     if (options.profileEncryptionKeyBase64) this.profileCipher = new SaaSProfileCipher(options.profileEncryptionKeyBase64);
     if (options.requireProfileEncryption && !this.profileCipher) throw new Error("profile_encryption_configuration_unavailable");
@@ -110,6 +144,324 @@ export class SaaSStore implements WebsiteIdentityStore {
     })();
     try { return await this.profileCompatibilityCheck; }
     catch (error) { this.profileCompatibilityCheck = undefined; throw error; }
+  }
+
+  private async recoveryBatch(statements: Array<{ sql: string; values?: unknown[] }>) {
+    if (this.db.batch) return this.db.batch(statements);
+    return this.db.transaction(async tx => {
+      const results = [];
+      for (const statement of statements) results.push(await tx.query(statement.sql, statement.values));
+      return results;
+    });
+  }
+
+  private recoverySubjectHash(googleSubject: string): string {
+    if (!this.profileCipher || !/^[A-Za-z0-9_-]{8,256}$/.test(googleSubject)) throw new Error("legacy_recovery_identity_invalid");
+    return this.profileCipher.digest(googleSubject);
+  }
+
+  private validateRecoveryEvidence(type: string, reference: string): asserts type is LegacyRecoveryEvidenceType {
+    if (!(LEGACY_RECOVERY_EVIDENCE_TYPES as readonly string[]).includes(type)
+      || typeof reference !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/#-]{7,255}$/.test(reference)) {
+      throw new Error("legacy_recovery_evidence_invalid");
+    }
+  }
+
+  private async expireLegacyRecoveryItems(now: Date): Promise<void> {
+    await this.recoveryBatch([
+      { sql: `UPDATE classroom_desk_account_recovery_intakes SET status='expired'
+        WHERE status='submitted' AND expires_at<=$1`, values: [now] },
+      { sql: `UPDATE classroom_desk_account_recovery_requests SET status='expired'
+        WHERE status='pending' AND expires_at<=$1`, values: [now] },
+      { sql: `UPDATE classroom_desk_users SET profile_recovery_status='ready'
+        WHERE profile_recovery_status='recovery_pending' AND NOT EXISTS (
+          SELECT 1 FROM classroom_desk_account_recovery_requests r
+          WHERE r.account_id=classroom_desk_users.id AND r.status='pending' AND r.expires_at>$1
+        )`, values: [now] },
+      { sql: `DELETE FROM classroom_desk_recovery_access_sessions WHERE expires_at<=$1`, values: [now] },
+    ]);
+  }
+
+  /** Recovery-only session minted after a fresh, verified Google OIDC login. */
+  async createLegacyRecoveryAccessSession(googleSubject: string, now = new Date()): Promise<{ token: string; expiresAt: Date }> {
+    if (!this.profileCipher || !this.options.requireProfileEncryption) throw new Error("profile_encryption_configuration_unavailable");
+    const token = randomBytes(32).toString("base64url");
+    const expiresAt = new Date(now.getTime() + RECOVERY_SESSION_TTL_MS);
+    await this.db.query(`INSERT INTO classroom_desk_recovery_access_sessions (token_hash,google_subject_hash,google_subject_ciphertext,expires_at,created_at)
+      VALUES ($1,$2,$3,$4,$5)`, [createHash("sha256").update(token, "utf8").digest("hex"), this.recoverySubjectHash(googleSubject), this.profileCipher.sealRecoveryEvidenceReference(googleSubject), expiresAt, now]);
+    return { token, expiresAt };
+  }
+
+  async findLegacyRecoveryAccessSession(token: string, now = new Date()): Promise<{ googleSubjectHash: string; googleSubject: string; expiresAt: Date } | undefined> {
+    if (!this.profileCipher || !this.options.requireProfileEncryption || !/^[A-Za-z0-9_-]{40,}$/.test(token)) return undefined;
+    const tokenHash = createHash("sha256").update(token, "utf8").digest("hex");
+    const result = await this.db.query<{ google_subject_hash: string; google_subject_ciphertext: string; expires_at: Date | string }>(
+      `SELECT google_subject_hash,google_subject_ciphertext,expires_at FROM classroom_desk_recovery_access_sessions WHERE token_hash=$1 AND expires_at>$2`, [tokenHash, now]);
+    const row = result.rows[0];
+    return row ? { googleSubjectHash: row.google_subject_hash, googleSubject: this.profileCipher!.openRecoveryEvidenceReference(row.google_subject_ciphertext), expiresAt: new Date(row.expires_at) } : undefined;
+  }
+
+  async revokeLegacyRecoveryAccessSession(token: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{40,}$/.test(token)) return;
+    await this.db.query(`DELETE FROM classroom_desk_recovery_access_sessions WHERE token_hash=$1`, [createHash("sha256").update(token, "utf8").digest("hex")]);
+  }
+
+  /** Public request intake. It records no Google email and never changes the legacy account. */
+  async submitLegacyRecoveryIntake(input: { sessionToken: string; accountId: string; evidenceType: string; evidenceReference: string; now?: Date }): Promise<{ requestId: string; expiresAt: Date }> {
+    if (!this.profileCipher || !this.options.requireProfileEncryption) throw new Error("profile_encryption_configuration_unavailable");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.accountId)) throw new Error("legacy_recovery_request_invalid");
+    this.validateRecoveryEvidence(input.evidenceType, input.evidenceReference);
+    const now = input.now ?? new Date();
+    const session = await this.findLegacyRecoveryAccessSession(input.sessionToken, now);
+    if (!session) throw new Error("legacy_recovery_session_required");
+    await this.expireLegacyRecoveryItems(now);
+    const account = (await this.db.query<{ id: string; status: string; profile_ciphertext: string | null; profile_recovery_status: string }>(
+      `SELECT id,status,profile_ciphertext,profile_recovery_status FROM classroom_desk_users WHERE id=$1 LIMIT 1`, [input.accountId])).rows[0];
+    if (!account || account.status !== "active" || account.profile_recovery_status !== "ready" || !account.profile_ciphertext) throw new Error("legacy_recovery_account_unavailable");
+    try { this.profileCipher.open(account.profile_ciphertext); throw new Error("legacy_recovery_not_required"); }
+    catch (error) {
+      if (error instanceof Error && error.message === "legacy_recovery_not_required") throw error;
+      if (!(error instanceof Error) || error.message !== "stored_profile_unavailable") throw new Error("legacy_recovery_profile_invalid");
+    }
+    const conflict = await this.db.query<{ id: string }>(`SELECT id FROM classroom_desk_users
+      WHERE id<>$1 AND (google_subject_hash=$2 OR google_subject=$3) LIMIT 2`, [input.accountId, session.googleSubjectHash, session.googleSubject]);
+    if (conflict.rows.length) throw new Error("legacy_recovery_identity_conflict");
+    const existing = await this.db.query<{ id: string }>(`SELECT id FROM classroom_desk_account_recovery_requests
+      WHERE status='pending' AND expires_at>$3 AND (account_id=$1 OR google_subject_hash=$2) LIMIT 1`, [input.accountId, session.googleSubjectHash, now]);
+    if (existing.rows.length) throw new Error("legacy_recovery_request_exists");
+    const requestId = randomUUID();
+    const expiresAt = new Date(now.getTime() + RECOVERY_INTAKE_TTL_MS);
+    const ciphertextHash = createHash("sha256").update(account.profile_ciphertext, "utf8").digest("hex");
+    const referenceHash = this.profileCipher.digestRecoveryEvidenceReference(input.evidenceReference);
+    const referenceCiphertext = this.profileCipher.sealRecoveryEvidenceReference(input.evidenceReference);
+    const inserted = await this.db.query<{ id: string }>(`INSERT INTO classroom_desk_account_recovery_intakes
+      (id,account_id,google_subject_hash,google_subject_ciphertext,expected_legacy_ciphertext_hash,claim_evidence_type,claim_evidence_reference_ciphertext,claim_evidence_reference_hash,status,expires_at,created_at)
+      SELECT $1,$2,$3,$4,$5,$6,$7,$8,'submitted',$9,$10
+      WHERE EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$2 AND status='active' AND profile_recovery_status='ready' AND profile_ciphertext=$11)
+        AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_intakes WHERE status='submitted' AND expires_at>$10 AND (account_id=$2 OR google_subject_hash=$3))
+        AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_requests WHERE status='pending' AND expires_at>$10 AND (account_id=$2 OR google_subject_hash=$3))
+      RETURNING id`, [requestId, input.accountId, session.googleSubjectHash, this.profileCipher.sealRecoveryEvidenceReference(session.googleSubject), ciphertextHash, input.evidenceType, referenceCiphertext, referenceHash, expiresAt, now, account.profile_ciphertext]);
+    if (inserted.rows.length !== 1) throw new Error("legacy_recovery_request_not_created");
+    return { requestId, expiresAt };
+  }
+
+  async listOwnLegacyRecoveryIntakes(sessionToken: string, now = new Date()): Promise<Array<{ id: string; status: string; expiresAt: Date; createdAt: Date }>> {
+    const session = await this.findLegacyRecoveryAccessSession(sessionToken, now);
+    if (!session) throw new Error("legacy_recovery_session_required");
+    const result = await this.db.query<{ id: string; status: string; expires_at: Date | string; created_at: Date | string }>(
+      `SELECT id,status,expires_at,created_at FROM classroom_desk_account_recovery_intakes WHERE google_subject_hash=$1 ORDER BY created_at DESC LIMIT 20`, [session.googleSubjectHash]);
+    return result.rows.map(row => ({ id: row.id, status: row.status, expiresAt: new Date(row.expires_at), createdAt: new Date(row.created_at) }));
+  }
+
+  /** Role lookup deliberately avoids profile decryption so an authorized SUPER_ADMIN can review recovery. */
+  async getRecoveryAdminActor(userId: string): Promise<{ id: string; role: "SUPER_ADMIN" } | undefined> {
+    const result = await this.db.query<{ id: string; role: string; status: string }>(`SELECT id,role,status FROM classroom_desk_users WHERE id=$1 LIMIT 1`, [userId]);
+    const row = result.rows[0];
+    return row?.status === "active" && row.role === "SUPER_ADMIN" ? { id: row.id, role: "SUPER_ADMIN" } : undefined;
+  }
+
+  async listLegacyRecoveryIntakesForAdmin(actorId: string, now = new Date()): Promise<LegacyRecoveryIntake[]> {
+    if (!(await this.getRecoveryAdminActor(actorId)) || !this.profileCipher) throw new Error("super_admin_required");
+    await this.expireLegacyRecoveryItems(now);
+    const result = await this.db.query<{
+      id: string; account_id: string; google_subject_hash: string; expected_legacy_ciphertext_hash: string;
+      claim_evidence_type: LegacyRecoveryEvidenceType; claim_evidence_reference_ciphertext: string; created_at: Date | string; expires_at: Date | string;
+    }>(`SELECT id,account_id,google_subject_hash,expected_legacy_ciphertext_hash,claim_evidence_type,claim_evidence_reference_ciphertext,created_at,expires_at
+      FROM classroom_desk_account_recovery_intakes WHERE status='submitted' AND expires_at>$1 ORDER BY created_at ASC LIMIT 50`, [now]);
+    return result.rows.map(row => ({
+      id: row.id, accountId: row.account_id, googleSubjectFingerprint: row.google_subject_hash.slice(0, 16),
+      expectedCiphertextFingerprint: row.expected_legacy_ciphertext_hash.slice(0, 16), claimEvidenceType: row.claim_evidence_type,
+      claimEvidenceReference: this.profileCipher!.openRecoveryEvidenceReference(row.claim_evidence_reference_ciphertext),
+      createdAt: new Date(row.created_at), expiresAt: new Date(row.expires_at),
+    }));
+  }
+
+  /** Owner attests to an independently checked source; the resulting approval is consumed by the existing OAuth callback. */
+  async approveLegacyRecoveryIntake(input: LegacyRecoveryApprovalInput): Promise<{ recoveryRequestId: string; expiresAt: Date }> {
+    if (!this.profileCipher || !this.options.requireProfileEncryption) throw new Error("profile_encryption_configuration_unavailable");
+    if (!/^[0-9a-f-]{36}$/i.test(input.requestId) || !input.confirmedIndependentEvidence) throw new Error("legacy_recovery_review_invalid");
+    this.validateRecoveryEvidence(input.evidenceType, input.evidenceReference);
+    const now = input.now ?? new Date();
+    if (!(await this.getRecoveryAdminActor(input.reviewerId))) throw new Error("super_admin_required");
+    await this.expireLegacyRecoveryItems(now);
+    const intake = (await this.db.query<{
+      id: string; account_id: string; google_subject_hash: string; google_subject_ciphertext: string; expected_legacy_ciphertext_hash: string;
+      status: string; expires_at: Date | string;
+    }>(`SELECT id,account_id,google_subject_hash,google_subject_ciphertext,expected_legacy_ciphertext_hash,status,expires_at
+      FROM classroom_desk_account_recovery_intakes WHERE id=$1 LIMIT 1`, [input.requestId])).rows[0];
+    if (!intake || intake.status !== "submitted" || new Date(intake.expires_at) <= now) throw new Error("legacy_recovery_request_not_actionable");
+    const account = (await this.db.query<{ status: string; profile_recovery_status: string; profile_ciphertext: string | null }>(
+      `SELECT status,profile_recovery_status,profile_ciphertext FROM classroom_desk_users WHERE id=$1 LIMIT 1`, [intake.account_id])).rows[0];
+    if (!account || account.status !== "active" || account.profile_recovery_status !== "ready" || !account.profile_ciphertext
+      || createHash("sha256").update(account.profile_ciphertext, "utf8").digest("hex") !== intake.expected_legacy_ciphertext_hash) throw new Error("legacy_recovery_account_changed");
+    try { this.profileCipher.open(account.profile_ciphertext); throw new Error("legacy_recovery_not_required"); }
+    catch (error) {
+      if (error instanceof Error && error.message === "legacy_recovery_not_required") throw error;
+      if (!(error instanceof Error) || error.message !== "stored_profile_unavailable") throw new Error("legacy_recovery_profile_invalid");
+    }
+    const googleSubject = this.profileCipher.openRecoveryEvidenceReference(intake.google_subject_ciphertext);
+    const duplicate = await this.db.query<{ id: string }>(`SELECT id FROM classroom_desk_users
+      WHERE id<>$1 AND (google_subject_hash=$2 OR google_subject=$3) LIMIT 2`, [intake.account_id, intake.google_subject_hash, googleSubject]);
+    if (duplicate.rows.length) throw new Error("legacy_recovery_identity_conflict");
+    const recoveryRequestId = randomUUID();
+    const expiresAt = new Date(now.getTime() + RECOVERY_APPROVAL_TTL_MS);
+    const evidenceHash = this.profileCipher.digestRecoveryEvidenceReference(input.evidenceReference);
+    const evidenceCiphertext = this.profileCipher.sealRecoveryEvidenceReference(input.evidenceReference);
+    const baseValues = [intake.id, input.reviewerId, input.evidenceType, evidenceCiphertext, evidenceHash, now,
+      recoveryRequestId, expiresAt, intake.account_id, intake.expected_legacy_ciphertext_hash, intake.google_subject_hash,
+      account.profile_ciphertext, googleSubject, JSON.stringify({ intakeId: intake.id, status: "submitted" }),
+      JSON.stringify({ recoveryRequestId, evidenceType: input.evidenceType, evidenceReferenceHash: evidenceHash })];
+    const baseGuard = `EXISTS (SELECT 1 FROM classroom_desk_account_recovery_intakes i
+      JOIN classroom_desk_users u ON u.id=i.account_id
+      JOIN classroom_desk_users admin ON admin.id=$2
+      WHERE i.id=$1 AND i.account_id=$9 AND i.google_subject_hash=$11 AND i.expected_legacy_ciphertext_hash=$10
+        AND i.status='submitted' AND i.expires_at>$6 AND u.status='active' AND u.profile_recovery_status IN ('ready','recovery_pending')
+        AND u.profile_ciphertext=$12 AND admin.status='active' AND admin.role='SUPER_ADMIN')
+      AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_intakes WHERE id=$1 AND status<>'submitted')
+      AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_requests WHERE status='pending' AND expires_at>$6 AND (account_id=$9 OR google_subject_hash=$11))
+      AND NOT EXISTS (SELECT 1 FROM classroom_desk_users WHERE id<>$9 AND (google_subject_hash=$11 OR google_subject=$13))
+      AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_review_claims WHERE intake_id=$1)`;
+    const statements = [
+      { sql: `UPDATE classroom_desk_users SET profile_recovery_status='recovery_pending'
+        WHERE id=$9 AND status='active' AND profile_recovery_status='ready' AND profile_ciphertext=$12 AND ${baseGuard} RETURNING id`, values: baseValues.slice(0, 13) },
+      { sql: `INSERT INTO classroom_desk_account_recovery_requests
+        (id,account_id,google_subject_hash,expected_legacy_ciphertext_hash,proof_method,proof_reference_hash,verified_by,status,expires_at,source_intake_id)
+        SELECT $7,$9,$11,$10,'independent_manual_review',$5,$2,'pending',$8,$1
+        WHERE ${baseGuard} AND EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$9 AND profile_recovery_status='recovery_pending')
+        RETURNING id`, values: baseValues.slice(0, 13) },
+      { sql: `UPDATE classroom_desk_account_recovery_intakes SET status='approved',reviewed_by=$2,reviewed_at=$6,
+        review_evidence_type=$3,review_evidence_reference_ciphertext=$4,review_evidence_reference_hash=$5,recovery_request_id=$7
+        WHERE id=$1 AND status='submitted' AND expires_at>$6
+          AND EXISTS (SELECT 1 FROM classroom_desk_account_recovery_requests WHERE id=$7 AND source_intake_id=$1 AND status='pending')
+        RETURNING id`, values: baseValues.slice(0, 7) },
+      { sql: `INSERT INTO classroom_desk_admin_audit (actor_user_id,target_user_id,action,reason,previous_state,new_state,created_at)
+        SELECT $2,$9,'approve_legacy_account_recovery','independent_evidence_verified',$14,$15,$6
+        WHERE EXISTS (SELECT 1 FROM classroom_desk_account_recovery_intakes WHERE id=$1 AND status='approved' AND recovery_request_id=$7)`,
+        values: baseValues },
+      { sql: `INSERT INTO classroom_desk_account_recovery_review_claims (intake_id,recovery_request_id,reviewed_by,reviewed_at,decision)
+        SELECT $1,$7,$2,$6,'approved' WHERE EXISTS (SELECT 1 FROM classroom_desk_account_recovery_intakes WHERE id=$1 AND status='approved' AND reviewed_by=$2 AND recovery_request_id=$7)
+          AND EXISTS (SELECT 1 FROM classroom_desk_account_recovery_requests WHERE id=$7 AND account_id=$9 AND google_subject_hash=$11 AND status='pending' AND source_intake_id=$1)
+        UNION ALL SELECT NULL,NULL,NULL,NULL,'approved' WHERE NOT (EXISTS (SELECT 1 FROM classroom_desk_account_recovery_intakes WHERE id=$1 AND status='approved' AND reviewed_by=$2 AND recovery_request_id=$7)
+          AND EXISTS (SELECT 1 FROM classroom_desk_account_recovery_requests WHERE id=$7 AND account_id=$9 AND google_subject_hash=$11 AND status='pending' AND source_intake_id=$1))`, values: baseValues.slice(0, 11) },
+    ];
+    // SQLite/D1 rejects the deliberately-null sentinel row if any preceding step did not commit its guarded write.
+    await this.recoveryBatch(statements);
+    const claim = await this.db.query<{ intake_id: string }>(`SELECT intake_id FROM classroom_desk_account_recovery_review_claims WHERE intake_id=$1`, [intake.id]);
+    if (claim.rows.length !== 1) throw new Error("legacy_recovery_review_not_committed");
+    return { recoveryRequestId, expiresAt };
+  }
+
+  async rejectLegacyRecoveryIntake(input: { requestId: string; reviewerId: string; reason: string; now?: Date }): Promise<void> {
+    if (!/^[0-9a-f-]{36}$/i.test(input.requestId) || !["insufficient_evidence", "account_mismatch", "identity_conflict", "other"].includes(input.reason)
+      || !(await this.getRecoveryAdminActor(input.reviewerId))) throw new Error("super_admin_required");
+    const now = input.now ?? new Date();
+    await this.expireLegacyRecoveryItems(now);
+    const claimValues = [input.requestId, input.reviewerId, now];
+    const auditValues = [input.requestId, input.reviewerId, now, `recovery_rejected:${input.reason}`,
+      JSON.stringify({ intakeId: input.requestId, status: "submitted" }),
+      JSON.stringify({ status: "rejected", reason: input.reason })];
+    try { await this.recoveryBatch([
+      { sql: `UPDATE classroom_desk_account_recovery_intakes SET status='rejected',reviewed_by=$2,reviewed_at=$3,rejection_reason_code=$4
+        WHERE id=$1 AND status='submitted' AND expires_at>$3 AND EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$2 AND status='active' AND role='SUPER_ADMIN')
+          AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_review_claims WHERE intake_id=$1) RETURNING account_id`,
+        values: [input.requestId, input.reviewerId, now, input.reason] },
+      { sql: `INSERT INTO classroom_desk_admin_audit (actor_user_id,target_user_id,action,reason,previous_state,new_state,created_at)
+        SELECT $2,account_id,'reject_legacy_account_recovery','recovery_rejected:'||$4,$5,$6,$3 FROM classroom_desk_account_recovery_intakes
+        WHERE id=$1 AND status='rejected' AND reviewed_by=$2 AND reviewed_at=$3`, values: auditValues },
+      { sql: `INSERT INTO classroom_desk_account_recovery_review_claims (intake_id,recovery_request_id,reviewed_by,reviewed_at,decision)
+        SELECT $1,NULL,$2,$3,'rejected' FROM classroom_desk_account_recovery_intakes
+        WHERE id=$1 AND status='rejected' AND reviewed_by=$2 AND reviewed_at=$3
+          AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_review_claims WHERE intake_id=$1)
+        UNION ALL SELECT NULL,NULL,NULL,NULL,'rejected' WHERE NOT EXISTS (
+          SELECT 1 FROM classroom_desk_account_recovery_intakes WHERE id=$1 AND status='rejected' AND reviewed_by=$2 AND reviewed_at=$3
+            AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_review_claims WHERE intake_id=$1))`, values: claimValues },
+    ]); } catch { throw new Error("legacy_recovery_request_not_actionable"); }
+    const claim = await this.db.query<{ intake_id: string }>(`SELECT intake_id FROM classroom_desk_account_recovery_review_claims WHERE intake_id=$1 AND decision='rejected' AND reviewed_by=$2 AND reviewed_at=$3`, [input.requestId, input.reviewerId, now]);
+    if (claim.rows.length !== 1) throw new Error("legacy_recovery_request_not_actionable");
+  }
+
+  /**
+   * Create a recovery-pending request only after an independent verifier
+   * confirms ownership of this account and the verified Google subject.
+   * This method is intentionally not exposed as a public website route.
+   */
+  async requestLegacyAccountRecovery(input: LegacyRecoveryRequestInput): Promise<{ requestId: string; status: "recovery_pending" }> {
+    if (!this.profileCipher || !this.options.requireProfileEncryption) throw new Error("profile_encryption_configuration_unavailable");
+    const verifier = this.options.legacyRecoveryOwnershipVerifier;
+    if (!verifier) throw new Error("legacy_recovery_verifier_unavailable");
+    if (!/^[0-9a-f-]{36}$/i.test(input.accountId)
+      || !/^[A-Za-z0-9_-]{8,256}$/.test(input.identity.googleSubject)
+      || input.identity.email.length > 320
+      || !/^[^\s@]+@[^\s@]+$/.test(input.identity.email)
+      || input.identity.displayName.length > 256
+      || !input.identity.displayName.trim()
+      || typeof input.proof !== "string" || input.proof.length < 16 || input.proof.length > 4096
+      || !Number.isFinite(input.expiresAt.getTime()) || input.expiresAt.getTime() <= Date.now()
+      || input.expiresAt.getTime() > Date.now() + 24 * 60 * 60 * 1000) throw new Error("legacy_recovery_request_invalid");
+    const verified = await verifier.verify({ accountId: input.accountId, googleSubject: input.identity.googleSubject, proof: input.proof });
+    if (!verified || verified.verifiedAccountId !== input.accountId
+      || verified.verifiedGoogleSubject !== input.identity.googleSubject
+      || verified.reviewerIndependent !== true
+      || typeof verified.verifiedBy !== "string" || !verified.verifiedBy.trim()
+      || typeof verified.caseReference !== "string" || !verified.caseReference.trim()) throw new Error("legacy_account_ownership_unverified");
+
+    const row = (await this.db.query<{ id: string; status: string; profile_ciphertext: string | null; profile_recovery_status: string }>(
+      `SELECT id,status,profile_ciphertext,profile_recovery_status FROM classroom_desk_users WHERE id=$1 LIMIT 1`, [input.accountId],
+    )).rows[0];
+    if (!row || row.status !== "active" || !row.profile_ciphertext) throw new Error("legacy_recovery_account_unavailable");
+    try {
+      this.profileCipher.open(row.profile_ciphertext);
+      throw new Error("legacy_recovery_not_required");
+    } catch (error) {
+      if (error instanceof Error && error.message === "legacy_recovery_not_required") throw error;
+      if (!(error instanceof Error) || error.message !== "stored_profile_unavailable") throw new Error("legacy_recovery_profile_invalid");
+    }
+
+    const subjectHash = this.profileCipher.digest(input.identity.googleSubject);
+    const emailHash = this.profileCipher.digest(input.identity.email.toLowerCase());
+    const displayNameHash = this.profileCipher.digest(input.identity.displayName);
+    const duplicate = await this.db.query<{ id: string }>(
+      `SELECT id FROM classroom_desk_users WHERE (google_subject_hash=$1 OR google_subject=$2) AND id<>$3 LIMIT 2`,
+      [subjectHash, input.identity.googleSubject, input.accountId],
+    );
+    if (duplicate.rows.length) throw new Error("legacy_recovery_identity_conflict");
+    const pending = await this.db.query<{ id: string }>(
+      `SELECT id FROM classroom_desk_account_recovery_requests WHERE status='pending' AND (account_id=$1 OR google_subject_hash=$2) LIMIT 2`,
+      [input.accountId, subjectHash],
+    );
+    if (pending.rows.length) throw new Error(pending.rows.length > 1 ? "legacy_recovery_ambiguous" : "legacy_recovery_request_exists");
+
+    const requestId = randomUUID();
+    const oldCiphertextHash = createHash("sha256").update(row.profile_ciphertext, "utf8").digest("hex");
+    const proofReferenceHash = createHash("sha256").update(verified.caseReference, "utf8").digest("hex");
+    const parameters = [requestId, input.accountId, subjectHash, oldCiphertextHash,
+      proofReferenceHash, verified.verifiedBy, input.expiresAt, null, row.profile_ciphertext];
+    const update = {
+      sql: `UPDATE classroom_desk_users SET profile_recovery_status='recovery_pending'
+        WHERE id=$2 AND status='active' AND profile_recovery_status IN ('ready','recovery_pending') AND profile_ciphertext=$9
+        RETURNING id`,
+      values: parameters,
+    };
+    const condition = `EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$2 AND status='active' AND profile_recovery_status='recovery_pending' AND profile_ciphertext=$9)
+      AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_requests WHERE status='pending' AND (account_id=$2 OR google_subject_hash=$3))`;
+    const insert = {
+      sql: `INSERT INTO classroom_desk_account_recovery_requests
+        (id,account_id,google_subject_hash,expected_legacy_ciphertext_hash,proof_method,proof_reference_hash,verified_by,status,expires_at)
+        SELECT $1,$2,$3,$4,'independent_manual_review',$5,$6,'pending',$7 WHERE ${condition}
+        UNION ALL SELECT NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL WHERE NOT (${condition})`,
+      values: parameters,
+    };
+    if (this.db.batch) {
+      await this.db.batch([update, insert]);
+    } else {
+      await this.db.transaction(async tx => {
+        const changed = await tx.query<{ id: string }>(update.sql, update.values);
+        if (changed.rows.length !== 1) throw new Error("legacy_recovery_account_changed");
+        const created = await tx.query<{ id: string }>(insert.sql, insert.values);
+        if (created.rows.length !== 1) throw new Error("legacy_recovery_request_not_created");
+      });
+    }
+    return { requestId, status: "recovery_pending" };
   }
 
   /**
@@ -236,13 +588,72 @@ export class SaaSStore implements WebsiteIdentityStore {
     return this.userFromRow(row);
   }
 
-  async resolveGoogleIdentityBinding(input: { googleSubject: string; email: string; displayName: string; now: Date }): Promise<{ accountId: string; mcpUserId: string }> {
-    const user = await this.upsertGoogleIdentity(input);
+  async resolveGoogleIdentityBinding(input: { googleSubject: string; email: string; displayName: string; now: Date }): Promise<{ accountId: string; mcpUserId: string; recovery?: import("../public/store.js").GoogleAccountBinding["recovery"] }> {
+    let user: SaaSUser;
+    try {
+      user = await this.upsertGoogleIdentity(input);
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "stored_profile_unavailable") throw error;
+      return this.resolvePendingLegacyAccountRecovery(input);
+    }
     if (user.status !== "active") throw new Error("account_unavailable");
-    // Prefer the public-history unified OAuth map, then retain legacy pairing
-    // identities. New D1-only installations can omit the former table.
+    // Prefer the unified OAuth map, then retain legacy pairing identities.
     const linked = await this.getUnifiedMcpUserId(user.id) ?? await this.getLegacyMcpUserId(user.id);
     return { accountId: user.id, mcpUserId: linked ?? user.id };
+  }
+
+  private async resolvePendingLegacyAccountRecovery(input: { googleSubject: string; email: string; displayName: string }): Promise<{ accountId: string; mcpUserId: string; recovery: NonNullable<import("../public/store.js").GoogleAccountBinding["recovery"]> }> {
+    if (!this.profileCipher) throw new Error("account_recovery_required");
+    const subjectHash = this.profileCipher.digest(input.googleSubject);
+    const requests = await this.db.query<{
+      id: string; account_id: string; google_subject_hash: string; expected_legacy_ciphertext_hash: string;
+      status: string; expires_at: Date | string; verified_by: string;
+    }>(`SELECT id,account_id,google_subject_hash,expected_legacy_ciphertext_hash,status,expires_at,verified_by
+      FROM classroom_desk_account_recovery_requests WHERE google_subject_hash=$1 AND status='pending' AND expires_at>$2 LIMIT 2`, [subjectHash, new Date()]);
+    if (requests.rows.length !== 1) throw new Error(requests.rows.length > 1 ? "legacy_recovery_ambiguous" : "account_recovery_required");
+    const request = requests.rows[0]!;
+    const account = (await this.db.query<{
+      id: string; status: string; profile_ciphertext: string | null; profile_recovery_status: string;
+    }>(`SELECT id,status,profile_ciphertext,profile_recovery_status FROM classroom_desk_users WHERE id=$1 LIMIT 1`, [request.account_id])).rows[0];
+    if (!account || account.status !== "active" || account.profile_recovery_status !== "recovery_pending" || !account.profile_ciphertext) throw new Error("legacy_recovery_account_changed");
+    const expectedCiphertextHash = createHash("sha256").update(account.profile_ciphertext, "utf8").digest("hex");
+    if (expectedCiphertextHash !== request.expected_legacy_ciphertext_hash) throw new Error("legacy_recovery_ciphertext_changed");
+    if (request.google_subject_hash !== subjectHash) throw new Error("legacy_recovery_subject_mismatch");
+    const duplicates = await this.db.query<{ id: string }>(`SELECT id FROM classroom_desk_users WHERE google_subject_hash=$1 OR google_subject=$2 LIMIT 3`, [subjectHash, input.googleSubject]);
+    if (duplicates.rows.some(row => String(row.id) !== String(request.account_id))) throw new Error("legacy_recovery_identity_conflict");
+
+    const legacy = await this.db.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_connections WHERE website_user_id=$1 LIMIT 2`, [request.account_id]);
+    let unified: { mcp_user_id: string }[] = [];
+    try {
+      unified = (await this.db.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_oauth_accounts WHERE website_user_id=$1 LIMIT 2`, [request.account_id])).rows;
+    } catch (error) {
+      if (!isMissingSchemaField(error, "classroom_desk_oauth_accounts")) throw error;
+    }
+    if (legacy.rows.length > 1 || unified.length > 1) throw new Error("legacy_recovery_ambiguous");
+    const legacyId = legacy.rows[0]?.mcp_user_id;
+    const unifiedId = unified[0]?.mcp_user_id;
+    if (legacyId && unifiedId && legacyId !== unifiedId) throw new Error("oauth_account_binding_conflict");
+    const mcpUserId = unifiedId ?? legacyId ?? String(request.account_id);
+    for (const table of ["classroom_desk_connections", ...(unified.length || unifiedId ? ["classroom_desk_oauth_accounts"] : [])]) {
+      const owners = await this.db.query<{ website_user_id: string }>(`SELECT website_user_id FROM ${table} WHERE mcp_user_id=$1 LIMIT 2`, [mcpUserId]);
+      if (owners.rows.some(owner => String(owner.website_user_id) !== String(request.account_id))) throw new Error("oauth_account_binding_conflict");
+    }
+
+    const recoveredProfile: PrivateSaaSProfile = {
+      googleSubject: input.googleSubject,
+      email: input.email,
+      displayName: input.displayName,
+    };
+    const emailHash = this.profileCipher.digest(recoveredProfile.email.toLowerCase());
+    const displayNameHash = this.profileCipher.digest(recoveredProfile.displayName);
+    return {
+      accountId: String(request.account_id), mcpUserId,
+      recovery: {
+        requestId: String(request.id), googleSubjectHash: subjectHash, emailHash, displayNameHash,
+        profile: recoveredProfile, expectedLegacyCiphertext: account.profile_ciphertext,
+        expectedLegacyCiphertextHash: request.expected_legacy_ciphertext_hash,
+      },
+    };
   }
 
   async getUser(id: string): Promise<SaaSUser | null> {
