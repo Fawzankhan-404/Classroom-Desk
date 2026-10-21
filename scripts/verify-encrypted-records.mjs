@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createDecipheriv, hkdfSync } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -103,8 +103,8 @@ export function verifyEncryptedSnapshot(snapshot, keyBase64) {
 export async function verifyEncryptedSnapshotFile(filePath, keyBase64) {
   let contents;
   try {
-    const metadata = await stat(filePath);
-    if (!metadata.isFile() || metadata.size > MAX_SNAPSHOT_BYTES) return { profiles: { valid: 0, invalid: 0 }, oauthRecords: { valid: 0, invalid: 0 }, passed: false };
+    const metadata = await lstat(filePath);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_SNAPSHOT_BYTES) return { profiles: { valid: 0, invalid: 0 }, oauthRecords: { valid: 0, invalid: 0 }, passed: false };
     contents = await readFile(filePath);
     if (contents.length > MAX_SNAPSHOT_BYTES) return { profiles: { valid: 0, invalid: 0 }, oauthRecords: { valid: 0, invalid: 0 }, passed: false };
     return verifyEncryptedSnapshot(JSON.parse(contents.toString("utf8")), keyBase64);

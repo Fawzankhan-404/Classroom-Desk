@@ -1,8 +1,15 @@
 import { createCipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { verifyEncryptedSnapshot } from "../../scripts/verify-encrypted-records.mjs";
+import { verifyEncryptedSnapshot, verifyEncryptedSnapshotFile } from "../../scripts/verify-encrypted-records.mjs";
 
 const TEST_KEY = Buffer.from(Array.from({ length: 32 }, (_, i) => i)).toString("base64");
+const execFileAsync = promisify(execFile);
 
 function seal(value: unknown, key: Buffer, aad?: string, iv = Buffer.alloc(12, 0x2a)): string {
   const cipher = createCipheriv("aes-256-gcm", key, iv);
@@ -79,5 +86,49 @@ describe("encrypted record compatibility verifier", () => {
       profiles: [{ ciphertext: sample.profile }],
       oauthRecords: [{ ...sample.grant, access_token: "synthetic-only" }],
     }, TEST_KEY).passed).toBe(false);
+  });
+
+  it("rejects symlink snapshot paths without reading their target", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "classroom-desk-encrypted-snapshot-"));
+    const target = join(directory, "snapshot.json");
+    const link = join(directory, "snapshot-link.json");
+    try {
+      const sample = fixture();
+      await writeFile(target, JSON.stringify({ profiles: [{ ciphertext: sample.profile }], oauthRecords: [sample.grant] }));
+      try {
+        await symlink(target, link);
+      } catch (error) {
+        if (process.platform === "win32" && ["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")) return;
+        throw error;
+      }
+      await expect(verifyEncryptedSnapshotFile(link, TEST_KEY)).resolves.toEqual({
+        profiles: { valid: 0, invalid: 0 }, oauthRecords: { valid: 0, invalid: 0 }, passed: false,
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("prints only aggregate verification results from the owner-invoked CLI", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "classroom-desk-encrypted-snapshot-"));
+    const snapshotPath = join(directory, "synthetic-snapshot.json");
+    const scriptPath = fileURLToPath(new URL("../../scripts/verify-encrypted-records.mjs", import.meta.url));
+    const sample = fixture();
+    try {
+      await writeFile(snapshotPath, JSON.stringify({ profiles: [{ ciphertext: sample.profile }], oauthRecords: [sample.grant] }));
+      const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath, snapshotPath], {
+        env: { ...process.env, V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64: TEST_KEY },
+        windowsHide: true,
+      });
+      expect(stdout).toBe("PASS profiles=1/1 oauth_records=1/1\n");
+      expect(stderr).toBe("");
+      for (const sensitive of [TEST_KEY, "synthetic-subject", "synthetic@example.invalid", "synthetic-only", sample.profile, sample.grant.payload]) {
+        expect(stdout).not.toContain(sensitive);
+        expect(stderr).not.toContain(sensitive);
+      }
+      expect(await readFile(snapshotPath, "utf8")).toContain(sample.profile);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
