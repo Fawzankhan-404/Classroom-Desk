@@ -60,7 +60,24 @@ describe("encrypted record compatibility verifier", () => {
   it("returns only aggregate counts and rejects malformed snapshots", () => {
     const result = verifyEncryptedSnapshot({ profiles: [{ ciphertext: "not-a-record" }], oauthRecords: [] }, TEST_KEY);
     expect(Object.keys(result).sort()).toEqual(["oauthRecords", "passed", "profiles"]);
-    expect(result).toEqual({ profiles: { valid: 0, invalid: 1 }, oauthRecords: { valid: 0, invalid: 0 }, passed: false });
+    expect(result).toEqual({ profiles: { valid: 0, invalid: 0 }, oauthRecords: { valid: 0, invalid: 0 }, passed: false });
     expect(verifyEncryptedSnapshot({}, TEST_KEY).passed).toBe(false);
+  });
+
+  it("fails closed when either encrypted record class is empty", () => {
+    expect(verifyEncryptedSnapshot({ profiles: [], oauthRecords: [fixture().grant] }, TEST_KEY).passed).toBe(false);
+    expect(verifyEncryptedSnapshot({ profiles: [{ ciphertext: fixture().profile }], oauthRecords: [] }, TEST_KEY).passed).toBe(false);
+  });
+
+  it("rejects snapshots containing unencrypted account or token fields", () => {
+    const sample = fixture();
+    expect(verifyEncryptedSnapshot({
+      profiles: [{ ciphertext: sample.profile, email: "synthetic@example.invalid" }],
+      oauthRecords: [sample.grant],
+    }, TEST_KEY).passed).toBe(false);
+    expect(verifyEncryptedSnapshot({
+      profiles: [{ ciphertext: sample.profile }],
+      oauthRecords: [{ ...sample.grant, access_token: "synthetic-only" }],
+    }, TEST_KEY).passed).toBe(false);
   });
 });

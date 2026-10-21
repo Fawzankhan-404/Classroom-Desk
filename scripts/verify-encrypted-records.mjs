@@ -59,11 +59,17 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function hasOnlyKeys(value, allowed) {
+  return isPlainObject(value) && Object.keys(value).every((key) => allowed.includes(key));
+}
+
 /** Validate encrypted records without returning or logging decoded content. */
 export function verifyEncryptedSnapshot(snapshot, keyBase64) {
   const root = decodeKey(keyBase64);
   const result = { profiles: { valid: 0, invalid: 0 }, oauthRecords: { valid: 0, invalid: 0 }, passed: false };
-  if (!root || !isPlainObject(snapshot) || !Array.isArray(snapshot.profiles) || !Array.isArray(snapshot.oauthRecords)
+  if (!root || !hasOnlyKeys(snapshot, ["profiles", "oauthRecords"])
+    || !Array.isArray(snapshot.profiles) || !Array.isArray(snapshot.oauthRecords)
+    || snapshot.profiles.length === 0 || snapshot.oauthRecords.length === 0
     || snapshot.profiles.length + snapshot.oauthRecords.length > MAX_RECORDS) {
     if (root) root.fill(0);
     return result;
@@ -73,12 +79,12 @@ export function verifyEncryptedSnapshot(snapshot, keyBase64) {
   const authKey = Buffer.from(hkdfSync("sha256", root, Buffer.alloc(0), AUTH_ENCRYPTION_INFO, 32));
   try {
     for (const row of snapshot.profiles) {
-      const value = row && isPlainObject(row) ? decryptJson(row.ciphertext, profileKey) : undefined;
+      const value = hasOnlyKeys(row, ["ciphertext"]) ? decryptJson(row.ciphertext, profileKey) : undefined;
       if (isProfile(value)) result.profiles.valid += 1;
       else result.profiles.invalid += 1;
     }
     for (const row of snapshot.oauthRecords) {
-      const validRow = row && isPlainObject(row)
+      const validRow = hasOnlyKeys(row, ["kind", "key_hash", "payload"])
         && typeof row.kind === "string" && AUTH_KINDS.has(row.kind)
         && typeof row.key_hash === "string" && /^[a-f0-9]{64}$/.test(row.key_hash);
       const value = validRow ? decryptJson(row.payload, authKey, `${row.kind}:${row.key_hash}`) : undefined;
@@ -119,7 +125,9 @@ if (isCli()) {
     process.stdout.write("Usage: V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64=<securely supplied> node scripts/verify-encrypted-records.mjs <protected-snapshot.json>\n");
     process.exit(filePath ? 0 : 2);
   }
-  const result = await verifyEncryptedSnapshotFile(filePath, process.env.V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64);
+  const keyBase64 = process.env.V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64;
+  delete process.env.V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64;
+  const result = await verifyEncryptedSnapshotFile(filePath, keyBase64);
   process.stdout.write(`${result.passed ? "PASS" : "FAIL"} profiles=${result.profiles.valid}/${result.profiles.valid + result.profiles.invalid} oauth_records=${result.oauthRecords.valid}/${result.oauthRecords.valid + result.oauthRecords.invalid}\n`);
   process.exit(result.passed ? 0 : 1);
 }

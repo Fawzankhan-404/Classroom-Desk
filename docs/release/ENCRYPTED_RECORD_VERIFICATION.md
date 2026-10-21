@@ -19,8 +19,18 @@ The verifier uses the same key contract and derivation labels as the Worker:
 `V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64` is canonical base64 for a 32-byte root;
 profile and OAuth payload keys use their respective HKDF-SHA256 labels; OAuth
 records also authenticate the `kind:key_hash` value as AES-256-GCM AAD. It
-validates the profile fields and parses OAuth JSON in memory, then discards the
-plaintext buffers. It prints only PASS/FAIL and successful/total record counts.
+validates the profile fields and parses OAuth JSON in memory, then clears the
+mutable key/plaintext buffers. It prints only PASS/FAIL and successful/total
+record counts. A PASS requires at least one valid profile and one valid OAuth
+record; empty categories fail closed.
+
+The input shape is strict. Profile rows may contain only `ciphertext`; OAuth
+rows may contain only `kind`, `key_hash`, and `payload`; the root object may
+contain only `profiles` and `oauthRecords`. This prevents accidentally passing
+plaintext profile, token, or unrelated database fields to the verifier.
+JavaScript strings and parsed objects are managed by the runtime and cannot be
+reliably zeroized; use a protected local process and do not treat this as an
+in-place database migration tool.
 
 ## Owner-invoked procedure
 

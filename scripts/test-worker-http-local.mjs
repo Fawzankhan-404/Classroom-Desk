@@ -79,6 +79,8 @@ async function run() {
   assert(picker.status === 400, "invalid Picker callback fails closed");
   const order = await request("/api/billing/trial/order", { method: "POST", headers: { "content-type": "application/json", origin: origin.origin }, body: "{}" });
   assert(order.status === 401, "trial order requires authenticated session");
+  const subscription = await request("/api/billing/subscription", { method: "POST", headers: { "content-type": "application/json", origin: origin.origin }, body: JSON.stringify({ plan: "student" }) });
+  assert(subscription.status === 401, "subscription creation requires authenticated session");
   const webhook = await request("/webhooks/razorpay", { method: "POST", headers: { "content-type": "application/json", "x-razorpay-signature": "synthetic-invalid" }, body: "{}" });
   assert(webhook.status === 401, "invalid billing webhook signature rejected");
 
