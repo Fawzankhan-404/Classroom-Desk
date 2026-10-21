@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "classroom-desk",
+  "main": "src/final-worker.ts",
+  "compatibility_date": "2026-10-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "keep_vars": true,
+  "secrets": {
+    "required": [
+      "INTERNAL_DELEGATION_SECRET",
+      "MCP_ACCESS_POLICY_SECRET",
+      "MCP_GRANDFATHERED_SUBJECT_HASHES",
+      "MCP_HANDOFF_SIGNING_SECRET",
+      "RAZORPAY_KEY_ID",
+      "RAZORPAY_KEY_SECRET",
+      "RAZORPAY_STUDENT_PLAN_ID",
+      "RAZORPAY_TEACHER_PLAN_ID",
+      "RAZORPAY_WEBHOOK_SECRET",
+      "V2_GOOGLE_OAUTH_CLIENT_ID",
+      "V2_GOOGLE_OAUTH_CLIENT_SECRET",
+      "V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64"
+    ]
+  },
+  "routes": [
+    { "pattern": "classroom.jarvis404.com/*", "zone_name": "jarvis404.com" }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "redact_query_string": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1, "persist": true, "invocation_logs": true },
+    "traces": { "enabled": false, "persist": true, "head_sampling_rate": 1 }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "classroom-desk-db",
+      "database_id": "805f756e-16ea-40e2-a032-335176793b8e",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ratelimits": [
+    { "name": "V2_AUTH_RATE_LIMIT", "namespace_id": "4042026111", "simple": { "limit": 20, "period": 60 } },
+    { "name": "V2_PUBLIC_RATE_LIMIT", "namespace_id": "4042026110", "simple": { "limit": 300, "period": 60 } }
+  ]
+}

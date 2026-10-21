@@ -9,6 +9,13 @@ export function isTrialPurchaseOpen(now: Date): boolean {
   return now.getTime() <= new Date(CAMPAIGN_END_ISO).getTime();
 }
 
+/** Provider order timestamps are authoritative for campaign eligibility. */
+export function isTrialOrderCreatedByCutoff(createdAt: unknown): createdAt is number {
+  if (typeof createdAt !== "number" || !Number.isSafeInteger(createdAt) || createdAt <= 0) return false;
+  const createdAtMs = createdAt * 1000;
+  return Number.isSafeInteger(createdAtMs) && createdAtMs <= Date.parse(CAMPAIGN_END_ISO);
+}
+
 export function trialExpiry(paidAt: Date): Date {
   return new Date(paidAt.getTime() + TRIAL_DURATION_MS);
 }

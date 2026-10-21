@@ -32,7 +32,7 @@ const submissionStateText = (value: string | null | undefined) => {
     case "CREATED": return "In progress";
     case "TURNED_IN": return "Turned in";
     case "RETURNED": return "Returned";
-    case "RECLAIMED_BY_STUDENT": return "Returned to student";
+    case "RECLAIMED_BY_STUDENT": return "Unsubmitted by student";
     default: return "Status not available";
   }
 };
