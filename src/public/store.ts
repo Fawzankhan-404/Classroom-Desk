@@ -4,7 +4,20 @@ import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/share
 import type { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 
 export type GoogleGrant = { userId: string; refreshToken: string; scopes: string[]; createdAt: number; updatedAt: number; googleSubject?: string };
-export type GoogleAccountBinding = { accountId: string; mcpUserId: string };
+export type GoogleAccountBinding = {
+  accountId: string;
+  mcpUserId: string;
+  /** Internal recovery payload; never exposed in OAuth responses or diagnostics. */
+  recovery?: {
+    requestId: string;
+    googleSubjectHash: string;
+    emailHash: string;
+    displayNameHash: string;
+    profile: { googleSubject: string; email: string; displayName: string };
+    expectedLegacyCiphertext: string;
+    expectedLegacyCiphertextHash: string;
+  };
+};
 export type GoogleFlow = {
   id: string; client: OAuthClientInformationFull; params: AuthorizationParams; userId: string;
   googleState: string; googleVerifier: string; googleNonce?: string; expiresAt: number; started: boolean;

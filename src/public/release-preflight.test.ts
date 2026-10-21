@@ -70,9 +70,9 @@ describe("production release preflight", () => {
     const configPath = fileURLToPath(new URL("../../wrangler.production-candidate.jsonc", import.meta.url));
     const config = JSON.parse(await readFile(configPath, "utf8"));
     const migrations = await readCandidateMigrationNames(configPath, config);
-    expect(migrations).toHaveLength(12);
+    expect(migrations).toHaveLength(13);
     expect(migrations[0]).toBe("0001_classroom_desk.sql");
-    expect(migrations.at(-1)).toBe("0012_payment_refund_totals.sql");
+    expect(migrations.at(-1)).toBe("0013_legacy_account_recovery.sql");
   });
 
   it("rejects a migration directory that escapes the candidate configuration directory", async () => {

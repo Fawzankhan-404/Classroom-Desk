@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOOGLE_CANONICAL_CLASSROOM_SCOPES } from "../scopes.js";
 import { createPublicApp } from "./http.js";
 import { MCP_OFFLINE_SCOPE, MCP_SCOPE } from "./oauth.js";
-import { MemoryPublicAuthStore } from "./store.js";
+import { MemoryPublicAuthStore, type GoogleAccountBinding } from "./store.js";
 
 async function freePort() {
   const server = createNetServer();
@@ -15,7 +15,7 @@ async function freePort() {
   return port;
 }
 
-async function startHarness() {
+async function startHarness(googleIdentityResolver?: (identity: { googleSubject: string; email: string; displayName: string }) => Promise<string | GoogleAccountBinding>) {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const store = new MemoryPublicAuthStore();
@@ -23,6 +23,7 @@ async function startHarness() {
     origin: new URL(origin), mcpResource: new URL(`${origin}/mcp`),
     googleCallbackUrl: `${origin}/oauth/google/callback`, googleClientId: "mock-google-client",
     googleClientSecret: "mock-google-secret", port, production: false,
+    ...(googleIdentityResolver ? { googleIdentityResolver } : {}),
   };
   const { app } = createPublicApp(config, store);
   const server = app.listen(port, "127.0.0.1");
@@ -132,6 +133,43 @@ describe("public OAuth callback behavior", () => {
       expect(await store.getGrant(secondUserId!)).toMatchObject({ refreshToken: "grant-b" });
       expect(await store.getGrant(firstUserId!)).toMatchObject({ refreshToken: "grant-a" });
       expect(tokenExchange).toHaveBeenCalledTimes(2);
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+  });
+
+  it("completes an approved recovery only with a fresh Google refresh token and never decrypts the old grant", async () => {
+    const recovery: NonNullable<GoogleAccountBinding["recovery"]> = {
+      requestId: "synthetic-recovery-request", googleSubjectHash: "a".repeat(64), emailHash: "b".repeat(64),
+      displayNameHash: "c".repeat(64), profile: { googleSubject: "synthetic-recovery-subject", email: "owner@example.invalid", displayName: "Recovery Owner" },
+      expectedLegacyCiphertext: "synthetic-old-key-envelope", expectedLegacyCiphertextHash: "d".repeat(64),
+    };
+    const accountBinding = { accountId: "00000000-0000-4000-8000-000000000041", mcpUserId: "legacy-mcp-subject", recovery };
+    const { origin, store, server } = await startHarness(async () => accountBinding);
+    const redirectUri = `${origin}/chatgpt/callback`;
+    const client = await registerClient(origin, redirectUri);
+    const getToken = vi.spyOn(OAuth2Client.prototype, "getToken").mockResolvedValue({
+      tokens: { refresh_token: "synthetic-fresh-refresh", id_token: "synthetic-id-token", scope: GOOGLE_CANONICAL_CLASSROOM_SCOPES.join(" ") },
+    } as never);
+    let expectedNonce = "";
+    vi.spyOn(OAuth2Client.prototype, "verifyIdToken").mockImplementation(async () => ({
+      getPayload: () => ({ iss: "https://accounts.google.com", aud: "mock-google-client", exp: Math.floor(Date.now() / 1000) + 600,
+        iat: Math.floor(Date.now() / 1000), nonce: expectedNonce, sub: recovery.profile.googleSubject,
+        email: recovery.profile.email, email_verified: true, name: recovery.profile.displayName }),
+    } as never));
+    const readOldGrant = vi.spyOn(store, "getGrant").mockRejectedValue(new Error("Stored authorization is unavailable."));
+    try {
+      const authorization = await beginAuthorization(origin, client.client_id, redirectUri, "recovery-state");
+      const google = await beginGoogle(origin, authorization.connectUrl!);
+      expectedNonce = (await store.getFlow(google.flowId))!.googleNonce!;
+      const callback = await fetch(`${origin}/oauth/google/callback?state=${encodeURIComponent(google.googleUrl.searchParams.get("state")!)}&code=synthetic-google-code`, { redirect: "manual" });
+      expect(callback.status).toBe(303);
+      const destination = new URL(callback.headers.get("location")!);
+      expect(destination.origin + destination.pathname).toBe(redirectUri);
+      expect(destination.searchParams.has("code")).toBe(true);
+      expect(destination.searchParams.get("state")).toBe("recovery-state");
+      expect(readOldGrant).not.toHaveBeenCalled();
+      expect(getToken).toHaveBeenCalledTimes(1);
+      readOldGrant.mockRestore();
+      expect(await store.getGrant(accountBinding.mcpUserId)).toMatchObject({ refreshToken: "synthetic-fresh-refresh", googleSubject: recovery.profile.googleSubject });
     } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
   });
 

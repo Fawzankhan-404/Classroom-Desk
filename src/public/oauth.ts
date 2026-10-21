@@ -274,7 +274,12 @@ export class PublicOAuthProvider implements OAuthServerProvider {
         accountBinding = resolved;
         googleSubject = resolved.googleSubject;
       }
-      const existingGrant = this.config.googleIdentityResolver ? await this.store.getGrant(grantUserId) : undefined;
+      // A legacy recovery must replace an old-key grant with a refresh token
+      // returned by this fresh Google authorization. Do not try to decrypt the
+      // inaccessible old grant or fall back to its refresh token.
+      const existingGrant = this.config.googleIdentityResolver && !accountBinding?.recovery
+        ? await this.store.getGrant(grantUserId)
+        : undefined;
       // A grant can have a different legacy MCP key from the newly verified
       // website account. Reuse a stored Google refresh token only when its
       // persisted stable subject matches the ID token for this callback.
