@@ -332,8 +332,19 @@ export default {
             try {
               const paymentId=req.body?.payload?.payment?.entity?.id;
               const payment=req.body?.payload?.payment?.entity;
-              const owner=(eventType==='refund.processed'||eventType==='payment.refunded')&&typeof paymentId==='string'?await saasStore.paymentOwner(paymentId,typeof payment?.order_id==='string'?payment.order_id:undefined,typeof payment?.subscription_id==='string'?payment.subscription_id:undefined):undefined;
-              accepted = await saasStore.processWebhook(eventId,eventType,payloadHash,parseRazorpayEvent(req.body,new Date(),owner,{student:bindings.RAZORPAY_STUDENT_PLAN_ID,teacher:bindings.RAZORPAY_TEACHER_PLAN_ID}));
+              const orderId = typeof payment?.order_id === "string" ? payment.order_id : undefined;
+              let owner=(eventType==='refund.processed'||eventType==='payment.refunded')&&typeof paymentId==='string'?await saasStore.paymentOwner(paymentId,orderId,typeof payment?.subscription_id==='string'?payment.subscription_id:undefined):undefined;
+              let webhookBody = req.body;
+              const webhookOrder = req.body?.payload?.order?.entity;
+              if (eventType === "payment.captured" && !webhookOrder && typeof paymentId === "string" && orderId) {
+                owner = await saasStore.paymentOwner(paymentId, orderId);
+              }
+              if (eventType === "payment.captured" && owner && !webhookOrder && orderId) {
+                if (!bindings.RAZORPAY_KEY_ID || !bindings.RAZORPAY_KEY_SECRET) throw new Error("billing_provider_unavailable");
+                const order = await new RazorpayClient(bindings.RAZORPAY_KEY_ID, bindings.RAZORPAY_KEY_SECRET).getOrder(orderId);
+                webhookBody = { ...req.body, payload: { ...req.body.payload, order: { entity: order } } };
+              }
+              accepted = await saasStore.processWebhook(eventId,eventType,payloadHash,parseRazorpayEvent(webhookBody,new Date(),owner,{student:bindings.RAZORPAY_STUDENT_PLAN_ID,teacher:bindings.RAZORPAY_TEACHER_PLAN_ID}));
             }
             catch { console.error("razorpay_webhook_processing_failed"); return res.status(500).json({ error: "webhook_processing_failed" }); }
             return res.status(200).json({ received: true, duplicate: !accepted });

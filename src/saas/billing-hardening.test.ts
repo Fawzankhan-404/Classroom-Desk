@@ -11,7 +11,7 @@ import { reconcileRecentPayments } from "./reconciliation.js";
 import { invoicePaidThrough, RazorpayClient, trialOrderReceipt, type RazorpayPayment, type RazorpaySubscription } from "./razorpay-client.js";
 import { verifyCheckoutSignature, verifySubscriptionSignature } from "./razorpay.js";
 import { renderSubscription } from "./account-portal.js";
-import { CAMPAIGN_END_ISO } from "./campaign.js";
+import { CAMPAIGN_END_ISO, isTrialOrderCreatedByCutoff } from "./campaign.js";
 
 const secret = "synthetic-billing-secret";
 const now = new Date();
@@ -114,11 +114,25 @@ describe("billing provider boundaries (all fetches mocked)", () => {
   it("uses immutable signed/provider timestamps and rejects missing or future trial times", () => {
     const created = Math.floor(now.getTime()/1000) - 2*86400;
     const payment = { id:"pay_test",order_id:"order_test",amount:900,currency:"INR",status:"captured",created_at:created,notes:{user_id:"owner",kind:"trial"} };
-    const body = {event:"payment.captured",payload:{payment:{entity:payment}}};
+    const cutoffOrderTime = Math.floor(Date.parse(CAMPAIGN_END_ISO) / 1000);
+    const orderEntity = { id:"order_test",amount:900,currency:"INR",created_at:cutoffOrderTime,notes:{user_id:"owner",kind:"trial",product:"classroom_desk_trial"} };
+    const body = {event:"payment.captured",payload:{payment:{entity:payment},order:{entity:orderEntity}}};
     expect(parseRazorpayEvent(body, now)).toMatchObject({orderId:"order_test",paidAt:new Date(created*1000)});
     expect(parseRazorpayEvent({...body,created_at:created+60},now)).toMatchObject({paidAt:new Date((created+60)*1000)});
     expect(parseRazorpayEvent({...body,payload:{payment:{entity:{...payment,created_at:undefined}}}},now)).toBeNull();
     expect(parseRazorpayEvent({...body,created_at:now.getTime()/1000+61},now)).toBeNull();
+    expect(parseRazorpayEvent({...body,payload:{...body.payload,order:{entity:{...orderEntity,created_at:cutoffOrderTime+1}}}},now)).toBeNull();
+    expect(parseRazorpayEvent({...body,payload:{payment:{entity:payment}}},now)).toBeNull();
+    expect(parseRazorpayEvent({...body,payload:{...body.payload,order:{entity:{...orderEntity,created_at:undefined}}}},now)).toBeNull();
+  });
+
+  it("uses the provider order timestamp at the inclusive campaign cutoff and fails closed for invalid values", () => {
+    const cutoffOrderTime = Math.floor(Date.parse(CAMPAIGN_END_ISO) / 1000);
+    expect(isTrialOrderCreatedByCutoff(cutoffOrderTime)).toBe(true);
+    expect(isTrialOrderCreatedByCutoff(cutoffOrderTime + 1)).toBe(false);
+    for (const invalid of [undefined, null, NaN, 0, -1, 1.5, "1792535399"]) {
+      expect(isTrialOrderCreatedByCutoff(invalid)).toBe(false);
+    }
   });
 
   it("rejects conflicting subscription users, plans, payment linkage and refunded captures", () => {
@@ -149,7 +163,7 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
 
   const user = (name:string) => store.upsertGoogleIdentity({googleSubject:`billing-${name}`,email:`${name}@example.invalid`,displayName:name,now});
   const captured = (id:string,extra:Partial<RazorpayPayment>={}) => ({id,amount:900,currency:"INR",status:"captured",created_at:Math.floor(Date.now()/1000)-3600,...extra});
-  const order = (owner:string,status="paid") => ({id:"order_owned",amount:900,amount_paid:status === "paid" ? 900 : 0,amount_due:status === "paid" ? 0 : 900,created_at:Math.floor(Date.now()/1000),currency:"INR",status,notes:{user_id:owner,kind:"trial",product:"classroom_desk_trial"}});
+  const order = (owner:string,status="paid",createdAt=Math.floor(Date.parse(CAMPAIGN_END_ISO)/1000)) => ({id:"order_owned",amount:900,amount_paid:status === "paid" ? 900 : 0,amount_due:status === "paid" ? 0 : 900,created_at:createdAt,currency:"INR",status,notes:{user_id:owner,kind:"trial",product:"classroom_desk_trial"}});
   const subscription = (owner:string):RazorpaySubscription => ({id:"sub_owned",plan_id:planIds.student,status:"active",current_start:Math.floor(Date.now()/1000)-3600,current_end:Math.floor(Date.now()/1000)+30*86400,notes:{user_id:owner,plan:"student"}});
 
   async function harness(ownerId:string,provider:Partial<RazorpayClient>) {
@@ -306,12 +320,21 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
     setTimeBeforeTrialCutoff();
     const createTrialOrder = vi.fn(async () => {
       vi.setSystemTime(new Date(Date.parse(CAMPAIGN_END_ISO) + 1000));
-      return order(owner.id, "created");
+      return order(owner.id, "created", Math.floor(Date.parse(CAMPAIGN_END_ISO) / 1000) + 1);
     });
     const send = await harness(owner.id, { createTrialOrder });
 
     expect(await send("/api/billing/trial/order")).toEqual({ status: 409, data: { error: "trial_not_eligible" } });
     expect(createTrialOrder).toHaveBeenCalledTimes(1);
+    expect(await store.pendingTrialOrder(owner.id)).toBeNull();
+  });
+
+  it.each([["missing", undefined], ["invalid", Number.NaN]] as const)("does not return checkout data when provider order timestamp is %s", async (_case, createdAt) => {
+    const owner = await user(`trial-create-${_case}`);
+    setTimeBeforeTrialCutoff();
+    const createTrialOrder = vi.fn(async () => ({ ...order(owner.id, "created"), created_at: createdAt as number }));
+    const send = await harness(owner.id, { createTrialOrder });
+    expect(await send("/api/billing/trial/order")).toEqual({ status: 409, data: { error: "trial_not_eligible" } });
     expect(await store.pendingTrialOrder(owner.id)).toBeNull();
   });
 
@@ -328,6 +351,20 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
 
     const closed = await harness(owner.id, { getOrder: async () => order(owner.id, "closed"), getOrderPayments: async () => ({ count: 0, items: [] }) });
     expect(await closed("/api/billing/trial/resume")).toMatchObject({ status: 409, data: { error: "trial_attempt_expired" } });
+  });
+
+  it.each([
+    ["after-cutoff", Math.floor(Date.parse(CAMPAIGN_END_ISO) / 1000) + 1],
+    ["missing", undefined],
+    ["invalid", Number.NaN],
+  ] as const)("rejects trial resume when provider order timestamp is %s", async (_case, createdAt) => {
+    const owner = await user(`trial-resume-${_case}`);
+    await store.beginTrialPurchase(owner.id, new Date(Date.parse(CAMPAIGN_END_ISO) - 1));
+    await store.recordPendingTrialOrder(owner.id, "order_owned", 900, "INR");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.parse(CAMPAIGN_END_ISO) + 1));
+    const payable = await harness(owner.id, { getOrder: async () => ({ ...order(owner.id, "created"), created_at: createdAt as number }), getOrderPayments: async () => ({ count: 0, items: [] }) });
+    expect(await payable("/api/billing/trial/resume")).toMatchObject({ status: 409, data: { error: "trial_attempt_expired" } });
   });
 
   it("does not resume after cutoff while a provider payment is still in flight", async () => {
@@ -378,6 +415,19 @@ describe("billing ownership and fair recovery with isolated PostgreSQL", () => {
     expect((await send("/api/billing/verify",trialBody())).status).toBe(200);
     expect((await pg.query("SELECT * FROM classroom_desk_payments")).rows).toHaveLength(1);
     expect((await pg.query("SELECT starts_at,expires_at FROM classroom_desk_trials WHERE user_id=$1",[owner.id])).rows).toEqual(before.rows);
+  });
+
+  it.each([
+    ["after cutoff", Math.floor(Date.parse(CAMPAIGN_END_ISO) / 1000) + 1],
+    ["missing", undefined],
+    ["invalid", Number.NaN],
+  ] as const)("rejects paid trial completion with a provider order timestamp %s", async (_case, createdAt) => {
+    const owner = await user(`trial-completion-${_case}`);
+    await store.recordPendingTrialOrder(owner.id,"order_owned",900,"INR");
+    const send = await harness(owner.id, { getPayment: async () => captured("pay_owned", { order_id:"order_owned" }), getOrder: async () => ({ ...order(owner.id,"paid"), created_at:createdAt as number }) });
+    expect(await send("/api/billing/verify",trialBody())).toMatchObject({ status: 400, data: { error: "payment_mismatch" } });
+    expect((await store.entitlement(owner.id)).allowed).toBe(false);
+    expect((await pg.query("SELECT status FROM classroom_desk_payments WHERE provider_order_id='order_owned'")).rows).toEqual([{status:"pending"}]);
   });
 
   it.each([

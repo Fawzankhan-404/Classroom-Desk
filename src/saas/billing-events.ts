@@ -1,4 +1,4 @@
-import { planPricePaise, TRIAL_PRICE_PAISE } from "./campaign.js";
+import { isTrialOrderCreatedByCutoff, planPricePaise, TRIAL_PRICE_PAISE } from "./campaign.js";
 import { paymentIsFullyRefunded, paymentRefundStateIsConsistent } from "./razorpay-client.js";
 
 export type BillingEvent =
@@ -29,7 +29,10 @@ export function parseRazorpayEvent(body: unknown, now = new Date(), knownPayment
     if (order && (payment.order_id !== order.id || order.amount !== amount || order.currency !== "INR")) return null;
     if ([paymentNotes, orderNotes].some(notes => string(notes?.product) && notes?.product !== "classroom_desk_trial")) return null;
     const paidAt = providerEventTime(body.created_at ?? payment.created_at, now);
-    return kind === "trial" && amount === TRIAL_PRICE_PAISE && paidAt ? { kind: "trial_captured", userId, paymentId, orderId: string(payment.order_id), amountPaise: amount, paidAt } : null;
+    const orderId = string(payment.order_id);
+    return kind === "trial" && amount === TRIAL_PRICE_PAISE && paidAt && orderId && order && order.id === orderId
+      && isTrialOrderCreatedByCutoff(order.created_at)
+      ? { kind: "trial_captured", userId, paymentId, orderId, amountPaise: amount, paidAt } : null;
   }
   if (body.event === "subscription.charged" && subscription && payment) {
     const subscriptionId = string(subscription.id); const paymentId = string(payment.id); const plan = string(subscriptionNotes?.plan); const amount = number(payment.amount);

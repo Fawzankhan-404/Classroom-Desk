@@ -96,7 +96,8 @@ describe("Classroom Desk SaaS rules", () => {
     expect(() => assertCanPerform({ role: "SUPPORT_ADMIN" }, "revoke_access")).toThrow("admin_permission_required");
   });
   it("classifies only correlated Razorpay payment events", () => {
-    expect(parseRazorpayEvent({ event: "payment.captured", payload: { payment: { entity: { id: "pay_1", amount: 900, currency:"INR",status:"captured",created_at:Math.floor(now.getTime()/1000),notes: { user_id: "u", kind: "trial" } } } } }, now)).toMatchObject({ kind: "trial_captured", userId: "u", amountPaise: 900 });
+    const orderCreatedAt = Math.floor(Date.parse(CAMPAIGN_END_ISO) / 1000);
+    expect(parseRazorpayEvent({ event: "payment.captured", payload: { payment: { entity: { id: "pay_1", order_id:"order_1", amount: 900, currency:"INR",status:"captured",created_at:Math.floor(now.getTime()/1000),notes: { user_id: "u", kind: "trial" } } }, order: { entity: { id:"order_1", amount:900, currency:"INR", created_at:orderCreatedAt, notes:{ user_id:"u", kind:"trial", product:"classroom_desk_trial" } } } } }, now)).toMatchObject({ kind: "trial_captured", userId: "u", amountPaise: 900 });
     expect(parseRazorpayEvent({ event: "payment.captured", payload: { payment: { entity: { id: "pay_2", amount: 900, notes: {} } } } }, now)).toBeNull();
     expect(parseRazorpayEvent({ event: "payment.captured", payload: { payment: { entity: { id: "pay_wrong", amount: 100, notes: { user_id: "u", kind: "trial" } } } } }, now)).toBeNull();
     expect(parseRazorpayEvent({ event: "subscription.pending", payload: { subscription: { entity: { id: "sub_1", notes: { user_id: "u", plan: "student" } } } } }, now)).toMatchObject({ kind: "subscription_failed", subscriptionId: "sub_1" });
