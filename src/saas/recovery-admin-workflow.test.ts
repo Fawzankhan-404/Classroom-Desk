@@ -254,6 +254,7 @@ describe("owner-admin legacy account recovery workflow", () => {
       expect((await fixture.db.query("SELECT profile_ciphertext FROM classroom_desk_users WHERE id=$1", [fixture.legacy.id])).rows).toEqual([{ profile_ciphertext: fixture.ciphertext }]);
       expect((await fixture.db.query("SELECT count(*) AS count FROM classroom_desk_account_recovery_requests")).rows).toEqual([{ count: 0 }]);
       expect((await fixture.db.query("SELECT count(*) AS count FROM classroom_desk_admin_audit WHERE action='reject_legacy_account_recovery'")).rows).toEqual([{ count: 1 }]);
+      expect((await fixture.db.query("SELECT reason FROM classroom_desk_admin_audit WHERE action='reject_legacy_account_recovery'")).rows).toEqual([{ reason: "recovery_rejected:account_mismatch" }]);
     } finally { fixture.sqlite.close(); }
   });
 

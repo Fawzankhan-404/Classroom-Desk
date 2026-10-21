@@ -357,7 +357,7 @@ export class SaaSStore implements WebsiteIdentityStore {
     const now = input.now ?? new Date();
     await this.expireLegacyRecoveryItems(now);
     const claimValues = [input.requestId, input.reviewerId, now];
-    const auditValues = [input.requestId, input.reviewerId, now, `recovery_rejected:${input.reason}`,
+    const auditValues = [input.requestId, input.reviewerId, now, input.reason,
       JSON.stringify({ intakeId: input.requestId, status: "submitted" }),
       JSON.stringify({ status: "rejected", reason: input.reason })];
     try { await this.recoveryBatch([
