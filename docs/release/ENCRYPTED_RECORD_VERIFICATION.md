@@ -40,7 +40,7 @@ the environment variable through the owner-approved local secret mechanism,
 then run:
 
 ```powershell
-node scripts/verify-encrypted-records.mjs C:\protected\classroom-desk-encrypted-snapshot.json
+node scripts/verify-encrypted-records.mjs <protected-snapshot.json>
 ```
 
 The script does not export records, contact Cloudflare, alter a database, or

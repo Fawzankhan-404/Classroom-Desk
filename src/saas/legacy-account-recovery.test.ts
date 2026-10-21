@@ -11,7 +11,7 @@ import { SaaSProfileCipher } from "./privacy.js";
 
 function isolatedD1(): { sqlite: DatabaseSync; db: D1SqlDatabase } {
   const sqlite = new DatabaseSync(":memory:");
-  for (let version = 1; version <= 13; version += 1) {
+  for (let version = 1; version <= 14; version += 1) {
     const name = String(version).padStart(4, "0");
     const file = version === 1 ? "0001_classroom_desk.sql"
       : version === 2 ? "0002_d1_link_claims.sql"
@@ -25,7 +25,8 @@ function isolatedD1(): { sqlite: DatabaseSync; db: D1SqlDatabase } {
       : version === 10 ? "0010_user_experience_preferences.sql"
       : version === 11 ? "0011_subscription_creation_reservations.sql"
       : version === 12 ? "0012_payment_refund_totals.sql"
-      : "0013_legacy_account_recovery.sql";
+      : version === 13 ? "0013_legacy_account_recovery.sql"
+      : "0014_legacy_account_recovery_review.sql";
     sqlite.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), "utf8"));
     void name;
   }

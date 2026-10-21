@@ -40,7 +40,10 @@ function sqliteD1(options: {
   if (options.includeExperienceMigration !== false) sqlite.exec(readFileSync(new URL("../../migrations/0010_user_experience_preferences.sql", import.meta.url), "utf8"));
   if (options.includeSubscriptionCreationMigration !== false) sqlite.exec(readFileSync(new URL("../../migrations/0011_subscription_creation_reservations.sql", import.meta.url), "utf8"));
   if (options.includeRefundTotalsMigration !== false) sqlite.exec(readFileSync(new URL("../../migrations/0012_payment_refund_totals.sql", import.meta.url), "utf8"));
-  if (options.includeLegacyAccountRecoveryMigration !== false) sqlite.exec(readFileSync(new URL("../../migrations/0013_legacy_account_recovery.sql", import.meta.url), "utf8"));
+  if (options.includeLegacyAccountRecoveryMigration !== false) {
+    sqlite.exec(readFileSync(new URL("../../migrations/0013_legacy_account_recovery.sql", import.meta.url), "utf8"));
+    sqlite.exec(readFileSync(new URL("../../migrations/0014_legacy_account_recovery_review.sql", import.meta.url), "utf8"));
+  }
   const statement = (sql: string, values: unknown[] = []) => ({
     all: async <T>() => {
       const query = sqlite.prepare(sql);

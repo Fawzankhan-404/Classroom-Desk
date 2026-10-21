@@ -6,6 +6,7 @@ export type PrivateSaaSProfile = { googleSubject: string; email: string; display
 export class SaaSProfileCipher {
   private readonly key: Buffer;
   private readonly lookupKey: Buffer;
+  private readonly recoveryEvidenceKey: Buffer;
 
   constructor(keyBase64: string | undefined) {
     if (!keyBase64 || !/^[A-Za-z0-9+/]{43}=$/.test(keyBase64)) throw new Error("invalid_profile_encryption_key");
@@ -13,16 +14,43 @@ export class SaaSProfileCipher {
     if (master.length !== 32 || master.toString("base64") !== keyBase64) throw new Error("invalid_profile_encryption_key");
     this.key = Buffer.from(hkdfSync("sha256", master, Buffer.alloc(0), "classroom-saas-profile-v1", 32));
     this.lookupKey = Buffer.from(hkdfSync("sha256", master, Buffer.alloc(0), "classroom-saas-profile-lookups-v1", 32));
+    this.recoveryEvidenceKey = Buffer.from(hkdfSync("sha256", master, Buffer.alloc(0), "classroom-saas-recovery-evidence-v1", 32));
     master.fill(0);
   }
 
   digest(value: string): string { return createHmac("sha256", this.lookupKey).update(value).digest("hex"); }
+  digestRecoveryEvidenceReference(value: string): string { return createHmac("sha256", this.recoveryEvidenceKey).update(value).digest("hex"); }
 
   seal(profile: PrivateSaaSProfile): string {
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", this.key, iv);
     const body = Buffer.concat([cipher.update(JSON.stringify(profile), "utf8"), cipher.final()]);
     return `v1.${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${body.toString("base64url")}`;
+  }
+
+  /** Encrypt a non-sensitive external evidence reference with a purpose-specific key. */
+  sealRecoveryEvidenceReference(value: string): string {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", this.recoveryEvidenceKey, iv);
+    cipher.setAAD(Buffer.from("classroom-recovery-evidence-v1"));
+    const body = Buffer.concat([cipher.update(JSON.stringify({ value }), "utf8"), cipher.final()]);
+    return `r1.${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${body.toString("base64url")}`;
+  }
+
+  openRecoveryEvidenceReference(value: string): string {
+    try {
+      const [version, ivText, tagText, bodyText] = value.split(".");
+      if (version !== "r1" || !ivText || !tagText || !bodyText) throw new Error("invalid recovery evidence envelope");
+      const iv = Buffer.from(ivText, "base64url");
+      const tag = Buffer.from(tagText, "base64url");
+      if (iv.length !== 12 || tag.length !== 16) throw new Error("invalid recovery evidence envelope");
+      const decipher = createDecipheriv("aes-256-gcm", this.recoveryEvidenceKey, iv);
+      decipher.setAAD(Buffer.from("classroom-recovery-evidence-v1"));
+      decipher.setAuthTag(tag);
+      const decoded = JSON.parse(Buffer.concat([decipher.update(Buffer.from(bodyText, "base64url")), decipher.final()]).toString("utf8")) as { value?: unknown };
+      if (typeof decoded.value !== "string") throw new Error("invalid recovery evidence payload");
+      return decoded.value;
+    } catch { throw new Error("recovery_evidence_unavailable"); }
   }
 
   open(value: string): PrivateSaaSProfile {
