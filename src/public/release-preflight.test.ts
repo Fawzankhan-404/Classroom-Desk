@@ -86,6 +86,12 @@ describe("production release preflight", () => {
     expect(evaluateReleasePreflight({ config: goodConfig(), metadata: goodMetadata(), evidence: goodEvidence(), candidateMigrationNames: migrationNames }).decision).toBe("GO");
   });
 
+  it("reports each release gate once, even when labels differ only by punctuation", () => {
+    const report = evaluateReleasePreflight({ config: goodConfig(), metadata: goodMetadata(), evidence: goodEvidence(), candidateMigrationNames: migrationNames });
+    const normalized = report.checks.map(({ gate }) => gate.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim());
+    expect(new Set(normalized).size).toBe(normalized.length);
+  });
+
   it("blocks when owner approval is missing even if all technical gates pass", () => {
     const evidence = goodEvidence();
     evidence.ownerDeploymentApproval = false;
