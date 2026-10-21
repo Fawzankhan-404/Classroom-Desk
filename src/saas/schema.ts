@@ -1,5 +1,5 @@
 /** Additive SaaS schema. Apply with a reviewed direct Neon migration, never at Worker request time. */
-export const SAAS_SCHEMA_VERSION = 5;
+export const SAAS_SCHEMA_VERSION = 7;
 export const SaaSMigration = `
 CREATE TABLE IF NOT EXISTS classroom_desk_users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -20,9 +20,30 @@ ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS profile_ciphertext tex
 ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS google_subject_hash text;
 ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS email_hash text;
 ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS display_name_hash text;
+ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS profile_recovery_status text NOT NULL DEFAULT 'ready' CHECK (profile_recovery_status IN ('ready','recovery_pending'));
 CREATE UNIQUE INDEX IF NOT EXISTS classroom_desk_users_google_subject_hash_idx ON classroom_desk_users(google_subject_hash) WHERE google_subject_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS classroom_desk_users_email_hash_idx ON classroom_desk_users(email_hash) WHERE email_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS classroom_desk_users_display_name_hash_idx ON classroom_desk_users(display_name_hash) WHERE display_name_hash IS NOT NULL;
+CREATE TABLE IF NOT EXISTS classroom_desk_account_recovery_requests (
+  id text PRIMARY KEY NOT NULL,
+  account_id uuid NOT NULL REFERENCES classroom_desk_users(id) ON DELETE RESTRICT,
+  google_subject_hash text NOT NULL,
+  expected_legacy_ciphertext_hash text NOT NULL,
+  proof_method text NOT NULL CHECK (proof_method='independent_manual_review'),
+  proof_reference_hash text NOT NULL,
+  verified_by text NOT NULL,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed','revoked','expired')),
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_desk_recovery_pending_subject_idx ON classroom_desk_account_recovery_requests(google_subject_hash) WHERE status='pending';
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_desk_recovery_pending_account_idx ON classroom_desk_account_recovery_requests(account_id) WHERE status='pending';
+CREATE TABLE IF NOT EXISTS classroom_desk_account_recovery_claims (
+  recovery_id text PRIMARY KEY NOT NULL REFERENCES classroom_desk_account_recovery_requests(id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES classroom_desk_users(id) ON DELETE RESTRICT,
+  completed_at timestamptz NOT NULL
+);
 CREATE TABLE IF NOT EXISTS classroom_desk_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES classroom_desk_users(id) ON DELETE CASCADE,

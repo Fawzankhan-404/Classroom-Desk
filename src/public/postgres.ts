@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { Pool, type QueryResultRow } from "pg";
+import { SaaSProfileCipher } from "../saas/privacy.js";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { PublicAuthStore, GoogleAccountBinding, GoogleFlow, GoogleGrant, InternalCode, AccessRecord, RefreshRecord } from "./store.js";
 
@@ -51,6 +52,7 @@ const schema = [
 export class PostgresPublicAuthStore implements PublicAuthStore {
   private readonly encryptionKey: Buffer;
   private readonly lookupKey: Buffer;
+  private readonly profileCipher: SaaSProfileCipher;
 
   constructor(readonly db: SqlDatabase, keyBase64: string | undefined, readonly tableName = "public_auth_records") {
     if (!keyBase64 || !/^[A-Za-z0-9+/]{43}=$/.test(keyBase64)) throw new Error("PUBLIC_AUTH_ENCRYPTION_KEY_B64 must be a base64-encoded 32-byte key.");
@@ -58,6 +60,7 @@ export class PostgresPublicAuthStore implements PublicAuthStore {
     if (master.length !== 32 || master.toString("base64") !== keyBase64) throw new Error("PUBLIC_AUTH_ENCRYPTION_KEY_B64 must be a base64-encoded 32-byte key.");
     this.encryptionKey = Buffer.from(hkdfSync("sha256", master, Buffer.alloc(0), "classroom-auth-records-v1", 32));
     this.lookupKey = Buffer.from(hkdfSync("sha256", master, Buffer.alloc(0), "classroom-auth-lookups-v1", 32));
+    this.profileCipher = new SaaSProfileCipher(keyBase64);
     master.fill(0);
   }
 
@@ -175,6 +178,7 @@ export class PostgresPublicAuthStore implements PublicAuthStore {
     const bindingOptions = binding ? { binding, bindingTables, conflictTables: mappingTables } : {};
     const grantOptions = { owner: grant.userId, ...bindingOptions };
     const codeOptions = { owner: code.userId, expiresAt: code.expiresAt, ...bindingOptions };
+    const recoveryPlan = binding?.recovery ? this.legacyRecoveryStatements(binding, grant, code, mappingTables, bindingTables) : undefined;
     const linkStatements = binding ? bindingTables.map(table => {
       const sameAccountGuard = bindingTables.map(candidate => `NOT EXISTS (SELECT 1 FROM ${candidate} WHERE website_user_id=$1 AND mcp_user_id<>$2)`).join(" AND ");
       const otherOwnerGuard = mappingTables.map(candidate => `NOT EXISTS (SELECT 1 FROM ${candidate} WHERE mcp_user_id=$2 AND website_user_id<>$1)`).join(" AND ");
@@ -187,17 +191,80 @@ export class PostgresPublicAuthStore implements PublicAuthStore {
       };
     }) : [];
     if (this.db.batch) {
-      await this.db.batch([...linkStatements, this.putStatement("grant", grant.userId, grant, grantOptions), this.putStatement("code", code.code, code, codeOptions)]);
+      await this.db.batch([...(recoveryPlan?.before ?? []), ...linkStatements,
+        this.putStatement("grant", grant.userId, grant, grantOptions),
+        this.putStatement("code", code.code, code, codeOptions),
+        ...(recoveryPlan ? [recoveryPlan.commit] : [])]);
       if (binding) await this.assertBindingPersisted(binding, bindingTables, mappingTables);
       if (!(await this.getCode(code.code)) || !(await this.getGrant(grant.userId))) throw new Error("oauth_grant_or_code_persistence_failed");
       return;
     }
     await this.db.transaction(async (tx) => {
+      for (const statement of recoveryPlan?.before ?? []) await tx.query(statement.sql, statement.values);
       for (const statement of linkStatements) await tx.query(statement.sql, statement.values);
       if (binding) await this.assertBindingPersisted(binding, bindingTables, mappingTables, tx);
       await this.put("grant", grant.userId, grant, grantOptions, tx);
       await this.put("code", code.code, code, codeOptions, tx);
+      if (recoveryPlan) await tx.query(recoveryPlan.commit.sql, recoveryPlan.commit.values);
     });
+  }
+
+  /**
+   * Re-encrypt a legacy account only in the same atomic unit that stores the
+   * freshly authorized Google grant and MCP code. The final constrained claim
+   * forces the D1 batch/SQL transaction to roll back if any guard fails.
+   */
+  private legacyRecoveryStatements(
+    binding: GoogleAccountBinding,
+    grant: GoogleGrant,
+    code: InternalCode,
+    mappingTables: readonly AccountMappingTable[],
+    bindingTables: readonly AccountMappingTable[],
+  ) {
+    const recovery = binding.recovery!;
+    const now = new Date();
+    const grantHash = this.hash(grant.userId);
+    const codeHash = this.hash(code.code);
+    const profileCiphertext = this.profileCipher.seal(recovery.profile);
+    const markerSubject = `enc:${recovery.googleSubjectHash}`;
+    const markerEmail = `enc:${recovery.emailHash}`;
+    const markerDisplayName = `enc:${recovery.displayNameHash}`;
+    const values = [binding.accountId, recovery.requestId, binding.mcpUserId, now,
+      recovery.googleSubjectHash, recovery.profile.googleSubject, profileCiphertext,
+      recovery.emailHash, recovery.displayNameHash, grantHash, codeHash,
+      recovery.expectedLegacyCiphertext, markerSubject, markerEmail, markerDisplayName,
+      recovery.expectedLegacyCiphertextHash];
+    const duplicateIdentity = `EXISTS (SELECT 1 FROM classroom_desk_users WHERE id<>$1 AND (google_subject_hash=$5 OR google_subject=$6))`;
+    const updateProfile = {
+      sql: `UPDATE classroom_desk_users SET google_subject=$13,email=$14,display_name=$15,
+        google_subject_hash=$5,email_hash=$8,display_name_hash=$9,profile_ciphertext=$7,profile_recovery_status='ready'
+        WHERE id=$1 AND status='active' AND profile_recovery_status='recovery_pending'
+          AND profile_ciphertext=$12 AND NOT ${duplicateIdentity} RETURNING id`,
+      values: values.slice(0, 15),
+    };
+    const completeRequest = {
+      sql: `UPDATE classroom_desk_account_recovery_requests SET status='completed',completed_at=$4
+        WHERE id=$2 AND account_id=$1 AND google_subject_hash=$5 AND expected_legacy_ciphertext_hash=$16 AND status='pending' AND expires_at>$4
+          AND EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$1 AND profile_recovery_status='ready' AND profile_ciphertext=$7)
+        RETURNING id`,
+      values,
+    };
+    const guards = [
+      `EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$1 AND status='active' AND profile_recovery_status='ready' AND profile_ciphertext=$7 AND google_subject_hash=$5 AND email_hash=$8 AND display_name_hash=$9)`,
+      `EXISTS (SELECT 1 FROM classroom_desk_account_recovery_requests WHERE id=$2 AND account_id=$1 AND google_subject_hash=$5 AND expected_legacy_ciphertext_hash=$16 AND status='completed')`,
+      `NOT ${duplicateIdentity}`,
+      ...bindingTables.map(table => `EXISTS (SELECT 1 FROM ${table} WHERE website_user_id=$1 AND mcp_user_id=$3)`),
+      ...mappingTables.map(table => `NOT EXISTS (SELECT 1 FROM ${table} WHERE mcp_user_id=$3 AND website_user_id<>$1)`),
+      `EXISTS (SELECT 1 FROM ${this.table()} WHERE kind='grant' AND key_hash=$10 AND owner_id=$3)`,
+      `EXISTS (SELECT 1 FROM ${this.table()} WHERE kind='code' AND key_hash=$11 AND owner_id=$3)`,
+    ].join(" AND ");
+    const commit = {
+      sql: `INSERT INTO classroom_desk_account_recovery_claims (recovery_id,account_id,completed_at)
+        SELECT $2,$1,$4 WHERE ${guards}
+        UNION ALL SELECT NULL,NULL,NULL WHERE NOT (${guards}) RETURNING recovery_id`,
+      values,
+    };
+    return { before: [updateProfile, completeRequest], commit };
   }
 
   private async assertBindingPersisted(binding: GoogleAccountBinding, bindingTables: readonly AccountMappingTable[], conflictTables: readonly AccountMappingTable[], db: SqlConnection = this.db): Promise<void> {
