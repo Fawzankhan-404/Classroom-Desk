@@ -34,20 +34,25 @@ in-place database migration tool.
 
 ## Owner-invoked procedure
 
-Use a protected offline copy and a local file with restrictive permissions.
-Do not put a key in command history, command arguments, a report, or a log. Set
-the environment variable through the owner-approved local secret mechanism,
-then run:
+Use a protected offline copy and a local Windows session for the identity that
+owns the approved Credential Manager entry. The CLI reads a named Generic
+Credential from that user's Credential Manager through a captured local
+process pipe. It does not accept a key through a command argument or
+environment variable. The credential target is an identifier, not the key.
+Run:
 
 ```powershell
-node scripts/verify-encrypted-records.mjs <protected-snapshot.json>
+node scripts/verify-encrypted-records.mjs <protected-snapshot.json> --windows-credential-target <credential-target>
 ```
 
 The script does not export records, contact Cloudflare, alter a database, or
 write the snapshot. Remove the local snapshot using the approved protected-data
-handling procedure after verification. This command has not been run against
-production records. Synthetic-key tests do not establish that the production
-key is available or compatible.
+handling procedure after verification. It prints only PASS/FAIL and aggregate
+record counts. The key remains in process memory and JavaScript strings cannot
+be reliably zeroized. Do not run the verifier under shell tracing, a PowerShell
+transcript, or a debugger that captures process memory. This command has not
+been run against production records. Synthetic-key tests do not establish
+that the production key is available or compatible.
 
 The snapshot must be prepared by an independently approved procedure that
 returns only the encrypted `profile_ciphertext` and OAuth envelope fields; it
