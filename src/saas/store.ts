@@ -43,6 +43,15 @@ export type LegacyRecoveryApprovalInput = {
   requestId: string; reviewerId: string; evidenceType: LegacyRecoveryEvidenceType; evidenceReference: string;
   confirmedIndependentEvidence: boolean; now?: Date;
 };
+export type ProfileStorageCompatibilityReport = {
+  profilesChecked: number;
+  markerMatches: number;
+  markerMismatches: number;
+  missingMarkers: number;
+  missingSubjectHashes: number;
+  decryptionFailures: number;
+  identityConsistencyFailures: number;
+};
 const RECOVERY_SESSION_TTL_MS = 30 * 60 * 1000;
 const RECOVERY_INTAKE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RECOVERY_APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -121,28 +130,69 @@ export class SaaSStore implements WebsiteIdentityStore {
     return { id: String(row.id), googleSubject: profile?.googleSubject ?? "", email: profile?.email ?? "Profile unavailable", displayName: profile?.displayName ?? "Profile unavailable", role: row.role, status: row.status, createdAt: new Date(row.created_at), lastLoginAt: row.last_login_at ? new Date(row.last_login_at) : null };
   }
 
+  async inspectProfileStorageCompatibility(maxRows = 10_000): Promise<ProfileStorageCompatibilityReport> {
+    if (!this.profileCipher) throw new Error("profile_encryption_configuration_unavailable");
+    const report: ProfileStorageCompatibilityReport = {
+      profilesChecked: 0, markerMatches: 0, markerMismatches: 0, missingMarkers: 0,
+      missingSubjectHashes: 0, decryptionFailures: 0, identityConsistencyFailures: 0,
+    };
+    const result = await this.db.query<{ id: string; google_subject: string | null; email: string; display_name: string; profile_ciphertext: string; google_subject_hash: string | null; email_hash: string | null; display_name_hash: string | null }>(
+      `SELECT id,google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users WHERE profile_ciphertext IS NOT NULL LIMIT $1`, [maxRows + 1]);
+    if (result.rows.length > maxRows) throw new Error("profile_storage_validation_limit");
+    const detachedIds = result.rows.filter(row => row.google_subject === null && row.google_subject_hash === null).map(row => row.id);
+    const detachedByAccount = new Map<string, { google_subject: string | null; google_subject_hash: string | null }[]>();
+    if (detachedIds.length) {
+      await this.requireDetachedIdentitySchema();
+      const placeholders = detachedIds.map((_, index) => `$${index + 1}`).join(",");
+      const archived = await this.db.query<{ account_id: string; google_subject: string | null; google_subject_hash: string | null }>(
+        `SELECT account_id,google_subject,google_subject_hash FROM classroom_desk_detached_google_identities WHERE account_id IN (${placeholders})`, detachedIds);
+      for (const row of archived.rows) {
+        const accountRows = detachedByAccount.get(row.account_id) ?? [];
+        accountRows.push({ google_subject: row.google_subject, google_subject_hash: row.google_subject_hash });
+        detachedByAccount.set(row.account_id, accountRows);
+      }
+    }
+    const equalHash = (expected: string, actual: string | null) => {
+      if (!actual || !/^[a-f0-9]{64}$/i.test(actual)) return false;
+      return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(actual, "hex"));
+    };
+    const markerMatches = (actual: string | null, plain: string, hash: string) => actual === plain || actual === `enc:${hash}`;
+    for (const row of result.rows) {
+      report.profilesChecked += 1;
+      if (row.google_subject_hash === null) report.missingSubjectHashes += 1;
+      let failed = false;
+      let profile: PrivateSaaSProfile;
+      try { profile = this.profileCipher.open(row.profile_ciphertext); }
+      catch { report.decryptionFailures += 1; report.identityConsistencyFailures += 1; continue; }
+      const subject = this.profileCipher.digest(profile.googleSubject);
+      const email = this.profileCipher.digest(profile.email.toLowerCase());
+      const display = this.profileCipher.digest(profile.displayName);
+      const active = row.google_subject !== null || row.google_subject_hash !== null;
+      const archived = !active ? detachedByAccount.get(row.id) : undefined;
+      const subjectMarker = active ? row.google_subject : archived?.length === 1 ? archived[0]!.google_subject : null;
+      const subjectHash = active ? row.google_subject_hash : archived?.length === 1 ? archived[0]!.google_subject_hash : null;
+      if (subjectMarker === null) report.missingMarkers += 1;
+      else if (markerMatches(subjectMarker, profile.googleSubject, subject)) report.markerMatches += 1;
+      else { report.markerMismatches += 1; failed = true; }
+      const hasSubjectIdentity = subjectMarker !== null || subjectHash !== null;
+      if (!hasSubjectIdentity || (archived && archived.length !== 1)
+        || (subjectHash !== null && !equalHash(subject, subjectHash))
+        || (row.email_hash === null || !equalHash(email, row.email_hash))
+        || (row.display_name_hash === null || !equalHash(display, row.display_name_hash))
+        || (row.email !== null && !markerMatches(row.email, profile.email, email))
+        || (row.display_name !== null && !markerMatches(row.display_name, profile.displayName, display))) failed = true;
+      if (failed) report.identityConsistencyFailures += 1;
+    }
+    return report;
+  }
+
   async verifyProfileStorageCompatibility(maxRows = 10_000): Promise<number> {
     if (!this.profileCipher) throw new Error("profile_encryption_configuration_unavailable");
     if (!this.profileCompatibilityCheck) this.profileCompatibilityCheck = (async () => {
-      const result = await this.db.query<{ google_subject: string; email: string; display_name: string; profile_ciphertext: string; google_subject_hash: string | null; email_hash: string | null; display_name_hash: string | null }>(
-        `SELECT google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users WHERE profile_ciphertext IS NOT NULL LIMIT $1`, [maxRows + 1]);
-      if (result.rows.length > maxRows) throw new Error("profile_storage_validation_limit");
-      const equalHash = (expected: string, actual: string | null) => {
-        if (!actual || !/^[a-f0-9]{64}$/i.test(actual)) return false;
-        return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(actual, "hex"));
-      };
-      for (const row of result.rows) {
-        const profile = this.profileCipher!.open(row.profile_ciphertext);
-        const subject = this.profileCipher!.digest(profile.googleSubject);
-        const email = this.profileCipher!.digest(profile.email.toLowerCase());
-        const display = this.profileCipher!.digest(profile.displayName);
-      const markerMatches = (actual: string | null, plain: string, hash: string) => actual === null || actual === plain || actual === `enc:${hash}`;
-        if (!equalHash(subject, row.google_subject_hash) || !equalHash(email, row.email_hash) || !equalHash(display, row.display_name_hash)
-          || !markerMatches(row.google_subject, profile.googleSubject, subject)
-          || !markerMatches(row.email, profile.email, email)
-          || !markerMatches(row.display_name, profile.displayName, display)) throw new Error("profile_storage_compatibility_failed");
-      }
-      return result.rows.length;
+      const report = await this.inspectProfileStorageCompatibility(maxRows);
+      if (report.decryptionFailures) throw new Error("stored_profile_unavailable");
+      if (report.identityConsistencyFailures) throw new Error("profile_storage_compatibility_failed");
+      return report.profilesChecked;
     })();
     try { return await this.profileCompatibilityCheck; }
     catch (error) { this.profileCompatibilityCheck = undefined; throw error; }
