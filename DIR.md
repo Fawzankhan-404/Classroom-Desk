@@ -48,3 +48,21 @@ synthetic fixture counts (5 users and 2 payments) were preserved, and
 `PRAGMA foreign_key_check` returned no violations. This did not use production
 data or verify production backup restoration, v22 behavior parity, or the
 production encryption key. No Worker was deployed.
+
+### Detached Google identity reset candidate — 2026-10-22
+
+Migrations 0015–0016 and the detached-identity OAuth changes are committed in
+the release-readiness branch. Migration 0015 makes active Google bindings
+nullable and unique only when present. Migration 0016 has exact aggregate
+preconditions and archives bindings before the authorized authentication
+reset. The protected October 22 copy rehearsal preserved 11 historical user
+rows, all 11 trial rows, the subscription, 6 payments, 16 webhook events, and
+13 OAuth clients; the promised October 22–29 trials remained active. The
+rehearsal also confirmed the fail-closed count guard and no foreign-key errors.
+Wrangler local D1 applied 0015; 0016 correctly remained blocked on an empty
+database. Production still runs Worker v24, and migrations 0015–0016 are
+pending there. No production deployment or D1 write occurred. Exact v24 source
+compatibility and production encrypted-profile compatibility remain
+unverified release gates. A readable detached profile can use the same
+recovery-only Google sign-in and independent owner-review flow; restoration
+occurs only after a matching archived subject and a fresh OAuth callback.

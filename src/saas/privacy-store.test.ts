@@ -25,7 +25,7 @@ describe("encrypted profile storage", () => {
     const row = (await db.query<{ google_subject: string; email: string; display_name: string; profile_ciphertext: string }>(
       "SELECT google_subject,email,display_name,profile_ciphertext FROM classroom_desk_users WHERE id=$1", [user.id],
     )).rows[0]!;
-    expect(row.google_subject).toMatch(/^enc:[a-f0-9]{64}$/);
+    expect(row.google_subject).toBeNull();
     expect(row.email).toMatch(/^enc:[a-f0-9]{64}$/);
     expect(row.display_name).toMatch(/^enc:[a-f0-9]{64}$/);
     expect(row.profile_ciphertext).toMatch(/^v1\./);

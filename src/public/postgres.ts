@@ -226,17 +226,16 @@ export class PostgresPublicAuthStore implements PublicAuthStore {
     const grantHash = this.hash(grant.userId);
     const codeHash = this.hash(code.code);
     const profileCiphertext = this.profileCipher.seal(recovery.profile);
-    const markerSubject = `enc:${recovery.googleSubjectHash}`;
     const markerEmail = `enc:${recovery.emailHash}`;
     const markerDisplayName = `enc:${recovery.displayNameHash}`;
     const values = [binding.accountId, recovery.requestId, binding.mcpUserId, now,
       recovery.googleSubjectHash, recovery.profile.googleSubject, profileCiphertext,
       recovery.emailHash, recovery.displayNameHash, grantHash, codeHash,
-      recovery.expectedLegacyCiphertext, markerSubject, markerEmail, markerDisplayName,
+      recovery.expectedLegacyCiphertext, null, markerEmail, markerDisplayName,
       recovery.expectedLegacyCiphertextHash];
     const duplicateIdentity = `EXISTS (SELECT 1 FROM classroom_desk_users WHERE id<>$1 AND (google_subject_hash=$5 OR google_subject=$6))`;
     const updateProfile = {
-      sql: `UPDATE classroom_desk_users SET google_subject=$13,email=$14,display_name=$15,
+      sql: `UPDATE classroom_desk_users SET google_subject=NULL,email=$14,display_name=$15,
         google_subject_hash=$5,email_hash=$8,display_name_hash=$9,profile_ciphertext=$7,profile_recovery_status='ready'
         WHERE id=$1 AND status='active' AND profile_recovery_status='recovery_pending'
           AND profile_ciphertext=$12 AND NOT ${duplicateIdentity} RETURNING id`,

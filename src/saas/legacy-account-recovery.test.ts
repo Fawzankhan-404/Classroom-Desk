@@ -11,7 +11,7 @@ import { SaaSProfileCipher } from "./privacy.js";
 
 function isolatedD1(): { sqlite: DatabaseSync; db: D1SqlDatabase } {
   const sqlite = new DatabaseSync(":memory:");
-  for (let version = 1; version <= 14; version += 1) {
+  for (let version = 1; version <= 15; version += 1) {
     const name = String(version).padStart(4, "0");
     const file = version === 1 ? "0001_classroom_desk.sql"
       : version === 2 ? "0002_d1_link_claims.sql"
@@ -26,7 +26,8 @@ function isolatedD1(): { sqlite: DatabaseSync; db: D1SqlDatabase } {
       : version === 11 ? "0011_subscription_creation_reservations.sql"
       : version === 12 ? "0012_payment_refund_totals.sql"
       : version === 13 ? "0013_legacy_account_recovery.sql"
-      : "0014_legacy_account_recovery_review.sql";
+      : version === 14 ? "0014_legacy_account_recovery_review.sql"
+      : "0015_detached_google_identities.sql";
     sqlite.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), "utf8"));
     void name;
   }
@@ -117,7 +118,7 @@ describe("legacy encrypted account recovery", () => {
       expect(row.profile_ciphertext).not.toBe(original);
       expect(row.profile_recovery_status).toBe("ready");
       expect(new SaaSProfileCipher(newKey).open(row.profile_ciphertext)).toEqual(identity);
-      expect(row.google_subject).toMatch(/^enc:[a-f0-9]{64}$/);
+      expect(row.google_subject).toBeNull();
       expect((await db.query("SELECT status FROM classroom_desk_account_recovery_requests WHERE id=$1", [request.requestId])).rows).toEqual([{ status: "completed" }]);
       expect((await db.query("SELECT recovery_id,account_id FROM classroom_desk_account_recovery_claims WHERE recovery_id=$1", [request.requestId])).rows).toEqual([{ recovery_id: request.requestId, account_id: user.id }]);
       expect(await auth.getGrant(binding.mcpUserId)).toMatchObject({ refreshToken: "synthetic-fresh-google-refresh", googleSubject: identity.googleSubject });

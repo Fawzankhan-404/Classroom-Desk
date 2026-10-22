@@ -25,6 +25,7 @@ function migrationName(version: number): string {
     "0007_saas_profile_privacy.sql", "0008_unified_oauth_accounts.sql", "0009_dashboard_preference.sql",
     "0010_user_experience_preferences.sql", "0011_subscription_creation_reservations.sql",
     "0012_payment_refund_totals.sql", "0013_legacy_account_recovery.sql", "0014_legacy_account_recovery_review.sql",
+    "0015_detached_google_identities.sql",
   ];
   const name = names[version - 1];
   if (!name) throw new Error("test_migration_missing");
@@ -33,7 +34,7 @@ function migrationName(version: number): string {
 
 function isolatedD1() {
   const sqlite = new DatabaseSync(":memory:");
-  for (let version = 1; version <= 14; version += 1) {
+  for (let version = 1; version <= 15; version += 1) {
     sqlite.exec(readFileSync(new URL(`../../migrations/${migrationName(version)}`, import.meta.url), "utf8"));
   }
   const statement = (sql: string, values: unknown[] = []) => ({
@@ -221,7 +222,7 @@ describe("owner-admin legacy account recovery workflow", () => {
       expect(recovered.id).toBe(fixture.legacy.id);
       expect(recovered.profile_ciphertext).not.toBe(fixture.ciphertext);
       expect(recovered.profile_recovery_status).toBe("ready");
-      expect(recovered.google_subject).toMatch(/^enc:[a-f0-9]{64}$/);
+      expect(recovered.google_subject).toBeNull();
       expect((await fixture.db.query("SELECT status FROM classroom_desk_account_recovery_requests WHERE id=$1", [approvalRequest.id])).rows).toEqual([{ status: "completed" }]);
       expect((await fixture.db.query("SELECT recovery_id,account_id FROM classroom_desk_account_recovery_claims WHERE recovery_id=$1", [approvalRequest.id])).rows).toEqual([{ recovery_id: approvalRequest.id, account_id: fixture.legacy.id }]);
       expect(await auth.getGrant(binding.mcpUserId)).toMatchObject({ refreshToken: "synthetic-fresh-refresh", googleSubject: recoveryIdentity.googleSubject });
