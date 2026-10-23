@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { AttachmentAuthorizationStore } from "./v2/attachments.js";
-import { AttachmentContentError, GoogleDriveAttachmentReader } from "./v2/attachment-content.js";
+import { AttachmentContentError, GoogleDriveAttachmentReader, MAX_ATTACHMENT_TEXT, MAX_PDF_PAGES } from "./v2/attachment-content.js";
 import { prepareTeacherAttachment, readTeacherAttachment } from "./v2/attachment-workflow.js";
 import { buildPickerUrl } from "./v2/urls.js";
 
@@ -13,6 +13,31 @@ function driveFor(mimeType: string, body: string | Buffer, metadata: Record<stri
     : { data: { id: "teacher-file", name: "Inheritance notes.txt", mimeType, size: String(Buffer.byteLength(body)), trashed: false, ...metadata } });
   const exportFile = vi.fn(async () => ({ data: Readable.from([body]) }));
   return { files: { get, export: exportFile } } as any;
+}
+
+function syntheticTextPdf(text: string, pageCount = 1): Buffer {
+  const objects = ["%PDF-1.4\n"];
+  const offsets: number[] = [];
+  const addObject = (id: number, body: string) => {
+    offsets[id] = objects.join("").length;
+    objects.push(`${id} 0 obj\n${body}\nendobj\n`);
+  };
+  const encodedText = Array.from(new TextEncoder().encode(text), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  // Hex-string text is intentionally unsupported by the literal-only fallback;
+  // this assertion therefore proves the PDF.js parser path was used.
+  const content = `BT /F1 12 Tf 72 720 Td <${encodedText}> Tj ET`;
+  addObject(1, "<</Type/Catalog/Pages 2 0 R>>");
+  const pageIds = Array.from({ length: pageCount }, (_, index) => index + 5);
+  addObject(2, `<</Type/Pages/Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}]/Count ${pageCount}>>`);
+  addObject(3, `<</Length ${content.length}>>\nstream\n${content}\nendstream`);
+  addObject(4, "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>");
+  for (const id of pageIds) addObject(id, `<</Type/Page/Parent 2 0 R/MediaBox [0 0 612 792]/Resources <</Font <</F1 4 0 R>>>>/Contents 3 0 R>>`);
+  const xrefOffset = objects.join("").length;
+  const objectCount = pageCount + 5;
+  objects.push(`xref\n0 ${objectCount}\n0000000000 65535 f \n`);
+  for (let id = 1; id < objectCount; id += 1) objects.push(`${String(offsets[id]).padStart(10, "0")} 00000 n \n`);
+  objects.push(`trailer\n<</Size ${objectCount}/Root 1 0 R>>\nstartxref\n${xrefOffset}\n%%EOF`);
+  return Buffer.from(objects.join(""), "latin1");
 }
 
 function betaClients(options: { now?: () => number; mimeType?: string; body?: string | Buffer; subject?: string } = {}) {
@@ -76,6 +101,23 @@ describe("V2 explicit teacher attachment authorization", () => {
 });
 
 describe("V2 authorized attachment content", () => {
+  it("extracts text from a PDF using the Worker-compatible PDF.js build", async () => {
+    const pdf = syntheticTextPdf("Synthetic worker PDF text");
+    const result = await new GoogleDriveAttachmentReader(driveFor("application/pdf", pdf)).read(attachment);
+    expect(result.kind).toBe("text");
+    if (result.kind === "text") expect(result.text).toContain("Synthetic worker PDF text");
+  });
+
+  it("bounds PDF extraction by page count and output length", async () => {
+    const pdf = syntheticTextPdf("bounded page text ".repeat(20), MAX_PDF_PAGES + 1);
+    const result = await new GoogleDriveAttachmentReader(driveFor("application/pdf", pdf)).read(attachment);
+    expect(result.kind).toBe("text");
+    if (result.kind === "text") {
+      expect(result.text.length).toBeLessThanOrEqual(MAX_ATTACHMENT_TEXT);
+      expect(result.truncated).toBe(true);
+    }
+  });
+
   it.each([
     ["application/vnd.google-apps.document", "text/plain"],
     ["application/vnd.google-apps.presentation", "text/plain"],

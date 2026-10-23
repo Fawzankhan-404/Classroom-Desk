@@ -37,6 +37,7 @@ describe("SaaS schema upgrade compatibility", () => {
 
     const indexes = await pg.query<{ indexname: string }>(`SELECT indexname FROM pg_indexes
       WHERE tablename='classroom_desk_users' AND indexname IN (
+        'classroom_desk_users_google_subject_active_idx',
         'classroom_desk_users_google_subject_hash_idx',
         'classroom_desk_users_email_hash_idx',
         'classroom_desk_users_display_name_hash_idx'
@@ -44,11 +45,12 @@ describe("SaaS schema upgrade compatibility", () => {
     expect(indexes.rows.map((row) => row.indexname).sort()).toEqual([
       "classroom_desk_users_display_name_hash_idx",
       "classroom_desk_users_email_hash_idx",
+      "classroom_desk_users_google_subject_active_idx",
       "classroom_desk_users_google_subject_hash_idx",
     ]);
 
     await pg.exec(SaaSMigration);
-    expect(SAAS_SCHEMA_VERSION).toBe(8);
+    expect(SAAS_SCHEMA_VERSION).toBe(9);
     expect((await pg.query(`SELECT google_subject FROM classroom_desk_users`)).rows).toEqual([{ google_subject: "synthetic-legacy-subject" }]);
     expect((await pg.query<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_name='classroom_desk_payments' AND column_name='amount_refunded_paise'`)).rows).toEqual([{ column_name: "amount_refunded_paise" }]);
     const operationColumns=await pg.query<{table_name:string;column_name:string}>(`SELECT table_name,column_name FROM information_schema.columns WHERE (table_name,column_name) IN (('classroom_desk_entitlement_grants','last_operation_id'),('classroom_desk_payments','last_operation_id'),('classroom_desk_referrals','qualified_operation_id')) ORDER BY table_name,column_name`);

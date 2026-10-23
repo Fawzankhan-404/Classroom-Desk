@@ -24,6 +24,7 @@ function sqliteD1(options: {
   includeSubscriptionCreationMigration?: boolean;
   includeRefundTotalsMigration?: boolean;
   includeLegacyAccountRecoveryMigration?: boolean;
+  includeDetachedIdentityMigration?: boolean;
 } = {}) {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(readFileSync(new URL("../../migrations/0001_classroom_desk.sql", import.meta.url), "utf8"));
@@ -43,6 +44,11 @@ function sqliteD1(options: {
   if (options.includeLegacyAccountRecoveryMigration !== false) {
     sqlite.exec(readFileSync(new URL("../../migrations/0013_legacy_account_recovery.sql", import.meta.url), "utf8"));
     sqlite.exec(readFileSync(new URL("../../migrations/0014_legacy_account_recovery_review.sql", import.meta.url), "utf8"));
+  }
+  if (options.includeDetachedIdentityMigration !== false && options.includePublicOAuthMigrations !== false
+    && options.includeExperienceMigration !== false && options.includeSubscriptionCreationMigration !== false
+    && options.includeRefundTotalsMigration !== false && options.includeLegacyAccountRecoveryMigration !== false) {
+    sqlite.exec(readFileSync(new URL("../../migrations/0015_detached_google_identities.sql", import.meta.url), "utf8"));
   }
   const statement = (sql: string, values: unknown[] = []) => ({
     all: async <T>() => {
@@ -301,7 +307,7 @@ describe("D1 migration and account-link atomicity", () => {
         `SELECT id,google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users ORDER BY id`);
       expect(encrypted.rows).toHaveLength(5);
       for (const row of encrypted.rows) {
-        expect(row.google_subject).toMatch(/^enc:[a-f0-9]{64}$/);
+        expect(row.google_subject).toBeNull();
         expect(row.email).toMatch(/^enc:[a-f0-9]{64}$/);
         expect(row.display_name).toMatch(/^enc:[a-f0-9]{64}$/);
         expect(row.profile_ciphertext).toMatch(/^v1\./);
@@ -361,7 +367,7 @@ describe("D1 migration and account-link atomicity", () => {
       expect(after.rows).toHaveLength(5);
       expect(after.rows.filter(row => row.profile_ciphertext !== null)).toHaveLength(1);
       const migrated = after.rows.find(row => row.id === target.id)!;
-      expect(migrated.google_subject).toMatch(/^enc:/);
+      expect(migrated.google_subject).toBeNull();
       expect(migrated.email).toMatch(/^enc:/);
       expect(migrated.display_name).toMatch(/^enc:/);
       expect(migrated.profile_ciphertext).toMatch(/^v1\./);
@@ -437,7 +443,7 @@ describe("D1 migration and account-link atomicity", () => {
       expect(await store.backfillLegacyProfiles(10, "synthetic-legacy-case-")).toBe(1);
       const rows = await database.query<{ google_subject: string; profile_ciphertext: string | null }>(`SELECT google_subject,profile_ciphertext FROM classroom_desk_users ORDER BY id`);
       expect(rows.rows[0]).toMatchObject({ google_subject: "real-stage-subject-redacted", profile_ciphertext: null });
-      expect(rows.rows[1]).toMatchObject({ google_subject: expect.stringMatching(/^enc:/), profile_ciphertext: expect.stringMatching(/^v1\./) });
+      expect(rows.rows[1]).toMatchObject({ google_subject: null, profile_ciphertext: expect.stringMatching(/^v1\./) });
       expect(await store.backfillLegacyProfiles(10, "synthetic-legacy-case-")).toBe(0);
       await expect(store.backfillLegacyProfiles(10, "synthetic%_")).rejects.toThrow("profile_backfill_prefix_invalid");
     } finally { sqlite.close(); }
@@ -544,7 +550,7 @@ describe("D1 migration and account-link atomicity", () => {
          FROM classroom_desk_users WHERE id=$1`, [userId]);
       expect(stored.rows[0]).toMatchObject({
         id: userId,
-        google_subject: expect.stringMatching(/^enc:/),
+        google_subject: null,
         email: expect.stringMatching(/^enc:/),
         display_name: expect.stringMatching(/^enc:/),
         profile_ciphertext: expect.stringMatching(/^v1\./),
@@ -580,7 +586,7 @@ describe("D1 migration and account-link atomicity", () => {
       const user = await userStore.upsertGoogleIdentity({ ...expectedIdentity, now: new Date() });
       await database.query(`UPDATE classroom_desk_trials SET status='active',starts_at=$2,expires_at=$3 WHERE user_id=$1`, [user.id, new Date(Date.now() - 60_000), new Date(Date.now() + 60_000)]);
       const privateRow = await database.query<{ google_subject: string; email: string; display_name: string; profile_ciphertext: string; google_subject_hash: string }>(`SELECT google_subject,email,display_name,profile_ciphertext,google_subject_hash FROM classroom_desk_users WHERE id=$1`, [user.id]);
-      expect(privateRow.rows[0]).toMatchObject({ google_subject: expect.stringMatching(/^enc:/), email: expect.stringMatching(/^enc:/), display_name: expect.stringMatching(/^enc:/), profile_ciphertext: expect.stringMatching(/^v1\./), google_subject_hash: expect.stringMatching(/^[a-f0-9]{64}$/) });
+      expect(privateRow.rows[0]).toMatchObject({ google_subject: null, email: expect.stringMatching(/^enc:/), display_name: expect.stringMatching(/^enc:/), profile_ciphertext: expect.stringMatching(/^v1\./), google_subject_hash: expect.stringMatching(/^[a-f0-9]{64}$/) });
       expect(JSON.stringify(privateRow.rows)).not.toContain(expectedIdentity.email);
 
       const authStore = new PostgresPublicAuthStore(database, key, "classroom_desk_auth_records");
@@ -698,24 +704,14 @@ describe("D1 migration and account-link atomicity", () => {
     } finally { sqlite.close(); }
   });
 
-  it("supports OAuth account binding on the 0001-0007 schema without the optional unified mapping table", async () => {
-    const { sqlite, database } = sqliteD1({ includePublicOAuthMigrations: false });
+  it("fails closed until the detached-identity migration is applied", async () => {
+    const { sqlite, database } = sqliteD1({ includePublicOAuthMigrations: false, includeDetachedIdentityMigration: false });
     const key = randomBytes(32).toString("base64");
     const users = new SaaSStore(database, { profileEncryptionKeyBase64: key, requireProfileEncryption: true });
-    const authStore = new PostgresPublicAuthStore(database, key, "classroom_desk_auth_records");
     try {
-      const user = await users.upsertGoogleIdentity({ googleSubject: "synthetic-legacy-schema", email: "legacy-schema@example.invalid", displayName: "Synthetic Legacy Schema", now: new Date() });
-      const binding = await users.resolveGoogleIdentityBinding({ googleSubject: user.googleSubject, email: user.email, displayName: user.displayName, now: new Date() });
-      expect(binding).toEqual({ accountId: user.id, mcpUserId: user.id });
-      await authStore.migrate();
-      await authStore.putGrantAndCode(
-        { userId: binding.mcpUserId, refreshToken: "synthetic-legacy-refresh", scopes: ["openid"], createdAt: Date.now(), updatedAt: Date.now(), googleSubject: "synthetic-legacy-schema" },
-        { code: "synthetic-legacy-schema-code", clientId: "synthetic-client", userId: binding.mcpUserId, redirectUri: "https://chatgpt.com/connector/oauth/callback", challenge: "synthetic-pkce-challenge", scopes: ["mcp:tools"], expiresAt: Date.now() + 30_000 },
-        binding,
-      );
-      expect((await database.query<{ mcp_user_id: string }>(`SELECT mcp_user_id FROM classroom_desk_connections WHERE website_user_id=$1`, [user.id])).rows).toEqual([{ mcp_user_id: user.id }]);
-      expect(await authStore.getGrant(user.id)).toMatchObject({ refreshToken: "synthetic-legacy-refresh", googleSubject: "synthetic-legacy-schema" });
-      expect(await users.accountStatusForMcpUser(user.id, "https://classroom.jarvis404.com")).not.toMatchObject({ state: "ACCOUNT_SETUP_REQUIRED" });
+      await expect(users.upsertGoogleIdentity({ googleSubject: "synthetic-legacy-schema", email: "legacy-schema@example.invalid", displayName: "Synthetic Legacy Schema", now: new Date() }))
+        .rejects.toThrow("detached_identity_schema_required");
+      expect((await database.query(`SELECT count(*) AS count FROM classroom_desk_users`)).rows).toEqual([{ count: 0 }]);
     } finally { sqlite.close(); }
   });
   it("creates a user, consumes one pairing code once, and rejects cross-account reassignment", async () => {

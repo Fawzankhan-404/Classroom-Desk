@@ -1,9 +1,9 @@
 /** Additive SaaS schema. Apply with a reviewed direct Neon migration, never at Worker request time. */
-export const SAAS_SCHEMA_VERSION = 8;
+export const SAAS_SCHEMA_VERSION = 9;
 export const SaaSMigration = `
 CREATE TABLE IF NOT EXISTS classroom_desk_users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  google_subject text NOT NULL UNIQUE,
+  google_subject text,
   email text NOT NULL,
   display_name text NOT NULL,
   profile_ciphertext text,
@@ -21,9 +21,41 @@ ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS google_subject_hash te
 ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS email_hash text;
 ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS display_name_hash text;
 ALTER TABLE classroom_desk_users ADD COLUMN IF NOT EXISTS profile_recovery_status text NOT NULL DEFAULT 'ready' CHECK (profile_recovery_status IN ('ready','recovery_pending'));
+-- Google identity bindings are active only while the subject is non-null.
+-- Existing rows are preserved; an authorized reset may detach them without
+-- inventing placeholder subject strings.
+ALTER TABLE classroom_desk_users ALTER COLUMN google_subject DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_desk_users_google_subject_active_idx ON classroom_desk_users(google_subject) WHERE google_subject IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS classroom_desk_users_google_subject_hash_idx ON classroom_desk_users(google_subject_hash) WHERE google_subject_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS classroom_desk_users_email_hash_idx ON classroom_desk_users(email_hash) WHERE email_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS classroom_desk_users_display_name_hash_idx ON classroom_desk_users(display_name_hash) WHERE display_name_hash IS NOT NULL;
+CREATE TABLE IF NOT EXISTS classroom_desk_detached_google_identities (
+  account_id uuid PRIMARY KEY NOT NULL REFERENCES classroom_desk_users(id) ON DELETE RESTRICT,
+  google_subject text,
+  google_subject_hash text,
+  detached_at timestamptz NOT NULL,
+  reason text NOT NULL CHECK (reason = 'owner_authorized_auth_reset'),
+  CHECK (google_subject IS NOT NULL OR google_subject_hash IS NOT NULL)
+);
+CREATE TABLE IF NOT EXISTS classroom_desk_auth_reset_guard (
+  id integer PRIMARY KEY,
+  asserted integer NOT NULL CHECK (asserted = 1)
+);
+CREATE TABLE IF NOT EXISTS classroom_desk_auth_reset_audit (
+  id text PRIMARY KEY NOT NULL,
+  applied_at timestamptz NOT NULL,
+  reason text NOT NULL CHECK (reason = 'owner_authorized_auth_reset'),
+  detached_users integer NOT NULL,
+  revoked_grants integer NOT NULL,
+  revoked_refresh_records integer NOT NULL,
+  revoked_sessions integer NOT NULL,
+  removed_connection_mappings integer NOT NULL,
+  preserved_oauth_clients integer NOT NULL,
+  preserved_trials integer NOT NULL,
+  preserved_subscriptions integer NOT NULL,
+  preserved_payments integer NOT NULL,
+  preserved_webhook_events integer NOT NULL
+);
 CREATE TABLE IF NOT EXISTS classroom_desk_account_recovery_requests (
   id text PRIMARY KEY NOT NULL,
   account_id uuid NOT NULL REFERENCES classroom_desk_users(id) ON DELETE RESTRICT,

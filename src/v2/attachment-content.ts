@@ -4,6 +4,7 @@ import type { DiscoveredAttachment } from "./attachments.js";
 
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENT_TEXT = 120_000;
+export const MAX_PDF_PAGES = 200;
 
 const GOOGLE_DOC = "application/vnd.google-apps.document";
 const GOOGLE_SLIDES = "application/vnd.google-apps.presentation";
@@ -73,19 +74,101 @@ function validateMagic(mimeType: string, buffer: Buffer): void {
   if (mimeType === "image/webp" && !(buffer.subarray(0, 4).toString() === "RIFF" && buffer.subarray(8, 12).toString() === "WEBP")) throw new AttachmentContentError("malformed_attachment", "The selected WebP image is malformed.");
 }
 
-function textResult(fileName: string, sourceMimeType: string, extractedMimeType: string, value: string): ReadableAttachmentContent {
+function textResult(fileName: string, sourceMimeType: string, extractedMimeType: string, value: string, sourceTruncated = false): ReadableAttachmentContent {
   const normalized = value.replace(/\u0000/g, "");
-  return { kind: "text", fileName, sourceMimeType, extractedMimeType, text: normalized.slice(0, MAX_ATTACHMENT_TEXT), truncated: normalized.length > MAX_ATTACHMENT_TEXT };
+  return { kind: "text", fileName, sourceMimeType, extractedMimeType, text: normalized.slice(0, MAX_ATTACHMENT_TEXT), truncated: sourceTruncated || normalized.length > MAX_ATTACHMENT_TEXT };
 }
 
-async function extractPdfText(buffer: Buffer): Promise<string> {
-  // Keep pdfjs (and its DOMMatrix dependency) out of the Worker module
-  // initialization path. The parser is loaded only when a PDF is actually
-  // read, matching the existing bounded/validated attachment pipeline.
-  const { PDFParse } = await import("pdf-parse");
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
-  try { return (await parser.getText()).text; }
-  finally { await parser.destroy(); }
+type PdfJsDocument = {
+  numPages: number;
+  getPage(page: number): Promise<{ streamTextContent(): ReadableStream<{ items: Array<{ str?: string; hasEOL?: boolean }> }> }>;
+  destroy(): Promise<void>;
+};
+
+type PdfJsModule = {
+  getDocument(options: Record<string, unknown>): { promise: Promise<PdfJsDocument> };
+};
+
+let pdfJsModule: Promise<PdfJsModule> | undefined;
+
+async function loadWorkerPdfJs(): Promise<PdfJsModule> {
+  if (!pdfJsModule) {
+    pdfJsModule = (async () => {
+      const globals = globalThis as typeof globalThis & { DOMMatrix?: new (init?: number[]) => unknown };
+      const original = Object.getOwnPropertyDescriptor(globalThis, "DOMMatrix");
+      if (typeof globals.DOMMatrix === "undefined") {
+        // PDF.js evaluates a DOMMatrix constant even for text-only extraction.
+        // The class is installed only during module loading; no rendering path
+        // is exposed by the attachment reader.
+        class TextExtractionMatrix {
+          constructor(_init?: number[]) {}
+        }
+        Object.defineProperty(globalThis, "DOMMatrix", { configurable: true, value: TextExtractionMatrix });
+      }
+      try {
+        // Workerd has no DOM/Worker rendering globals. Load the worker module into
+        // the same isolate so PDF.js uses its supported fake-worker text path.
+        // @ts-expect-error pdfjs-dist does not declare the worker build entry
+        await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+        return await import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as PdfJsModule;
+      } finally {
+        if (!original) Reflect.deleteProperty(globalThis, "DOMMatrix");
+      }
+    })().catch((error) => {
+      pdfJsModule = undefined;
+      throw error;
+    });
+  }
+  return pdfJsModule;
+}
+
+async function extractPdfText(buffer: Buffer): Promise<{ text: string; truncated: boolean }> {
+  const pdfjs = await loadWorkerPdfJs();
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    disableWorker: true,
+    isEvalSupported: false,
+  });
+  const document = await loadingTask.promise;
+  try {
+    const text: string[] = [];
+    let textLength = 0;
+    let truncated = document.numPages > MAX_PDF_PAGES;
+    let textLimitReached = false;
+    const append = (value: string): boolean => {
+      const remaining = MAX_ATTACHMENT_TEXT - textLength;
+      if (remaining <= 0) { truncated = true; textLimitReached = true; return false; }
+      const bounded = value.slice(0, remaining);
+      text.push(bounded);
+      textLength += bounded.length;
+      if (bounded.length < value.length) { truncated = true; textLimitReached = true; }
+      return !textLimitReached;
+    };
+    for (let pageNumber = 1; pageNumber <= Math.min(document.numPages, MAX_PDF_PAGES); pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+      const reader = page.streamTextContent().getReader();
+      let complete = false;
+      try {
+        while (!textLimitReached) {
+          const chunk = await reader.read();
+          if (chunk.done) { complete = true; break; }
+          for (const item of chunk.value.items) {
+            const value = typeof item.str === "string" ? item.str : "";
+            if (value && !append(value)) break;
+            if (item.hasEOL && !append("\n")) break;
+            if (!item.hasEOL && value && !append(" ")) break;
+          }
+        }
+      } finally {
+        if (!complete) await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+      if (pageNumber < Math.min(document.numPages, MAX_PDF_PAGES) && !textLimitReached) append("\n");
+    }
+    return { text: text.join(""), truncated };
+  } finally {
+    await document.destroy();
+  }
 }
 
 async function inflatePdfStream(bytes: Buffer, budget: { remaining: number }): Promise<Buffer> {
@@ -210,7 +293,10 @@ export class GoogleDriveAttachmentReader {
       if (IMAGE_MIMES.has(mimeType)) return { kind: "image", fileName, sourceMimeType: mimeType, extractedMimeType: mimeType, bytes: new Uint8Array(buffer) };
       if (mimeType === PDF) {
         stage = "pdf_extract";
-        try { return textResult(fileName, mimeType, "text/plain", await extractPdfText(buffer)); }
+        try {
+          const extracted = await extractPdfText(buffer);
+          return textResult(fileName, mimeType, "text/plain", extracted.text, extracted.truncated);
+        }
         catch (error) {
           const fallback = await extractPdfLiteralText(buffer);
           if (fallback) return textResult(fileName, mimeType, "text/plain", fallback);

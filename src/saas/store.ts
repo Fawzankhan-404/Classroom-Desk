@@ -43,6 +43,15 @@ export type LegacyRecoveryApprovalInput = {
   requestId: string; reviewerId: string; evidenceType: LegacyRecoveryEvidenceType; evidenceReference: string;
   confirmedIndependentEvidence: boolean; now?: Date;
 };
+export type ProfileStorageCompatibilityReport = {
+  profilesChecked: number;
+  markerMatches: number;
+  markerMismatches: number;
+  missingMarkers: number;
+  missingSubjectHashes: number;
+  decryptionFailures: number;
+  identityConsistencyFailures: number;
+};
 const RECOVERY_SESSION_TTL_MS = 30 * 60 * 1000;
 const RECOVERY_INTAKE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RECOVERY_APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -93,57 +102,117 @@ export class SaaSStore implements WebsiteIdentityStore {
   readonly linking: AccountLinkService;
   private readonly profileCipher?: SaaSProfileCipher;
   private profileCompatibilityCheck?: Promise<number>;
+  private detachedIdentitySchemaCheck?: Promise<void>;
   constructor(readonly db: SqlDatabase, private readonly options: { referralRewardsEnabled?: boolean; profileEncryptionKeyBase64?: string; requireProfileEncryption?: boolean; legacyRecoveryOwnershipVerifier?: LegacyRecoveryOwnershipProofVerifier } = {}) {
     this.sessions = new WebsiteSessionStore(db); this.referrals = new ReferralService(db); this.linking = new AccountLinkService(db);
     if (options.profileEncryptionKeyBase64) this.profileCipher = new SaaSProfileCipher(options.profileEncryptionKeyBase64);
     if (options.requireProfileEncryption && !this.profileCipher) throw new Error("profile_encryption_configuration_unavailable");
   }
 
-  private profileFromRow(row: { google_subject: string; email: string; display_name: string; profile_ciphertext?: string | null }): PrivateSaaSProfile | undefined {
+  private profileFromRow(row: { google_subject: string | null; email: string; display_name: string; profile_ciphertext?: string | null }): PrivateSaaSProfile | undefined {
     if (row.profile_ciphertext) {
       if (!this.profileCipher) throw new Error("stored_profile_unavailable");
       return this.profileCipher.open(row.profile_ciphertext);
     }
     if (this.options.requireProfileEncryption) return undefined;
+    if (!row.google_subject) return undefined;
     return { googleSubject: row.google_subject, email: row.email, displayName: row.display_name };
   }
 
-  private userFromRow(row: { id: string; google_subject: string; email: string; display_name: string; profile_ciphertext?: string | null; role: SaaSUser["role"]; status: SaaSUser["status"]; created_at: Date; last_login_at: Date | null }): SaaSUser {
+  private userFromRow(row: { id: string; google_subject: string | null; email: string; display_name: string; profile_ciphertext?: string | null; role: SaaSUser["role"]; status: SaaSUser["status"]; created_at: Date; last_login_at: Date | null }): SaaSUser {
     const profile = this.profileFromRow(row);
     if (!profile) throw new Error("stored_profile_unavailable");
     return { id: String(row.id), googleSubject: profile.googleSubject, email: profile.email, displayName: profile.displayName, role: row.role, status: row.status, createdAt: new Date(row.created_at), lastLoginAt: row.last_login_at ? new Date(row.last_login_at) : null };
   }
 
-  private adminUserFromRow(row: { id: string; google_subject: string; email: string; display_name: string; profile_ciphertext?: string | null; role: SaaSUser["role"]; status: SaaSUser["status"]; created_at: Date; last_login_at: Date | null }): SaaSUser {
+  private adminUserFromRow(row: { id: string; google_subject: string | null; email: string; display_name: string; profile_ciphertext?: string | null; role: SaaSUser["role"]; status: SaaSUser["status"]; created_at: Date; last_login_at: Date | null }): SaaSUser {
     const profile = this.profileFromRow(row);
     return { id: String(row.id), googleSubject: profile?.googleSubject ?? "", email: profile?.email ?? "Profile unavailable", displayName: profile?.displayName ?? "Profile unavailable", role: row.role, status: row.status, createdAt: new Date(row.created_at), lastLoginAt: row.last_login_at ? new Date(row.last_login_at) : null };
+  }
+
+  async inspectProfileStorageCompatibility(maxRows = 10_000): Promise<ProfileStorageCompatibilityReport> {
+    if (!this.profileCipher) throw new Error("profile_encryption_configuration_unavailable");
+    const report: ProfileStorageCompatibilityReport = {
+      profilesChecked: 0, markerMatches: 0, markerMismatches: 0, missingMarkers: 0,
+      missingSubjectHashes: 0, decryptionFailures: 0, identityConsistencyFailures: 0,
+    };
+    const result = await this.db.query<{ id: string; google_subject: string | null; email: string; display_name: string; profile_ciphertext: string; google_subject_hash: string | null; email_hash: string | null; display_name_hash: string | null }>(
+      `SELECT id,google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users WHERE profile_ciphertext IS NOT NULL LIMIT $1`, [maxRows + 1]);
+    if (result.rows.length > maxRows) throw new Error("profile_storage_validation_limit");
+    const detachedIds = result.rows.filter(row => row.google_subject === null && row.google_subject_hash === null).map(row => row.id);
+    const detachedByAccount = new Map<string, { google_subject: string | null; google_subject_hash: string | null }[]>();
+    if (detachedIds.length) {
+      await this.requireDetachedIdentitySchema();
+      const placeholders = detachedIds.map((_, index) => `$${index + 1}`).join(",");
+      const archived = await this.db.query<{ account_id: string; google_subject: string | null; google_subject_hash: string | null }>(
+        `SELECT account_id,google_subject,google_subject_hash FROM classroom_desk_detached_google_identities WHERE account_id IN (${placeholders})`, detachedIds);
+      for (const row of archived.rows) {
+        const accountRows = detachedByAccount.get(row.account_id) ?? [];
+        accountRows.push({ google_subject: row.google_subject, google_subject_hash: row.google_subject_hash });
+        detachedByAccount.set(row.account_id, accountRows);
+      }
+    }
+    const equalHash = (expected: string, actual: string | null) => {
+      if (!actual || !/^[a-f0-9]{64}$/i.test(actual)) return false;
+      return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(actual, "hex"));
+    };
+    const markerMatches = (actual: string | null, plain: string, hash: string) => actual === plain || actual === `enc:${hash}`;
+    for (const row of result.rows) {
+      report.profilesChecked += 1;
+      if (row.google_subject_hash === null) report.missingSubjectHashes += 1;
+      let failed = false;
+      let profile: PrivateSaaSProfile;
+      try { profile = this.profileCipher.open(row.profile_ciphertext); }
+      catch { report.decryptionFailures += 1; report.identityConsistencyFailures += 1; continue; }
+      const subject = this.profileCipher.digest(profile.googleSubject);
+      const email = this.profileCipher.digest(profile.email.toLowerCase());
+      const display = this.profileCipher.digest(profile.displayName);
+      const active = row.google_subject !== null || row.google_subject_hash !== null;
+      const archived = !active ? detachedByAccount.get(row.id) : undefined;
+      const subjectMarker = active ? row.google_subject : archived?.length === 1 ? archived[0]!.google_subject : null;
+      const subjectHash = active ? row.google_subject_hash : archived?.length === 1 ? archived[0]!.google_subject_hash : null;
+      if (subjectMarker === null) report.missingMarkers += 1;
+      else if (markerMatches(subjectMarker, profile.googleSubject, subject)) report.markerMatches += 1;
+      else { report.markerMismatches += 1; failed = true; }
+      const hasSubjectIdentity = subjectMarker !== null || subjectHash !== null;
+      if (!hasSubjectIdentity || (archived && archived.length !== 1)
+        || (subjectHash !== null && !equalHash(subject, subjectHash))
+        || (row.email_hash === null || !equalHash(email, row.email_hash))
+        || (row.display_name_hash === null || !equalHash(display, row.display_name_hash))
+        || (row.email !== null && !markerMatches(row.email, profile.email, email))
+        || (row.display_name !== null && !markerMatches(row.display_name, profile.displayName, display))) failed = true;
+      if (failed) report.identityConsistencyFailures += 1;
+    }
+    return report;
   }
 
   async verifyProfileStorageCompatibility(maxRows = 10_000): Promise<number> {
     if (!this.profileCipher) throw new Error("profile_encryption_configuration_unavailable");
     if (!this.profileCompatibilityCheck) this.profileCompatibilityCheck = (async () => {
-      const result = await this.db.query<{ google_subject: string; email: string; display_name: string; profile_ciphertext: string; google_subject_hash: string | null; email_hash: string | null; display_name_hash: string | null }>(
-        `SELECT google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash FROM classroom_desk_users WHERE profile_ciphertext IS NOT NULL LIMIT $1`, [maxRows + 1]);
-      if (result.rows.length > maxRows) throw new Error("profile_storage_validation_limit");
-      const equalHash = (expected: string, actual: string | null) => {
-        if (!actual || !/^[a-f0-9]{64}$/i.test(actual)) return false;
-        return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(actual, "hex"));
-      };
-      for (const row of result.rows) {
-        const profile = this.profileCipher!.open(row.profile_ciphertext);
-        const subject = this.profileCipher!.digest(profile.googleSubject);
-        const email = this.profileCipher!.digest(profile.email.toLowerCase());
-        const display = this.profileCipher!.digest(profile.displayName);
-        const markerMatches = (actual: string, plain: string, hash: string) => actual === plain || actual === `enc:${hash}`;
-        if (!equalHash(subject, row.google_subject_hash) || !equalHash(email, row.email_hash) || !equalHash(display, row.display_name_hash)
-          || !markerMatches(row.google_subject, profile.googleSubject, subject)
-          || !markerMatches(row.email, profile.email, email)
-          || !markerMatches(row.display_name, profile.displayName, display)) throw new Error("profile_storage_compatibility_failed");
-      }
-      return result.rows.length;
+      const report = await this.inspectProfileStorageCompatibility(maxRows);
+      if (report.decryptionFailures) throw new Error("stored_profile_unavailable");
+      if (report.identityConsistencyFailures) throw new Error("profile_storage_compatibility_failed");
+      return report.profilesChecked;
     })();
     try { return await this.profileCompatibilityCheck; }
     catch (error) { this.profileCompatibilityCheck = undefined; throw error; }
+  }
+
+  private async requireDetachedIdentitySchema(): Promise<void> {
+    if (!this.detachedIdentitySchemaCheck) {
+      this.detachedIdentitySchemaCheck = this.db.query(`SELECT account_id FROM classroom_desk_detached_google_identities LIMIT 0`)
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          const message = databaseErrorDetails(error).message.toLowerCase();
+          if (message.includes("classroom_desk_detached_google_identities") && (message.includes("no such table") || message.includes("does not exist"))) {
+            this.detachedIdentitySchemaCheck = undefined;
+            throw new Error("detached_identity_schema_required");
+          }
+          this.detachedIdentitySchemaCheck = undefined;
+          throw error;
+        });
+    }
+    await this.detachedIdentitySchemaCheck;
   }
 
   private async recoveryBatch(statements: Array<{ sql: string; values?: unknown[] }>) {
@@ -218,10 +287,15 @@ export class SaaSStore implements WebsiteIdentityStore {
     const account = (await this.db.query<{ id: string; status: string; profile_ciphertext: string | null; profile_recovery_status: string }>(
       `SELECT id,status,profile_ciphertext,profile_recovery_status FROM classroom_desk_users WHERE id=$1 LIMIT 1`, [input.accountId])).rows[0];
     if (!account || account.status !== "active" || account.profile_recovery_status !== "ready" || !account.profile_ciphertext) throw new Error("legacy_recovery_account_unavailable");
-    try { this.profileCipher.open(account.profile_ciphertext); throw new Error("legacy_recovery_not_required"); }
+    let profileReadable = false;
+    try { this.profileCipher.open(account.profile_ciphertext); profileReadable = true; }
     catch (error) {
-      if (error instanceof Error && error.message === "legacy_recovery_not_required") throw error;
       if (!(error instanceof Error) || error.message !== "stored_profile_unavailable") throw new Error("legacy_recovery_profile_invalid");
+    }
+    if (profileReadable) {
+      const detached = await this.db.query<{ account_id: string }>(`SELECT account_id FROM classroom_desk_detached_google_identities
+        WHERE account_id=$1 AND google_subject_hash=$2 LIMIT 1`, [input.accountId, session.googleSubjectHash]);
+      if (detached.rows.length !== 1) throw new Error("legacy_recovery_not_required");
     }
     const conflict = await this.db.query<{ id: string }>(`SELECT id FROM classroom_desk_users
       WHERE id<>$1 AND (google_subject_hash=$2 OR google_subject=$3) LIMIT 2`, [input.accountId, session.googleSubjectHash, session.googleSubject]);
@@ -234,10 +308,14 @@ export class SaaSStore implements WebsiteIdentityStore {
     const ciphertextHash = createHash("sha256").update(account.profile_ciphertext, "utf8").digest("hex");
     const referenceHash = this.profileCipher.digestRecoveryEvidenceReference(input.evidenceReference);
     const referenceCiphertext = this.profileCipher.sealRecoveryEvidenceReference(input.evidenceReference);
+    const detachedGuard = profileReadable
+      ? `EXISTS (SELECT 1 FROM classroom_desk_detached_google_identities WHERE account_id=$2 AND google_subject_hash=$3)`
+      : "1=1";
     const inserted = await this.db.query<{ id: string }>(`INSERT INTO classroom_desk_account_recovery_intakes
       (id,account_id,google_subject_hash,google_subject_ciphertext,expected_legacy_ciphertext_hash,claim_evidence_type,claim_evidence_reference_ciphertext,claim_evidence_reference_hash,status,expires_at,created_at)
       SELECT $1,$2,$3,$4,$5,$6,$7,$8,'submitted',$9,$10
       WHERE EXISTS (SELECT 1 FROM classroom_desk_users WHERE id=$2 AND status='active' AND profile_recovery_status='ready' AND profile_ciphertext=$11)
+        AND ${detachedGuard}
         AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_intakes WHERE status='submitted' AND expires_at>$10 AND (account_id=$2 OR google_subject_hash=$3))
         AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_requests WHERE status='pending' AND expires_at>$10 AND (account_id=$2 OR google_subject_hash=$3))
       RETURNING id`, [requestId, input.accountId, session.googleSubjectHash, this.profileCipher.sealRecoveryEvidenceReference(session.googleSubject), ciphertextHash, input.evidenceType, referenceCiphertext, referenceHash, expiresAt, now, account.profile_ciphertext]);
@@ -294,10 +372,18 @@ export class SaaSStore implements WebsiteIdentityStore {
       `SELECT status,profile_recovery_status,profile_ciphertext FROM classroom_desk_users WHERE id=$1 LIMIT 1`, [intake.account_id])).rows[0];
     if (!account || account.status !== "active" || account.profile_recovery_status !== "ready" || !account.profile_ciphertext
       || createHash("sha256").update(account.profile_ciphertext, "utf8").digest("hex") !== intake.expected_legacy_ciphertext_hash) throw new Error("legacy_recovery_account_changed");
-    try { this.profileCipher.open(account.profile_ciphertext); throw new Error("legacy_recovery_not_required"); }
+    let profileReadable = false;
+    try { this.profileCipher.open(account.profile_ciphertext); profileReadable = true; }
     catch (error) {
-      if (error instanceof Error && error.message === "legacy_recovery_not_required") throw error;
       if (!(error instanceof Error) || error.message !== "stored_profile_unavailable") throw new Error("legacy_recovery_profile_invalid");
+    }
+    const detachedArchiveGuard = profileReadable
+      ? `EXISTS (SELECT 1 FROM classroom_desk_detached_google_identities WHERE account_id=$9 AND google_subject_hash=$11)`
+      : "1=1";
+    if (profileReadable) {
+      const archived = await this.db.query<{ account_id: string }>(`SELECT account_id FROM classroom_desk_detached_google_identities
+        WHERE account_id=$1 AND google_subject_hash=$2 LIMIT 1`, [intake.account_id, intake.google_subject_hash]);
+      if (archived.rows.length !== 1) throw new Error("legacy_recovery_not_required");
     }
     const googleSubject = this.profileCipher.openRecoveryEvidenceReference(intake.google_subject_ciphertext);
     const duplicate = await this.db.query<{ id: string }>(`SELECT id FROM classroom_desk_users
@@ -320,6 +406,7 @@ export class SaaSStore implements WebsiteIdentityStore {
       AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_intakes WHERE id=$1 AND status<>'submitted')
       AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_requests WHERE status='pending' AND expires_at>$6 AND (account_id=$9 OR google_subject_hash=$11))
       AND NOT EXISTS (SELECT 1 FROM classroom_desk_users WHERE id<>$9 AND (google_subject_hash=$11 OR google_subject=$13))
+      AND ${detachedArchiveGuard}
       AND NOT EXISTS (SELECT 1 FROM classroom_desk_account_recovery_review_claims WHERE intake_id=$1)`;
     const statements = [
       { sql: `UPDATE classroom_desk_users SET profile_recovery_status='recovery_pending'
@@ -504,16 +591,16 @@ export class SaaSStore implements WebsiteIdentityStore {
 
       const ciphertext = this.profileCipher.seal(profile);
       const updated = await this.db.query<{
-        id: string; google_subject: string; email: string; display_name: string; profile_ciphertext: string;
+        id: string; google_subject: string | null; email: string; display_name: string; profile_ciphertext: string;
         role: SaaSUser["role"]; status: SaaSUser["status"]; created_at: Date; last_login_at: Date | null;
-      }>(`UPDATE classroom_desk_users SET google_subject=$2,email=$3,display_name=$4,profile_ciphertext=$5,
-        google_subject_hash=$6,email_hash=$7,display_name_hash=$8
-        WHERE id=$1 AND profile_ciphertext IS NULL AND google_subject=$9 AND email=$10 AND display_name=$11
-          AND (google_subject_hash IS NULL OR google_subject_hash=$6)
-          AND (email_hash IS NULL OR email_hash=$7)
-          AND (display_name_hash IS NULL OR display_name_hash=$8)
+      }>(`UPDATE classroom_desk_users SET google_subject=NULL,email=$2,display_name=$3,profile_ciphertext=$4,
+        google_subject_hash=$5,email_hash=$6,display_name_hash=$7
+        WHERE id=$1 AND profile_ciphertext IS NULL AND google_subject=$8 AND email=$9 AND display_name=$10
+          AND (google_subject_hash IS NULL OR google_subject_hash=$5)
+          AND (email_hash IS NULL OR email_hash=$6)
+          AND (display_name_hash IS NULL OR display_name_hash=$7)
         RETURNING id,google_subject,email,display_name,profile_ciphertext,role,status,created_at,last_login_at`,
-      [row.id, `enc:${subjectHash}`, `enc:${emailHash}`, `enc:${displayHash}`, ciphertext, subjectHash, emailHash, displayHash,
+      [row.id, `enc:${emailHash}`, `enc:${displayHash}`, ciphertext, subjectHash, emailHash, displayHash,
         profile.googleSubject, profile.email, profile.displayName]);
 
       let stored = updated.rows[0];
@@ -553,13 +640,14 @@ export class SaaSStore implements WebsiteIdentityStore {
   }
 
   async upsertGoogleIdentity(input: { googleSubject: string; email: string; displayName: string; now: Date }): Promise<SaaSUser> {
-    let row: { id: string; google_subject: string; email: string; display_name: string; profile_ciphertext?: string | null; role: SaaSUser["role"]; status: SaaSUser["status"]; created_at: Date; last_login_at: Date | null } | undefined;
+    await this.requireDetachedIdentitySchema();
+    let row: { id: string; google_subject: string | null; email: string; display_name: string; profile_ciphertext?: string | null; role: SaaSUser["role"]; status: SaaSUser["status"]; created_at: Date; last_login_at: Date | null } | undefined;
     if (this.profileCipher) {
       await this.verifyProfileStorageCompatibility();
       const subjectHash = this.profileCipher.digest(input.googleSubject);
       const emailHash = this.profileCipher.digest(input.email.toLowerCase());
       const displayHash = this.profileCipher.digest(input.displayName);
-      const markers = [`enc:${subjectHash}`, `enc:${emailHash}`, `enc:${displayHash}`];
+      const markers = [`enc:${emailHash}`, `enc:${displayHash}`];
       const profile = this.profileCipher.seal(input);
       const existing = await this.db.query<{ id: string; google_subject_hash: string | null }>(`SELECT id,google_subject_hash FROM classroom_desk_users WHERE google_subject_hash=$1 OR google_subject=$2 LIMIT 2`, [subjectHash, input.googleSubject]);
       if (existing.rows.length > 1) throw new Error("google_subject_account_conflict");
@@ -567,21 +655,31 @@ export class SaaSStore implements WebsiteIdentityStore {
       if (existing.rows[0]) {
         const existingSubjectHash = existing.rows[0].google_subject_hash;
         if (existingSubjectHash && existingSubjectHash.toLowerCase() !== subjectHash) throw new Error("google_subject_account_conflict");
-        saved = await this.db.query(`UPDATE classroom_desk_users SET google_subject=$2,email=$3,display_name=$4,profile_ciphertext=$5,google_subject_hash=$6,email_hash=$7,display_name_hash=$8,last_login_at=$9 WHERE id=$1 RETURNING id,google_subject,email,display_name,profile_ciphertext,role,status,created_at,last_login_at`, [existing.rows[0].id, ...markers, profile, subjectHash, emailHash, displayHash, input.now]);
+        saved = await this.db.query(`UPDATE classroom_desk_users SET google_subject=NULL,email=$2,display_name=$3,profile_ciphertext=$4,google_subject_hash=$5,email_hash=$6,display_name_hash=$7,last_login_at=$8
+          WHERE id=$1 AND (google_subject_hash=$5 OR (google_subject_hash IS NULL AND google_subject=$9))
+          RETURNING id,google_subject,email,display_name,profile_ciphertext,role,status,created_at,last_login_at`, [existing.rows[0].id, ...markers, profile, subjectHash, emailHash, displayHash, input.now, input.googleSubject]);
       } else {
-        saved = await this.db.query(`INSERT INTO classroom_desk_users (google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash,last_login_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING RETURNING id,google_subject,email,display_name,profile_ciphertext,role,status,created_at,last_login_at`, [...markers, profile, subjectHash, emailHash, displayHash, input.now]);
+        saved = await this.db.query(`INSERT INTO classroom_desk_users (google_subject,email,display_name,profile_ciphertext,google_subject_hash,email_hash,display_name_hash,last_login_at) VALUES (NULL,$1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING RETURNING id,google_subject,email,display_name,profile_ciphertext,role,status,created_at,last_login_at`, [...markers, profile, subjectHash, emailHash, displayHash, input.now]);
         if (!saved.rows[0]) {
           const raced = await this.db.query<{ id: string; google_subject_hash: string | null }>(`SELECT id,google_subject_hash FROM classroom_desk_users WHERE google_subject_hash=$1 OR google_subject=$2 LIMIT 2`, [subjectHash, input.googleSubject]);
           if (raced.rows.length !== 1) throw new Error("google_subject_account_conflict");
           const racedSubjectHash = raced.rows[0]!.google_subject_hash;
           if (racedSubjectHash && racedSubjectHash.toLowerCase() !== subjectHash) throw new Error("google_subject_account_conflict");
-          saved = await this.db.query(`UPDATE classroom_desk_users SET google_subject=$2,email=$3,display_name=$4,profile_ciphertext=$5,google_subject_hash=$6,email_hash=$7,display_name_hash=$8,last_login_at=$9 WHERE id=$1 RETURNING id,google_subject,email,display_name,profile_ciphertext,role,status,created_at,last_login_at`, [raced.rows[0]!.id, ...markers, profile, subjectHash, emailHash, displayHash, input.now]);
+          saved = await this.db.query(`UPDATE classroom_desk_users SET google_subject=NULL,email=$2,display_name=$3,profile_ciphertext=$4,google_subject_hash=$5,email_hash=$6,display_name_hash=$7,last_login_at=$8
+            WHERE id=$1 AND (google_subject_hash=$5 OR (google_subject_hash IS NULL AND google_subject=$9))
+            RETURNING id,google_subject,email,display_name,profile_ciphertext,role,status,created_at,last_login_at`, [raced.rows[0]!.id, ...markers, profile, subjectHash, emailHash, displayHash, input.now, input.googleSubject]);
         }
       }
       row = saved.rows[0] as typeof row;
     } else {
-      const result = await this.db.query(`INSERT INTO classroom_desk_users (google_subject,email,display_name,last_login_at) VALUES ($1,$2,$3,$4) ON CONFLICT (google_subject) DO UPDATE SET email=EXCLUDED.email, display_name=EXCLUDED.display_name, last_login_at=EXCLUDED.last_login_at RETURNING id,google_subject,email,display_name,role,status,created_at,last_login_at`, [input.googleSubject, input.email, input.displayName, input.now]);
-      row = result.rows[0] as typeof row;
+      const result = await this.db.query(`INSERT INTO classroom_desk_users (google_subject,email,display_name,last_login_at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING id,google_subject,email,display_name,role,status,created_at,last_login_at`, [input.googleSubject, input.email, input.displayName, input.now]);
+      if (result.rows[0]) row = result.rows[0] as typeof row;
+      else {
+        const existing = await this.db.query<{ id: string }>(`SELECT id FROM classroom_desk_users WHERE google_subject=$1 LIMIT 2`, [input.googleSubject]);
+        if (existing.rows.length !== 1) throw new Error("google_subject_account_conflict");
+        const updated = await this.db.query(`UPDATE classroom_desk_users SET email=$2,display_name=$3,last_login_at=$4 WHERE id=$1 AND google_subject=$5 RETURNING id,google_subject,email,display_name,role,status,created_at,last_login_at`, [existing.rows[0]!.id, input.email, input.displayName, input.now, input.googleSubject]);
+        row = updated.rows[0] as typeof row;
+      }
     }
     if (!row) throw new Error("Account could not be created.");
     await this.db.query(`INSERT INTO classroom_desk_trials (user_id,status) VALUES ($1,'eligible') ON CONFLICT (user_id) DO NOTHING`, [row.id]);
@@ -589,6 +687,17 @@ export class SaaSStore implements WebsiteIdentityStore {
   }
 
   async resolveGoogleIdentityBinding(input: { googleSubject: string; email: string; displayName: string; now: Date }): Promise<{ accountId: string; mcpUserId: string; recovery?: import("../public/store.js").GoogleAccountBinding["recovery"] }> {
+    if (this.profileCipher) {
+      await this.requireDetachedIdentitySchema();
+      const subjectHash = this.profileCipher.digest(input.googleSubject);
+      const activeIdentity = await this.db.query<{ id: string }>(`SELECT id FROM classroom_desk_users
+        WHERE google_subject_hash=$1 OR google_subject=$2 LIMIT 2`, [subjectHash, input.googleSubject]);
+      if (activeIdentity.rows.length === 0) {
+        const approvedRecovery = await this.db.query<{ id: string }>(`SELECT id FROM classroom_desk_account_recovery_requests
+          WHERE google_subject_hash=$1 AND status='pending' AND expires_at>$2 LIMIT 2`, [subjectHash, input.now]);
+        if (approvedRecovery.rows.length > 0) return this.resolvePendingLegacyAccountRecovery(input);
+      }
+    }
     let user: SaaSUser;
     try {
       user = await this.upsertGoogleIdentity(input);
