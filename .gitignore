@@ -36,3 +36,6 @@ Thumbs.db
 /tmp/
 /plugin/
 .codex-remote-attachments/
+# Internal release evidence and local workspace manifests
+/PRODUCTION_AUDIT.md
+/WORKTREE_MANIFEST.txt
