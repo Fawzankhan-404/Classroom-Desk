@@ -18,8 +18,8 @@ import type { PricingReferralView } from "../saas/pricing-referral-view.js";
 import type { PublicAuthStore } from "./store.js";
 import type { RuntimeConfig } from "./config.js";
 import { logHttp, logOAuthCallbackRedirect, logOAuthCallbackRejected } from "./log.js";
-import { faviconSvg, logoSvg } from "./favicon-asset.js";
 import { socialPreviewPngBase64 } from "./social-preview-asset.js";
+import { classroomDeskFaviconPngBase64, classroomDeskLogoPngBase64 } from "./logo-asset.js";
 import { accessGuidance, MCP_ONBOARDING_TOOLS, registerMcpOnboarding } from "../saas/mcp-access.js";
 
 type Session = { userId: string; transport: StreamableHTTPServerTransport; server: McpServer };
@@ -100,13 +100,25 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   const support = escapeHtml(config.supportEmail ?? "support@example.invalid");
   const mailto = `mailto:${support}`;
   const chatgptPluginUrl = config.chatgptPluginUrl ? escapeHtml(config.chatgptPluginUrl) : undefined;
+  app.get("/assets/classroom-desk-favicon.png", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.type("png").send(Buffer.from(classroomDeskFaviconPngBase64, "base64"));
+  });
+  app.get("/assets/classroom-desk-logo.png", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.type("png").send(Buffer.from(classroomDeskLogoPngBase64, "base64"));
+  });
+  app.get("/assets/classroom-desk-app-icon.png", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.type("png").send(Buffer.from(classroomDeskLogoPngBase64, "base64"));
+  });
   app.get("/assets/classroom-desk-favicon.svg", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=86400");
-    res.type("svg").send(faviconSvg);
+    res.type("png").send(Buffer.from(classroomDeskFaviconPngBase64, "base64"));
   });
   app.get("/assets/classroom-desk-logo.svg", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=86400");
-    res.type("svg").send(logoSvg);
+    res.type("png").send(Buffer.from(classroomDeskLogoPngBase64, "base64"));
   });
   app.get("/assets/classroom-desk-social-card.png", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=86400");
@@ -753,8 +765,8 @@ function page(title: string, active: string, operator: string, support: string, 
 <meta name="twitter:description" content="${escapeHtml(description)}">
 <meta name="twitter:image" content="${escapeHtml(imageUrl)}">
 ${title === "Classroom Desk" ? '<link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/5c3ec08f-2dbf-4c0a-8588-f6106a789443.webp" media="(min-width:768px)" fetchpriority="high"><link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/0f4926a4-e660-4df2-9195-2bfb3e341bdd.webp" media="(max-width:767px)" fetchpriority="high">' : ""}
-<link rel="icon" type="image/svg+xml" href="/assets/classroom-desk-favicon.svg">
-<link rel="apple-touch-icon" href="/assets/classroom-desk-logo.svg">
+<link rel="icon" type="image/png" href="/assets/classroom-desk-favicon.png">
+<link rel="apple-touch-icon" href="/assets/classroom-desk-app-icon.png">
 <style>${siteStyles()}${designStyles()}${pricingReferralStyles()}.numbered-steps b{color:#176b4b!important}.site-header .brand,.desktop-nav a,.header-actions a{min-height:44px;display:inline-flex;align-items:center}.header-cta{min-height:44px!important}.modal-header .eyebrow{color:#b8f3d5}.close-button{min-width:44px;min-height:44px;flex-shrink:0}.copy-chip button{min-width:44px;min-height:44px}@media(max-width:767px) and (max-height:900px){.modal-shell .guide-visual{display:none}}${active === "support" ? ".support-amounts article{min-height:0}.support-custom-amount{display:grid;gap:.5rem;max-width:420px;margin:1rem 0}.support-custom-amount label{font-weight:750;color:var(--deep)}.support-custom-amount input{min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;padding:.8rem;font:inherit;color:var(--deep);background:var(--soft)}.support-custom-amount input:disabled{opacity:.65;cursor:not-allowed}" : ""}</style>
 </head>
 <body class="${compact ? "compact" : ""}${title === "Classroom Desk" ? " home-page" : ""}">
@@ -777,7 +789,7 @@ ${active === "home" ? "" : connectGuideModal()}
 }
 
 function logoMark() {
-  return `<span class="logo" aria-hidden="true">${logoSvg.replace("<svg ", "<svg width=\"32\" height=\"32\" ")}</span>`;
+  return `<span class="logo" aria-hidden="true"><img src="/assets/classroom-desk-logo.png" width="32" height="32" alt=""></span>`;
 }
 
 function designStyles() {
