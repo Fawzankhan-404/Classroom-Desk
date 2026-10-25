@@ -30,6 +30,17 @@ describe("account dashboard pages", () => {
     expect(html).not.toContain("Currently missing</span></article><article><strong>0");
   });
 
+  it("ships the status-grid layout rules with the rendered dashboard stylesheet", () => {
+    const html = renderStudentDashboard(user, { state: "connected", overview: {
+      generatedAt: "2026-10-18T10:00:00Z", summary: { courses: 0, assignments: 0, missing: 0, turnedIn: 0, returned: 0 },
+      availability: { courseworkComplete: true, submissionsComplete: true, announcementsComplete: true, materialsComplete: true, topicsComplete: true },
+      courses: [], assignments: [], announcements: [], courseMaterials: [],
+    } });
+    expect(html).toContain('class="account-status-grid"');
+    expect(html).toContain('.account-status-grid{display:grid;');
+    expect(html).toContain('@media(max-width:700px){.account-status-grid{grid-template-columns:1fr}}');
+  });
+
   it("does not call an incomplete coursework read an empty assignment list", () => {
     const html = renderStudentDashboard(user, { state: "connected", overview: {
       generatedAt: "2026-10-18T10:00:00Z",
