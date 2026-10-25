@@ -89,8 +89,13 @@ document.addEventListener('submit',async e=>{
  const b=e.submitter,s=document.querySelector('#action-feedback');if(b)b.disabled=true;s.textContent='Working…';
  try{
   const r=await fetch(f.action,{method:'POST',body:new URLSearchParams(new FormData(f)),credentials:'same-origin',headers:{'Accept':'application/json'}});
-  if(!r.ok)throw new Error();
   const path=new URL(f.action).pathname;
+  if(path==='/api/account/experience'){
+   const data=await r.json().catch(()=>({error:'unknown'}));
+   if(!r.ok){if(data.error==='login_required'){s.innerHTML='Your sign-in expired. <a href="'+(data.action||'/login?next=/app/experience')+'">Sign in again</a> to choose a dashboard.';}else{s.textContent=data.message||'We could not save your dashboard choice. Try again.';}if(b)b.disabled=false;return;}
+   s.textContent='Dashboard choice saved. Loading your dashboard…';location.assign(data.redirect||'/app');return;
+  }
+  if(!r.ok)throw new Error();
   if(path==='/session/end'){location.assign('/');return;}
   if(path==='/api/classroom/link/start'){
    const data=await r.json();const output=document.querySelector('#pairing-code');output.textContent='Pairing code: '+data.code+' · expires '+new Date(data.expiresAt).toLocaleTimeString();output.setAttribute('tabindex','0');const copy=document.createElement('button');copy.type='button';copy.textContent='Copy code';copy.dataset.copy=data.code;copy.className='copy-pairing-code';output.append(' ',copy);

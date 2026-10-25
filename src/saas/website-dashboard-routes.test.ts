@@ -14,11 +14,12 @@ const user = (id: string): SaaSUser => ({
   role: "STUDENT", status: "active", createdAt: new Date("2026-01-01T00:00:00Z"), lastLoginAt: null,
 });
 
-type HarnessControls = { setMcpBinding: (id: string, mcpId: string) => void; setTeacherEntitled: (value: boolean) => void; seedTeacherWriteFlow: (state: string) => void };
+type HarnessControls = { setMcpBinding: (id: string, mcpId: string) => void; setTeacherEntitled: (value: boolean) => void; setPreferenceFailure: (value: boolean) => void; seedTeacherWriteFlow: (state: string) => void };
 
 async function withServer(run: (origin: string, cookie: string, userId: () => string, setUserId: (id: string) => void, controls: HarnessControls) => Promise<void>, teacherEntitled = true, routeOverrides: Partial<WebsiteRouteOptions> = {}) {
   let currentUserId = "user-1";
   let activeTeacherEntitlement = teacherEntitled;
+  let preferenceFailure = false;
   const preferences = new Map<string, "student" | "teacher">();
   const users = new Map([["user-1", user("user-1")], ["user-2", user("user-2")]]);
   const mcpBindings = new Map([["user-1", "user-1"], ["user-2", "user-2"]]);
@@ -32,7 +33,7 @@ async function withServer(run: (origin: string, cookie: string, userId: () => st
     getClassroomMcpUserId: vi.fn(async (id: string) => mcpBindings.get(id)),
     entitlement: vi.fn(async () => ({ allowed: activeTeacherEntitlement, plan: activeTeacherEntitlement ? "teacher" : null })),
     getDashboardExperience: vi.fn(async (id: string) => preferences.get(id) ?? null),
-    setDashboardExperience: vi.fn(async (id: string, value: "student" | "teacher") => { preferences.set(id, value); }),
+    setDashboardExperience: vi.fn(async (id: string, value: "student" | "teacher") => { if (preferenceFailure) throw new Error("preference_unavailable"); preferences.set(id, value); }),
   };
   const app = express();
   app.use(express.urlencoded({ extended: false }));
@@ -64,6 +65,7 @@ async function withServer(run: (origin: string, cookie: string, userId: () => st
   const controls: HarnessControls = {
     setMcpBinding: (id, mcpId) => { mcpBindings.set(id, mcpId); },
     setTeacherEntitled: value => { activeTeacherEntitlement = value; },
+    setPreferenceFailure: value => { preferenceFailure = value; },
     seedTeacherWriteFlow: state => { ephemeral.set(`teacher_authorization:${state}`, { authorizationType: "write", userId: "user-1", mcpUserId: "user-1", verifier: "v".repeat(43), nonce: "n".repeat(32) }); },
   };
   try { await run(`http://127.0.0.1:${address.port}`, sessionCookie(token, false), () => currentUserId, id => { currentUserId = id; }, controls); }
@@ -111,6 +113,34 @@ describe("authenticated dashboard routes", () => {
       expect(await teacher.text()).toContain("Teacher access required");
     });
     expect(saved.store.setDashboardExperience).toHaveBeenCalledWith("user-1", "teacher");
+  });
+
+  it("returns a JSON success response for the browser experience form", async () => {
+    await withServer(async (origin, cookie) => {
+      const response = await fetch(`${origin}/api/account/experience`, { method: "POST", headers: { cookie, origin, accept: "application/json", "content-type": "application/x-www-form-urlencoded" }, body: "experience=student" });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: "saved", experience: "student", redirect: "/app" });
+    });
+  });
+
+  it("explains expired sessions and preserves same-origin CSRF rejection", async () => {
+    await withServer(async (origin) => {
+      const expired = await fetch(`${origin}/api/account/experience`, { method: "POST", headers: { origin, accept: "application/json", "content-type": "application/x-www-form-urlencoded" }, body: "experience=student" });
+      expect(expired.status).toBe(401);
+      expect(await expired.json()).toMatchObject({ error: "login_required", action: "/login?next=/app/experience" });
+      const forged = await fetch(`${origin}/api/account/experience`, { method: "POST", headers: { cookie: "cd_session=" + token, origin: "https://attacker.invalid", accept: "application/json", "content-type": "application/x-www-form-urlencoded" }, body: "experience=student" });
+      expect(forged.status).toBe(403);
+      expect(await forged.json()).toEqual({ error: "same_origin_required" });
+    });
+  });
+
+  it("returns a friendly retryable error when preference persistence fails", async () => {
+    await withServer(async (origin, cookie, _userId, _setUserId, controls) => {
+      controls.setPreferenceFailure(true);
+      const response = await fetch(`${origin}/api/account/experience`, { method: "POST", headers: { cookie, origin, accept: "application/json", "content-type": "application/x-www-form-urlencoded" }, body: "experience=teacher" });
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "preference_unavailable", message: "We could not save your dashboard choice. Try again in a moment." });
+    });
   });
 
   it.each([
