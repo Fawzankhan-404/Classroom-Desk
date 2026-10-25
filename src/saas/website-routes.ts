@@ -568,7 +568,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   app.get("/app", async (_req, res) => {
     const user = res.locals.accountUser;
     const preference = await options.store.getDashboardExperience(user.id);
-    if (!preference) return res.type("html").send(renderExperienceSelector(user, null));
+    if (!preference) return res.redirect(303, "/app/experience");
     return preference === "teacher" ? renderTeacher(user, res) : renderStudent(user, res);
   });
   app.get("/app/experience", async (_req, res) => res.type("html").send(renderExperienceSelector(res.locals.accountUser, await options.store.getDashboardExperience(res.locals.accountUser.id))));
