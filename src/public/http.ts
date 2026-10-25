@@ -172,6 +172,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
       <p class="updated">Optional support for a free, open-source project.</p>
       <p>Classroom Desk is an independently developed, open-source project that connects Google Classroom with ChatGPT, making it easier for students to access their courses, assignments, deadlines, and learning information.</p>
       <p>Building and maintaining this project takes time and resources. Contributions help us keep improving it and make access more affordable for students who need it.</p>
+      <p><a class="button" href="https://github.com/Fawzankhan-404/Classroom-Desk" target="_blank" rel="noopener noreferrer">View Classroom Desk on GitHub</a></p>
 
       <h2>Where your support goes</h2>
       <div class="faq-list">
@@ -184,6 +185,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
       <p>Whether you're a student, developer, educator, or someone who believes in accessible education, your support helps keep Classroom Desk moving forward.</p>
       <p><a class="button secondary" href="mailto:${support}">Support Classroom Desk</a></p>
       <p class="fine-print">Classroom Desk is an independent open-source project. Contributions are voluntary and do not purchase a subscription or guarantee access to paid features.</p>
+      <p class="fine-print">Online contributions are not enabled yet. No payment can be made from this page until the merchant account and contribution checkout have been separately approved and configured.</p>
     </article>
   `)));
   app.get("/refunds", (_req, res) => res.type("html").send(page("Refund and cancellation policy", "refunds", operator, support, config.origin, `

@@ -413,8 +413,10 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain("Student access");
       expect(html).toContain("Hosting and maintenance");
       expect(html).toContain("Open-source development");
+      expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk"');
       expect(html).toContain("Support Classroom Desk");
       expect(html).toContain("Contributions are voluntary and do not purchase a subscription");
+      expect(html).toContain("Online contributions are not enabled yet");
       expect(html).not.toContain('id="support-custom-amount"');
       expect(html).not.toContain("No payment can be made from this page right now.");
       expect(html).not.toContain("buymeacoffee.com");
