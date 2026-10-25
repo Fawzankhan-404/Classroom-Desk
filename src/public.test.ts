@@ -401,7 +401,7 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain("Refunds and disputes");
     } finally { await close(ctx.server); }
   });
-  it("uses the shared site design for support and keeps unverified checkout disabled", async () => {
+  it("uses the shared site design for open-source support information", async () => {
     const ctx = await setup();
     try {
       const response = await fetch(`${ctx.origin}/support`);
@@ -409,16 +409,14 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(response.status).toBe(200);
       expect(html).toContain('<article class="doc support-card" id="project-support"');
       expect(html).toContain("Support Classroom Desk");
-      expect(html).toContain("₹99");
-      expect(html).toContain("₹299");
-      expect(html).toContain("₹999");
-      expect(html).toContain('id="support-custom-amount" type="number"');
-      expect(html).toContain('disabled aria-disabled="true" aria-describedby="support-custom-amount-status"');
-      expect(html).toContain("Custom contributions are not available yet.");
-      expect(html).toContain("maintenance, hosting, infrastructure, documentation, and future development");
-      expect(html).toContain("it does not unlock features, change account permissions, or purchase a hosted plan");
-      expect(html).toContain('class="button secondary" type="button" disabled aria-disabled="true"');
-      expect(html).toContain("No payment can be made from this page right now.");
+      expect(html).toContain("independently developed, open-source project");
+      expect(html).toContain("Student access");
+      expect(html).toContain("Hosting and maintenance");
+      expect(html).toContain("Open-source development");
+      expect(html).toContain("Support Classroom Desk");
+      expect(html).toContain("Contributions are voluntary and do not purchase a subscription");
+      expect(html).not.toContain('id="support-custom-amount"');
+      expect(html).not.toContain("No payment can be made from this page right now.");
       expect(html).not.toContain("buymeacoffee.com");
       expect(html).not.toContain("github.com/sponsors/");
       expect(html).not.toContain("href=\"https://rzp.io/");
@@ -429,7 +427,6 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).not.toContain("--support-bg:");
       expect(html).not.toContain("class=\"support-page\"");
       expect(html).not.toContain("sponsorship-hero");
-      expect(html).toContain("Do not send OAuth tokens, passwords, authorization codes");
       const homeResponse = await fetch(ctx.origin);
       const homeHtml = await homeResponse.text();
       expect(homeResponse.status).toBe(200);

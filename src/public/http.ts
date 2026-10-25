@@ -169,38 +169,21 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   app.get("/support", (_req, res) => res.type("html").send(page("Support", "support", operator, support, config.origin, `
     <article class="doc support-card" id="project-support" aria-labelledby="project-support-title">
       <h1 id="project-support-title">Support Classroom Desk</h1>
-      <p class="updated">Last updated: 20 October 2026. Optional support for a free, open-source project.</p>
-      <p>Contributions can help with maintenance, hosting, infrastructure, documentation, and future development. Support is voluntary; it does not unlock features, change account permissions, or purchase a hosted plan.</p>
+      <p class="updated">Optional support for a free, open-source project.</p>
+      <p>Classroom Desk is an independently developed, open-source project that connects Google Classroom with ChatGPT, making it easier for students to access their courses, assignments, deadlines, and learning information.</p>
+      <p>Building and maintaining this project takes time and resources. Contributions help us keep improving it and make access more affordable for students who need it.</p>
 
-      <h2 id="suggested-amounts">Suggested one-time amounts</h2>
-      <div class="price-strip support-amounts" aria-labelledby="suggested-amounts">
-        <article><strong>₹99</strong><p>A small contribution</p></article>
-        <article><strong>₹299</strong><p>Support ongoing upkeep</p></article>
-        <article><strong>₹999</strong><p>Support future development</p></article>
-      </div>
-      <div class="support-custom-amount">
-        <label for="support-custom-amount">Or enter a custom amount (₹)</label>
-        <input id="support-custom-amount" type="number" inputmode="decimal" placeholder="Not available yet" disabled aria-disabled="true" aria-describedby="support-custom-amount-status">
-      </div>
-      <p class="fine-print" id="support-custom-amount-status">Custom contributions are not available yet. This field will remain disabled until checkout is ready.</p>
-      <p class="fine-print">These are suggested amounts only. Checkout is not available yet.</p>
-      <p><button class="button secondary" type="button" disabled aria-disabled="true" aria-describedby="support-checkout-status">Checkout is not available yet</button></p>
-      <p class="fine-print" id="support-checkout-status">No payment can be made from this page right now.</p>
-
-      <h2>Questions</h2>
+      <h2>Where your support goes</h2>
       <div class="faq-list">
-        <details><summary>Is support required to use Classroom Desk?</summary><p>No. Support is optional. The project remains free and open source without a contribution.</p></details>
-        <details><summary>Does a contribution unlock features?</summary><p>No. Contributions do not unlock functionality, change permissions, or purchase hosted-plan access.</p></details>
-        <details><summary>How will contributions help?</summary><p>They can support project maintenance, hosting, infrastructure, documentation, and future development.</p></details>
+        <section class="panel"><h3>Student access</h3><p>Help us provide sponsored or discounted Classroom Desk access to students who cannot afford a subscription.</p></section>
+        <section class="panel"><h3>Hosting and maintenance</h3><p>Support the infrastructure, security updates, bug fixes, and ongoing reliability of Classroom Desk.</p></section>
+        <section class="panel"><h3>Open-source development</h3><p>Help us maintain the codebase, improve documentation, and build useful features for the community.</p></section>
       </div>
 
-      <h2>Need help?</h2>
-      <p>For connection problems, privacy questions, or deletion requests, contact <a href="${mailto}">${support}</a>.</p>
-      <div class="panel ok">
-        <h2>When contacting support</h2>
-        <ul><li>What you were trying to do</li><li>The page or ChatGPT step where the problem appeared</li><li>Any visible error message, without private Classroom content</li></ul>
-      </div>
-      <p class="fine-print">Do not send OAuth tokens, passwords, authorization codes, screenshots containing private Classroom data, or Google account secrets.</p>
+      <h2>Every contribution helps</h2>
+      <p>Whether you're a student, developer, educator, or someone who believes in accessible education, your support helps keep Classroom Desk moving forward.</p>
+      <p><a class="button secondary" href="mailto:${support}">Support Classroom Desk</a></p>
+      <p class="fine-print">Classroom Desk is an independent open-source project. Contributions are voluntary and do not purchase a subscription or guarantee access to paid features.</p>
     </article>
   `)));
   app.get("/refunds", (_req, res) => res.type("html").send(page("Refund and cancellation policy", "refunds", operator, support, config.origin, `
