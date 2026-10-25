@@ -560,6 +560,23 @@ function connectGuideModal() {
 
 function connectScript() {
   return `(() => {
+    const card = document.querySelector("[data-connection-card]");
+    const copy = document.querySelector(".home-copy");
+    const section = card?.closest("#how-it-works");
+    if (card && copy && section) {
+      const heading = document.createElement("p");
+      heading.className = "hero-connection-title";
+      heading.textContent = "Connect in 3 steps.";
+      card.querySelector(".connection-card-head span")?.replaceChildren(document.createTextNode("Connect in 3 steps"));
+      card.classList.add("hero-connection-card");
+      card.prepend(heading);
+      copy.querySelector(".home-note")?.remove();
+      copy.append(card);
+      section.remove();
+      const style = document.createElement("style");
+      style.textContent = ".hero-connection-title{margin:0 0 10px;color:#0b6247;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.hero-connection-card{max-width:560px;min-height:0;margin:24px 0 0;padding:20px;border-radius:18px}.hero-connection-card[data-connection-card] section{min-height:132px}.hero-connection-card[data-connection-card] h3{font-size:clamp(22px,2.5vw,30px);margin:14px 0 6px}.hero-connection-card[data-connection-card] p{font-size:15px}.hero-connection-card .connection-card-track{margin:16px 0 20px}.hero-connection-card .connection-card-actions{margin-top:16px}.hero-connection-card .connection-card-actions .text-link{margin-left:auto}@media(max-width:1023px){.hero-connection-card{max-width:680px}}@media(max-width:767px){.hero-connection-card{margin-top:20px;padding:17px}.hero-connection-card[data-connection-card] section{min-height:142px}.hero-connection-card .connection-url{align-items:stretch;flex-direction:column}.hero-connection-card .connection-card-actions{gap:10px;flex-wrap:wrap}.hero-connection-card .connection-card-actions .text-link{width:100%;margin-left:0}}@media(prefers-reduced-motion:reduce){.hero-connection-card{backdrop-filter:none;-webkit-backdrop-filter:none}}";
+      document.head.append(style);
+    }
     const bindCopy = (button, value) => {
       const feedback = button.querySelector("span") || (button.hasAttribute("data-prompt-tab") ? null : button);
       const label = feedback?.textContent ?? "Copy";
@@ -754,7 +771,7 @@ ${title === "Classroom Desk" ? '<link rel="preload" as="image" href="https://d2o
   <p class="disclaimer">Classroom Desk is an independent integration and is not affiliated with or endorsed by Google or OpenAI. Google Classroom, ChatGPT, and OpenAI are trademarks of their respective owners.</p>
 </footer>
 ${connectGuideModal()}
-<script src="/assets/connect.js?v=20261020-referrals1" defer></script>
+<script src="/assets/connect.js?v=20261025-hero2" defer></script>
 </body>
 </html>`;
 }
