@@ -100,8 +100,11 @@ describe("authenticated dashboard routes", () => {
     const saved = await withServer(async (origin, cookie) => {
       const headers = { cookie, origin, "content-type": "application/x-www-form-urlencoded" };
       const first = await fetch(`${origin}/app`, { headers: { cookie }, redirect: "manual" });
-      expect(first.status).toBe(200);
-      expect(await first.text()).toContain('value="student"');
+      expect(first.status).toBe(303);
+      expect(first.headers.get("location")).toBe("/app/experience");
+      const selector = await fetch(`${origin}/app/experience`, { headers: { cookie }, redirect: "manual" });
+      expect(selector.status).toBe(200);
+      expect(await selector.text()).toContain('value="student"');
       const choose = await fetch(`${origin}/api/account/experience`, { method: "POST", headers, body: "experience=teacher", redirect: "manual" });
       expect(choose.status).toBe(303);
       const teacher = await fetch(`${origin}/app`, { headers: { cookie }, redirect: "manual" });

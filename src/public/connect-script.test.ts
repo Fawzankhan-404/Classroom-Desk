@@ -151,7 +151,7 @@ describe("connectScript copy feedback", () => {
   });
 });
 
-it("serves the updated script over local HTTP with the existing tab and modal markup", async () => {
+it("serves the updated script and keeps the homepage card free of the retired modal", async () => {
   const origin = new URL("http://127.0.0.1");
   const { app } = createPublicApp({ origin, mcpResource: new URL("/mcp", origin), googleCallbackUrl: new URL("/oauth/google/callback", origin).href, googleClientId: "test", googleClientSecret: "test", port: 0, production: false }, new MemoryPublicAuthStore());
   const server = app.listen(0, "127.0.0.1");
@@ -166,8 +166,22 @@ it("serves the updated script over local HTTP with the existing tab and modal ma
     expect(() => new Script(delivered)).not.toThrow();
     const html = await (await fetch(`${base}/`)).text();
     expect(html).toContain('data-copy-prompt="What assignments do I have?">What assignments do I have?<span>Copy</span>');
-    expect(html).toContain('data-copy-mcp="https://classroom.jarvis404.com/mcp">Copy</button>');
+    expect(html).toContain("data-copy-mcp-card");
+    expect(html).not.toContain("data-connect-modal");
+    expect(html).not.toContain("Illustrative response");
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
+});
+
+it("keeps the hero guide progress synchronized for keyboard, swipe, wheel, and controls", () => {
+  const httpSource = readFileSync(new URL("./http.ts", import.meta.url), "utf8");
+  expect(httpSource).toContain("segments.forEach((segment, i) => segment.classList.toggle(\"is-active\", i <= index))");
+  expect(httpSource).toContain("advance(-1)");
+  expect(httpSource).toContain("advance(1)");
+  expect(httpSource).toContain('event.key === "ArrowRight"');
+  expect(httpSource).toContain('event.key === "ArrowLeft"');
+  expect(httpSource).toContain('card.addEventListener("touchend"');
+  expect(httpSource).toContain('card.addEventListener("wheel"');
+  expect(httpSource).toContain("Google authorization verified connection");
 });
