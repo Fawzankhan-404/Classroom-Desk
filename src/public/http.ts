@@ -314,7 +314,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
           <button class="button" type="submit">Continue with Google</button>
         </form>
         <p class="fine-print"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/support">Support</a></p>
-        <p class="fine-print">Built by <a href="https://fawzankhan-404.github.io/" target="_blank" rel="noopener noreferrer">Jarvis404’s developer</a>. Questions? <a href="${mailto}">Get in touch</a>.</p>
+        <p class="fine-print">Built by <a href="https://fawzankhan-404.github.io/" target="_blank" rel="noopener noreferrer">${operator}</a>. Questions? <a href="${mailto}">Get in touch</a>.</p>
       </section>
     `, true));
   });
