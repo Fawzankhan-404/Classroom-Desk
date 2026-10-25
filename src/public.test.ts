@@ -123,13 +123,17 @@ describe("public OAuth and HTTP authorization boundary", () => {
     try {
       const home = await fetch(`${ctx.origin}/`);
       const html = await home.text();
-      expect(html).toContain('rel="icon" type="image/png"');
-      expect(html).toContain('/assets/classroom-desk-favicon.png');
+      expect(html).toContain('rel="icon" type="image/svg+xml"');
+      expect(html).toContain('/assets/classroom-desk-favicon.svg');
       expect(html).not.toContain('/assets/classroom-desk.jpg');
       const favicon = await fetch(`${ctx.origin}/assets/classroom-desk-favicon.png`);
       expect(favicon.status).toBe(200);
       expect(favicon.headers.get("content-type")).toContain("image/png");
       expect(Array.from(new Uint8Array(await favicon.arrayBuffer()).slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+      const faviconSvg = await fetch(`${ctx.origin}/assets/classroom-desk-favicon.svg`);
+      expect(faviconSvg.status).toBe(200);
+      expect(faviconSvg.headers.get("content-type")).toContain("image/svg+xml");
+      expect(await faviconSvg.text()).toContain("data:image/png;base64,");
       const logo = await fetch(`${ctx.origin}/assets/classroom-desk-logo.png`);
       expect(logo.status).toBe(200);
       expect(logo.headers.get("content-type")).toContain("image/png");
