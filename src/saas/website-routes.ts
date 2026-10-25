@@ -563,7 +563,8 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   const renderStudent = async (user: SaaSUser, res: express.Response) => {
     let result: StudentDashboardState = { state: "unavailable" };
     try { result = options.loadClassroomDashboard ? await options.loadClassroomDashboard(user.id) : { state: "not_connected" }; } catch { result = { state: "unavailable" }; }
-    return res.type("html").send(renderStudentDashboard(user, result));
+    const account = await options.store.accountOverview(user);
+    return res.type("html").send(renderStudentDashboard(user, result, { allowed: account.entitlement.allowed, plan: account.entitlement.plan, expiresAt: account.entitlement.expiresAt }));
   };
   const renderTeacher = async (user: SaaSUser, res: express.Response, coursePageToken?: string) => {
     let result: TeacherDashboardState = { state: "unavailable" };
