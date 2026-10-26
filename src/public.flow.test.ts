@@ -48,6 +48,20 @@ describe("complete mocked public authorization path", () => {
     } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
   });
 
+  it("renders the connection card inside the hero without a duplicate how-it-works section", async () => {
+    const port = await freePort(); const origin = `http://127.0.0.1:${port}`;
+    const config = { origin: new URL(origin), mcpResource: new URL(`${origin}/mcp`), googleCallbackUrl: `${origin}/oauth/google/callback`, googleClientId: "mock", googleClientSecret: "mock", port, production: false };
+    const { app } = createPublicApp(config, new MemoryPublicAuthStore());
+    const server = app.listen(port, "127.0.0.1"); await new Promise<void>((resolve) => server.once("listening", resolve));
+    try {
+      const html = await (await fetch(`${origin}/`)).text();
+      expect(html).toContain('data-connection-card');
+      expect(html).toContain('<div class="home-copy">');
+      expect(html.indexOf('data-connection-card')).toBeLessThan(html.indexOf('class="home-console"'));
+      expect(html).not.toContain('id="how-it-works"');
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+  });
+
   it("connects through DCR, Google callback and MCP code exchange, then invokes a projected Classroom tool", async () => {
     const port = await freePort();
     const origin = `http://127.0.0.1:${port}`;
