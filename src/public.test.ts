@@ -133,7 +133,11 @@ describe("public OAuth and HTTP authorization boundary", () => {
       const faviconSvg = await fetch(`${ctx.origin}/assets/classroom-desk-favicon.svg`);
       expect(faviconSvg.status).toBe(200);
       expect(faviconSvg.headers.get("content-type")).toContain("image/svg+xml");
-      expect(await faviconSvg.text()).toContain("data:image/png;base64,");
+      const faviconMarkup = await faviconSvg.text();
+      expect(faviconMarkup).toContain("<svg");
+      expect(faviconMarkup).toContain("#087a55");
+      expect(faviconMarkup).toContain("<path");
+      expect(faviconMarkup).not.toContain("data:image/png;base64,");
       const logo = await fetch(`${ctx.origin}/assets/classroom-desk-logo.png`);
       expect(logo.status).toBe(200);
       expect(logo.headers.get("content-type")).toContain("image/png");
