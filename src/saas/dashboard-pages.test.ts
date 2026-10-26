@@ -14,7 +14,7 @@ describe("account dashboard pages", () => {
     expect(html).toContain("dashboard only");
   });
 
-  it("shows unavailable totals and explains partial Google data in plain language", () => {
+  it("shows bounded assignment work and does not expose optional feed data", () => {
     const html = renderStudentDashboard(user, { state: "connected", overview: {
       generatedAt: "2026-10-18T10:00:00Z",
       summary: { courses: 1, assignments: null, missing: null, turnedIn: null, returned: null },
@@ -22,11 +22,23 @@ describe("account dashboard pages", () => {
       courses: [{ id: "course-1", name: "Biology" }], assignments: [{ title: "Lab", courseName: "Biology", submissionState: "UNKNOWN", missing: null, late: null, dueAt: null, assignmentUrl: null }], announcements: [], courseMaterials: [],
     } });
     expect(html).toContain("Not available");
-    expect(html).toContain("assignment count is not available");
-    expect(html).toContain("missing and turned-in counts are not available");
     expect(html).toContain("Status not available");
+    expect(html).toContain("Work that needs attention");
+    expect(html).not.toContain("Announcements");
+    expect(html).not.toContain("Course materials");
     expect(html).not.toContain("UNKNOWN");
     expect(html).not.toContain("Currently missing</span></article><article><strong>0");
+  });
+
+  it("ships the status-grid layout rules with the rendered dashboard stylesheet", () => {
+    const html = renderStudentDashboard(user, { state: "connected", overview: {
+      generatedAt: "2026-10-18T10:00:00Z", summary: { courses: 0, assignments: 0, missing: 0, turnedIn: 0, returned: 0 },
+      availability: { courseworkComplete: true, submissionsComplete: true, announcementsComplete: true, materialsComplete: true, topicsComplete: true },
+      courses: [], assignments: [], announcements: [], courseMaterials: [],
+    } });
+    expect(html).toContain('class="account-status-grid"');
+    expect(html).toContain('.account-status-grid{display:grid;');
+    expect(html).toContain('@media(max-width:700px){.account-status-grid{grid-template-columns:1fr}}');
   });
 
   it("does not call an incomplete coursework read an empty assignment list", () => {
@@ -36,7 +48,7 @@ describe("account dashboard pages", () => {
       availability: { courseworkComplete: false, submissionsComplete: true, announcementsComplete: true, materialsComplete: true, topicsComplete: true },
       courses: [{ id: "course-1", name: "Biology" }], assignments: [], announcements: [], courseMaterials: [],
     } });
-    expect(html).toContain("We could not retrieve all assignment results from Google");
+    expect(html).toContain("Assignment details are temporarily incomplete");
     expect(html).not.toContain("Google returned no matching published assignments");
   });
 
@@ -50,8 +62,7 @@ describe("account dashboard pages", () => {
       announcements: [], courseMaterials: [],
     } });
     expect(html).toContain("Due: 3 Jan 2026</p>");
-    expect(html).toContain("Missing status not available");
-    expect(html).toContain("Not marked late");
+    expect(html).toContain("Status not available");
     expect(html).not.toContain("Due: 3 Jan 2026, 00:00");
   });
 
@@ -62,9 +73,9 @@ describe("account dashboard pages", () => {
       availability: { coursesComplete: false, courseworkComplete: false, submissionsComplete: false, announcementsComplete: true, materialsComplete: true, topicsComplete: true, assignmentResultsComplete: false, announcementResultsComplete: false, materialResultsComplete: false },
       courses: [], assignments: [], announcements: [], courseMaterials: [],
     } });
-    expect(html).toContain("We could not retrieve every course from Google");
-    expect(html).toContain("We could not retrieve every matching assignment from Google");
-    expect(html).toContain("We could not retrieve every announcement from Google");
+    expect(html).toContain("Course results are incomplete");
+    expect(html).toContain("Assignment details are temporarily incomplete");
+    expect(html).not.toContain("announcement");
     expect(html).not.toContain("Google returned no active courses");
     expect(html).not.toContain("Google returned no matching published assignments");
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderProfile, renderReferrals, renderSubscription } from "./account-portal.js";
+import { renderConnection, renderProfile, renderReferrals, renderSubscription } from "./account-portal.js";
 import type { AccountOverview } from "./account-portal.js";
 import type { SaaSUser } from "./types.js";
 
@@ -25,8 +25,14 @@ describe("account portal customer-facing copy", () => {
     expect(html).toContain("Your website sign-in and Google Classroom access are separate.");
     expect(html).toContain("Signing in to this website alone does not grant Classroom access.");
     expect(html).toContain("Switching here changes the website account only.");
+    expect(html).toContain('href="/app/connection">Manage connection</a>');
     expect(html).not.toContain("verified subject");
     expect(html).not.toContain("MCP user");
+  });
+
+  it("styles Google access management as a secondary action", () => {
+    const html = renderConnection(overview().user);
+    expect(html).toContain('class="button secondary" href="https://myaccount.google.com/connections"');
   });
 
   it("keeps checkout closed and renders account history without backend status codes", () => {
@@ -57,6 +63,13 @@ describe("account portal customer-facing copy", () => {
     expect(html).toContain("30 days");
     expect(html).not.toContain("private-referral-code");
     expect(html).not.toContain("Copy referral link");
+  });
+
+  it("explains active access separately from Google authorization", () => {
+    const html = renderSubscription(overview({ entitlement: { allowed: true, reason: "active_subscription", plan: "student", expiresAt: new Date("2026-11-24T00:00:00Z") } }), true, false);
+    expect(html).toContain("Student access is active.");
+    expect(html).toContain("Google authorization is a separate step");
+    expect(html).toContain("Connect or reconnect Google Classroom");
   });
 
   it("states the existing referral qualification rules without adding unsupported rewards", () => {

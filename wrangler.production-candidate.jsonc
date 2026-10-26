@@ -7,6 +7,11 @@
   "workers_dev": false,
   "preview_urls": false,
   "keep_vars": true,
+  "vars": {
+    "V2_PUBLIC_APP_ORIGIN": "https://classroom.jarvis404.com",
+    "V2_PICKER_CALLBACK_URL": "https://classroom.jarvis404.com/picker/callback",
+    "V2_PUBLIC_OPERATOR_NAME": "Mohammed Fawzan Khan"
+  },
   "secrets": {
     "required": [
       "INTERNAL_DELEGATION_SECRET",

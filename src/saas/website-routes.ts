@@ -470,11 +470,16 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   });
   app.post("/api/account/experience", async (req, res) => {
     const session = await currentSession(req.get("cookie"), options.store);
-    if (!session) return res.status(401).type("html").send(message("Sign in required", "Sign in before selecting a dashboard."));
+    const wantsJson = req.get("accept")?.includes("application/json") === true;
+    const failure = (status: number, error: string, detail: string, action?: string) => wantsJson
+      ? res.status(status).json({ error, message: detail, ...(action ? { action } : {}) })
+      : res.status(status).type("html").send(message(status === 401 ? "Sign in required" : "Preference could not be saved", detail));
+    if (!session) return failure(401, "login_required", "Your sign-in expired. Sign in again to choose a dashboard.", "/login?next=/app/experience");
     const experience = req.body?.experience;
-    if (experience !== "student" && experience !== "teacher") return res.status(400).type("html").send(message("Choose a dashboard", "Select Student or Teacher."));
+    if (experience !== "student" && experience !== "teacher") return failure(400, "invalid_experience", "Choose Student or Teacher to continue.");
     try { await options.store.setDashboardExperience(session.userId, experience as DashboardExperience); }
-    catch { return res.status(503).type("html").send(message("Preference could not be saved", "Your account preference was not changed. Try again.")); }
+    catch { return failure(503, "preference_unavailable", "We could not save your dashboard choice. Try again in a moment."); }
+    if (wantsJson) return res.status(200).json({ status: "saved", experience, redirect: "/app" });
     return res.redirect(303, "/app");
   });
   app.post("/api/teacher/authorization", async (req, res) => {
@@ -558,7 +563,8 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   const renderStudent = async (user: SaaSUser, res: express.Response) => {
     let result: StudentDashboardState = { state: "unavailable" };
     try { result = options.loadClassroomDashboard ? await options.loadClassroomDashboard(user.id) : { state: "not_connected" }; } catch { result = { state: "unavailable" }; }
-    return res.type("html").send(renderStudentDashboard(user, result));
+    const account = await options.store.accountOverview(user);
+    return res.type("html").send(renderStudentDashboard(user, result, { allowed: account.entitlement.allowed, plan: account.entitlement.plan, expiresAt: account.entitlement.expiresAt }));
   };
   const renderTeacher = async (user: SaaSUser, res: express.Response, coursePageToken?: string) => {
     let result: TeacherDashboardState = { state: "unavailable" };
@@ -568,7 +574,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
   app.get("/app", async (_req, res) => {
     const user = res.locals.accountUser;
     const preference = await options.store.getDashboardExperience(user.id);
-    if (!preference) return res.type("html").send(renderExperienceSelector(user, null));
+    if (!preference) return res.redirect(303, "/app/experience");
     return preference === "teacher" ? renderTeacher(user, res) : renderStudent(user, res);
   });
   app.get("/app/experience", async (_req, res) => res.type("html").send(renderExperienceSelector(res.locals.accountUser, await options.store.getDashboardExperience(res.locals.accountUser.id))));

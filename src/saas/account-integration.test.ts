@@ -108,8 +108,10 @@ describe("Account portal with isolated PostgreSQL persistence", () => {
         const headers={cookie:`cd_session=${token}`,origin};
         for (const path of ["/app","/app/subscription","/app/referrals","/app/connection"]) {
           const response=await fetch(origin+path,{headers,redirect:"manual"});
-          expect(response.status).toBe(200);expect(response.headers.get("cache-control")).toBe("no-store");
-          const content=await response.text();expect(content).toContain(user.email);expect(content).not.toContain('href="/app/courses"');
+          const expectedStatus = path === "/app" ? 303 : 200;
+          expect(response.status).toBe(expectedStatus);expect(response.headers.get("cache-control")).toBe("no-store");
+          const content=await response.text(); if (path !== "/app") expect(content).toContain(user.email); expect(content).not.toContain('href="/app/courses"');
+          if (path === "/app") expect(response.headers.get("location")).toBe("/app/experience");
           if (path === "/app/referrals") expect(content).toContain("Unavailable while rewards are paused");
         }
         const referralCode = await pg.query("SELECT code FROM classroom_desk_referral_codes WHERE user_id=$1", [user.id]);

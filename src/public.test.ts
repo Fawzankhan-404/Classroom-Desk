@@ -118,7 +118,7 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(body.token_endpoint).toContain("/token");
     } finally { await close(ctx.server); }
   });
-  it("uses the SVG brand as the primary site logo while retaining the legacy favicon endpoint", async () => {
+  it("uses the supplied Classroom Desk artwork as the primary site logo", async () => {
     const ctx = await setup();
     try {
       const home = await fetch(`${ctx.origin}/`);
@@ -126,17 +126,18 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain('rel="icon" type="image/svg+xml"');
       expect(html).toContain('/assets/classroom-desk-favicon.svg');
       expect(html).not.toContain('/assets/classroom-desk.jpg');
-      const vector = await fetch(`${ctx.origin}/assets/classroom-desk-favicon.svg`);
-      expect(vector.status).toBe(200);
-      expect(vector.headers.get("content-type")).toContain("image/svg+xml");
-      const svg = await vector.text();
-      expect(svg).toContain('viewBox="0 0 32 32"');
-      expect(svg).toContain('aria-label="Classroom Desk logo"');
-      expect(svg).toContain("#087a52");
-      expect(svg).not.toContain("classroom-desk.jpg");
-      const logo = await fetch(`${ctx.origin}/assets/classroom-desk-logo.svg`);
+      const favicon = await fetch(`${ctx.origin}/assets/classroom-desk-favicon.png`);
+      expect(favicon.status).toBe(200);
+      expect(favicon.headers.get("content-type")).toContain("image/png");
+      expect(Array.from(new Uint8Array(await favicon.arrayBuffer()).slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+      const faviconSvg = await fetch(`${ctx.origin}/assets/classroom-desk-favicon.svg`);
+      expect(faviconSvg.status).toBe(200);
+      expect(faviconSvg.headers.get("content-type")).toContain("image/svg+xml");
+      expect(await faviconSvg.text()).toContain("data:image/png;base64,");
+      const logo = await fetch(`${ctx.origin}/assets/classroom-desk-logo.png`);
       expect(logo.status).toBe(200);
-      expect(await logo.text()).toContain('viewBox="0 0 96 96"');
+      expect(logo.headers.get("content-type")).toContain("image/png");
+      expect(Array.from(new Uint8Array(await logo.arrayBuffer()).slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
       const social = await fetch(`${ctx.origin}/assets/classroom-desk-social-card.png`);
       expect(social.status).toBe(200);
       expect(social.headers.get("content-type")).toContain("image/png");
@@ -400,7 +401,7 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain("Refunds and disputes");
     } finally { await close(ctx.server); }
   });
-  it("uses the shared site design for support and keeps unverified checkout disabled", async () => {
+  it("uses the shared site design for open-source support information", async () => {
     const ctx = await setup();
     try {
       const response = await fetch(`${ctx.origin}/support`);
@@ -408,16 +409,16 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(response.status).toBe(200);
       expect(html).toContain('<article class="doc support-card" id="project-support"');
       expect(html).toContain("Support Classroom Desk");
-      expect(html).toContain("₹99");
-      expect(html).toContain("₹299");
-      expect(html).toContain("₹999");
-      expect(html).toContain('id="support-custom-amount" type="number"');
-      expect(html).toContain('disabled aria-disabled="true" aria-describedby="support-custom-amount-status"');
-      expect(html).toContain("Custom contributions are not available yet.");
-      expect(html).toContain("maintenance, hosting, infrastructure, documentation, and future development");
-      expect(html).toContain("it does not unlock features, change account permissions, or purchase a hosted plan");
-      expect(html).toContain('class="button secondary" type="button" disabled aria-disabled="true"');
-      expect(html).toContain("No payment can be made from this page right now.");
+      expect(html).toContain("independently developed, open-source project");
+      expect(html).toContain("Student access");
+      expect(html).toContain("Hosting and maintenance");
+      expect(html).toContain("Open-source development");
+      expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk"');
+      expect(html).toContain("Support Classroom Desk");
+      expect(html).toContain("Contributions are voluntary and do not purchase a subscription");
+      expect(html).toContain("Online contributions are not enabled yet");
+      expect(html).not.toContain('id="support-custom-amount"');
+      expect(html).not.toContain("No payment can be made from this page right now.");
       expect(html).not.toContain("buymeacoffee.com");
       expect(html).not.toContain("github.com/sponsors/");
       expect(html).not.toContain("href=\"https://rzp.io/");
@@ -428,7 +429,6 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).not.toContain("--support-bg:");
       expect(html).not.toContain("class=\"support-page\"");
       expect(html).not.toContain("sponsorship-hero");
-      expect(html).toContain("Do not send OAuth tokens, passwords, authorization codes");
       const homeResponse = await fetch(ctx.origin);
       const homeHtml = await homeResponse.text();
       expect(homeResponse.status).toBe(200);
