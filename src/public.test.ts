@@ -68,6 +68,9 @@ describe("public V1 scopes and projections", () => {
     const base = { GOOGLE_OAUTH_CLIENT_ID: "test-id", GOOGLE_OAUTH_CLIENT_SECRET: "test-secret", PUBLIC_APP_ORIGIN: "https://classroom.example" };
     expect(() => loadRuntimeConfig({ ...base, NODE_ENV: "production", PUBLIC_APP_ORIGIN: "http://classroom.example" })).toThrow("HTTPS");
     expect(() => loadRuntimeConfig({ ...base, MCP_RESOURCE_URL: "https://other.example/mcp" })).toThrow("MCP_RESOURCE_URL");
+    expect(() => loadRuntimeConfig({ ...base, MCP_STUDENT_RESOURCE_URL: "https://other.example/mcp/student" })).toThrow("MCP_STUDENT_RESOURCE_URL");
+    expect(() => loadRuntimeConfig({ ...base, MCP_STUDENT_RESOURCE_URL: "https://classroom.example/mcp/other" })).toThrow("MCP_STUDENT_RESOURCE_URL");
+    expect(loadRuntimeConfig(base).studentMcpResource?.href).toBe("https://classroom.example/mcp/student");
     expect(() => loadRuntimeConfig({ ...base, GOOGLE_OAUTH_CALLBACK_URL: "https://other.example/oauth/google/callback" })).toThrow("Google callback");
     expect(() => loadRuntimeConfig({ ...base, PORT: "0" })).toThrow("PORT");
     expect(() => loadRuntimeConfig({ ...base, NODE_ENV: "production", PUBLIC_AUTH_STORE: "memory" })).toThrow("encrypted persistent authorization store");
@@ -77,6 +80,29 @@ describe("public V1 scopes and projections", () => {
 });
 
 describe("public OAuth and HTTP authorization boundary", () => {
+  it("accepts only the exact legacy or student OAuth resource and preserves the student's audience", async () => {
+    const origin = new URL("https://classroom.example");
+    const studentResource = new URL("/mcp/student", origin);
+    const store = new MemoryPublicAuthStore();
+    const provider = new PublicOAuthProvider(store, { ...authConfig, origin, mcpResource: new URL("/mcp", origin), studentMcpResource: studentResource });
+    const clientId = "student-client";
+    const redirectUri = "https://chatgpt.com/connector/oauth/student-test";
+    const client = { client_id: clientId, redirect_uris: [redirectUri] } as never;
+    const params = { redirectUri, codeChallenge: "synthetic-pkce-challenge", state: "client-state", scopes: [MCP_SCOPE, MCP_OFFLINE_SCOPE], resource: studentResource };
+    const redirect = vi.fn<(status: number, url: string) => unknown>();
+    await provider.authorize(client, params, { setHeader: vi.fn(), redirect } as never);
+    const flow = await store.getFlow(new URL(redirect.mock.calls[0]![1]).searchParams.get("flow")!);
+    expect(flow?.params.resource?.href).toBe(studentResource.href);
+    await expect(provider.authorize(client, { ...params, resource: new URL("/mcp/other", origin) }, { setHeader: vi.fn(), redirect: vi.fn() } as never)).rejects.toThrow("Invalid resource");
+
+    const now = Date.now();
+    await store.putGrant({ userId: flow!.userId, refreshToken: "synthetic-google-refresh", scopes: [...PUBLIC_CLASSROOM_SCOPES], createdAt: now, updatedAt: now });
+    await store.putCode({ code: "student-resource-code", clientId, userId: flow!.userId, redirectUri, challenge: params.codeChallenge, resource: studentResource, scopes: params.scopes, expiresAt: now + 60_000 });
+    await expect(provider.exchangeAuthorizationCode(client, "student-resource-code", undefined, redirectUri, new URL("/mcp", origin))).rejects.toThrow("Invalid authorization code");
+    const issued = await provider.exchangeAuthorizationCode(client, "student-resource-code", undefined, redirectUri, studentResource);
+    await expect(provider.verifyAccessToken(issued.access_token)).resolves.toMatchObject({ resource: studentResource, scopes: params.scopes });
+  });
+
   it("limits unauthenticated readiness probes", async () => {
     const ctx = await setup();
     try {

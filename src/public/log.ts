@@ -1,4 +1,4 @@
-const routes = new Set(["/mcp", "/health", "/ready", "/authorize", "/token", "/register", "/revoke", "/connect/google", "/oauth/google/callback", "/disconnect/google"]);
+const routes = new Set(["/mcp", "/mcp/student", "/health", "/ready", "/authorize", "/token", "/register", "/revoke", "/connect/google", "/oauth/google/callback", "/disconnect/google"]);
 
 /** No request URL/query, identity, headers, bodies or upstream error strings enter logs. */
 export function logHttp(method: string, path: string, status: number, durationMs: number) {

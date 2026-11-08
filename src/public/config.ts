@@ -6,6 +6,7 @@ export type RuntimeConfig = PublicOAuthConfig & {
   port: number; production: boolean; bindHost?: string;
   workerClientIp?: boolean;
   storeKind?: "memory" | "postgres" | "d1"; databaseUrl?: string; encryptionKeyBase64?: string;
+  studentMcpResource?: URL;
   operatorName?: string; supportEmail?: string; chatgptPluginUrl?: string;
   saasFlags?: SaaSFeatureFlags;
 };
@@ -29,6 +30,8 @@ export function loadRuntimeConfig(env = process.env): RuntimeConfig {
   if (origin.pathname !== "/") throw new Error("PUBLIC_APP_ORIGIN must be an origin without a path.");
   const resource = safeUrl("MCP_RESOURCE_URL", env.MCP_RESOURCE_URL?.trim() || new URL("/mcp", origin).toString());
   if (resource.origin !== origin.origin || resource.pathname !== "/mcp") throw new Error("MCP_RESOURCE_URL must match the application origin and /mcp route.");
+  const studentResource = safeUrl("MCP_STUDENT_RESOURCE_URL", env.MCP_STUDENT_RESOURCE_URL?.trim() || new URL("/mcp/student", origin).toString());
+  if (studentResource.origin !== origin.origin || studentResource.pathname !== "/mcp/student") throw new Error("MCP_STUDENT_RESOURCE_URL must match the application origin and /mcp/student route.");
   const callback = safeUrl("GOOGLE_OAUTH_CALLBACK_URL", env.GOOGLE_OAUTH_CALLBACK_URL?.trim() || new URL("/oauth/google/callback", origin).toString());
   if (callback.origin !== origin.origin || callback.pathname !== "/oauth/google/callback") throw new Error("Google callback URL must match the configured application origin and callback route.");
   const port = Number(env.PORT ?? (production ? "3000" : "8787"));
@@ -53,7 +56,7 @@ export function loadRuntimeConfig(env = process.env): RuntimeConfig {
     if (url.protocol !== "https:" || !["chatgpt.com", "www.chatgpt.com"].includes(url.hostname)) throw new Error("CHATGPT_PLUGIN_URL must be an HTTPS ChatGPT URL.");
   }
   return {
-    origin, mcpResource: resource, googleCallbackUrl: callback.toString(),
+    origin, mcpResource: resource, studentMcpResource: studentResource, googleCallbackUrl: callback.toString(),
     googleClientId: env.GOOGLE_OAUTH_CLIENT_ID?.trim() || required("GOOGLE_OAUTH_CLIENT_ID", env),
     googleClientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || required("GOOGLE_OAUTH_CLIENT_SECRET", env),
     port, production, bindHost: production ? "0.0.0.0" : "127.0.0.1", storeKind, databaseUrl, encryptionKeyBase64, operatorName, supportEmail, chatgptPluginUrl,

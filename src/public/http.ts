@@ -22,10 +22,10 @@ import { socialPreviewPngBase64 } from "./social-preview-asset.js";
 import { classroomDeskFaviconPngBase64, classroomDeskFaviconSvg, classroomDeskLogoPngBase64 } from "./logo-asset.js";
 import { accessGuidance, MCP_ONBOARDING_TOOLS, registerMcpOnboarding } from "../saas/mcp-access.js";
 
-type Session = { userId: string; transport: StreamableHTTPServerTransport; server: McpServer };
+type Session = { userId: string; catalogMode: "full" | "student"; transport: StreamableHTTPServerTransport; server: McpServer };
 type AuthenticatedRequest = Request & { auth?: AuthInfo };
 export type RawBodyRequest = Request & { rawBody?: Buffer };
-type McpFactory = (auth: OAuth2Client, userId: string) => Promise<McpServer>;
+type McpFactory = (auth: OAuth2Client, userId: string, catalogMode: "full" | "student") => Promise<McpServer>;
 type PublicAppOptions = { mcpFactory?: McpFactory; resourceName?: string; registerRoutes?: (app: express.Express) => void; entitlementCheck?: (userId: string) => Promise<{ allowed: boolean; reason: string }>; loadPricingReferral?: (cookieHeader: string | undefined) => Promise<PricingReferralView>; publicOnly?: boolean; internalDelegationSecret?: string; stagingSubjectFingerprint?: boolean };
 
 export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, provider = new PublicOAuthProvider(store, config), readyCheck?: () => Promise<void>, clientsFactory: (auth: OAuth2Client) => ClassroomClients = createClients, options: PublicAppOptions = {}) {
@@ -70,7 +70,8 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   app.use(express.urlencoded({ extended: false, limit: "4kb" }));
   app.use(express.json({ limit: "64kb", verify: (req, _res, buffer) => { (req as RawBodyRequest).rawBody = Buffer.from(buffer); } }));
 
-  const metadataUrl = new URL("/.well-known/oauth-protected-resource/mcp", config.origin).toString();
+  const studentMcpResource = config.studentMcpResource ?? new URL("/mcp/student", config.origin);
+  const metadataUrlFor = (resource: URL) => new URL(`/.well-known/oauth-protected-resource${resource.pathname}`, config.origin).toString();
   app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
   app.get("/pricing", async (req, res) => {
     const flags = config.saasFlags ?? loadSaaSFeatureFlags(process.env);
@@ -240,6 +241,12 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   };
   app.get("/authorize", rejectUnsafeAuthorizationRedirect);
   app.post("/authorize", rejectUnsafeAuthorizationRedirect);
+  app.get("/.well-known/oauth-protected-resource/mcp/student", (_req, res) => res.json({
+    resource: studentMcpResource.href,
+    authorization_servers: [config.origin.href],
+    scopes_supported: [MCP_SCOPE, MCP_OFFLINE_SCOPE],
+    resource_name: "Classroom Desk Student",
+  }));
   app.use(mcpAuthRouter({
     provider, issuerUrl: config.origin, baseUrl: config.origin, resourceServerUrl: config.mcpResource,
     scopesSupported: [MCP_SCOPE, MCP_OFFLINE_SCOPE], resourceName: options.resourceName ?? "Classroom Desk MCP access",
@@ -338,6 +345,8 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   });
 
   const authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const resource = req.path === "/mcp/student" ? studentMcpResource : config.mcpResource;
+    const metadataUrl = metadataUrlFor(resource);
     const match = /^Bearer ([A-Za-z0-9._~+/-]+=*)$/.exec(req.get("authorization") ?? "");
     if (!match?.[1]) {
       res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${metadataUrl}"`);
@@ -345,7 +354,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
     }
     try {
       const auth = await provider.verifyAccessToken(match[1]);
-      if (!auth.scopes.includes(MCP_SCOPE) || auth.resource?.href !== config.mcpResource.href) throw new Error("invalid");
+      if (!auth.scopes.includes(MCP_SCOPE) || auth.resource?.href !== resource.href) throw new Error("invalid");
       req.auth = auth;
       return next();
     } catch {
@@ -363,14 +372,15 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
     } catch { return res.status(503).json({ error: "disconnect_failed", message: "Disconnect could not be confirmed. Try again." }); }
   });
 
-  app.options("/mcp", (_req, res) => {
+  app.options(["/mcp", "/mcp/student"], (_req, res) => {
     res.setHeader("Access-Control-Allow-Origin", config.origin.origin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID");
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
     res.status(204).end();
   });
-  app.all("/mcp", authenticate, async (req: AuthenticatedRequest, res) => {
+  app.all(["/mcp", "/mcp/student"], authenticate, async (req: AuthenticatedRequest, res) => {
+    const catalogMode: "full" | "student" = req.path === "/mcp/student" ? "student" : "full";
     res.setHeader("Access-Control-Allow-Origin", config.origin.origin);
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
     if (!["GET", "POST", "DELETE"].includes(req.method)) {
@@ -407,11 +417,12 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
         if (!entitlement?.allowed) return denyTool(entitlement?.reason ?? "temporarily_unavailable");
       } catch { return denyTool("temporarily_unavailable"); }
     }
+    if (catalogMode === "student" && !options.mcpFactory) return res.status(503).json({ error: "student_catalog_unavailable" });
     const makeServer = async () => {
       let auth = await provider.googleAuthForUser(userId).catch(() => undefined);
       if (!auth && protectedInvocation) return undefined;
       auth ??= new OAuth2Client(); // Discovery/onboarding never calls Google.
-      const mcp = options.mcpFactory ? await options.mcpFactory(auth, userId) : await createServer(clientsFactory(auth), { publicV1: true });
+      const mcp = options.mcpFactory ? await options.mcpFactory(auth, userId, catalogMode) : await createServer(clientsFactory(auth), { publicV1: true });
       registerMcpOnboarding(mcp, () => options.entitlementCheck?.(userId) ?? Promise.resolve({ allowed: false, reason: "account_setup_required" }), config.origin.origin, options.stagingSubjectFingerprint ? userId : undefined);
       return mcp;
     };
@@ -430,7 +441,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
     }
     const sessionId = req.get("mcp-session-id");
     let session = sessionId ? sessions.get(sessionId) : undefined;
-    if (sessionId && (!session || session.userId !== userId)) return res.status(404).json({ error: "session_not_found" });
+    if (sessionId && (!session || session.userId !== userId || session.catalogMode !== catalogMode)) return res.status(404).json({ error: "session_not_found" });
     if (!session) {
       if (req.method !== "POST") return res.status(400).json({ error: "initialization_required" });
       const mcp = await makeServer();
@@ -438,7 +449,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => crypto.randomUUID(),
         enableJsonResponse: true,
-        onsessioninitialized: (newSessionId) => { sessions.set(newSessionId, { userId, transport, server: mcp }); },
+        onsessioninitialized: (newSessionId) => { sessions.set(newSessionId, { userId, catalogMode, transport, server: mcp }); },
         onsessionclosed: async (closedId) => {
           const existing = sessions.get(closedId);
           sessions.delete(closedId);
@@ -446,7 +457,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
         },
       });
       transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
-      session = { userId, transport, server: mcp };
+      session = { userId, catalogMode, transport, server: mcp };
       await mcp.connect(transport);
     }
     try {

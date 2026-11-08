@@ -48,7 +48,7 @@ function errorResult(error: unknown, fallbackCode: string, fallbackMessage: stri
 }
 
 type AccountStatus = { state: string; message: string; activationUrl: string; billingUrl: string; settingsUrl: string; plan: string | null; expiresAt: string | null };
-type McpIdentity = { name?: string; version?: string; linkWebsiteAccount?: (code: string, mcpUserId: string) => Promise<boolean>; accountStatus?: (mcpUserId: string) => Promise<AccountStatus>; teacherAuthorizationUrl?: string; teacherWriteAuthorizationUrl?: string; teacherDraftWritesEnabled?: boolean };
+type McpIdentity = { name?: string; version?: string; catalogMode?: "full" | "student"; linkWebsiteAccount?: (code: string, mcpUserId: string) => Promise<boolean>; accountStatus?: (mcpUserId: string) => Promise<AccountStatus>; teacherAuthorizationUrl?: string; teacherWriteAuthorizationUrl?: string; teacherDraftWritesEnabled?: boolean };
 
 export function createV2BetaServer(clients: V2Clients, identity: McpIdentity = {}): McpServer {
   const server = new McpServer({ name: identity.name ?? "classroom-desk-v2-beta", version: identity.version ?? "2.0.0-beta.1" });
@@ -56,10 +56,11 @@ export function createV2BetaServer(clients: V2Clients, identity: McpIdentity = {
   if (identity.accountStatus) {
     server.registerTool("check_account_activation", { description: "Check the authenticated Classroom Desk account activation state. This returns only account and entitlement guidance, never Classroom content.", inputSchema: {}, _meta: v2Auth, annotations: readAnnotations }, async () => ({ content: [{ type: "text", text: JSON.stringify(await identity.accountStatus!(clients.subject)) }] }));
   }
-  server.registerTool("student_classroom_overview", { description: "Answer student questions across accessible Classroom data without requiring Google IDs. Use for assignments, due dates, missing/assigned/turned-in/returned work, announcements, course materials, topics, recent activity, catch-up summaries, and keyword searches.", inputSchema: { courseQuery: z.string().min(1).optional().describe("Optional natural course name or keyword."), searchQuery: z.string().min(1).optional().describe("Optional keyword to search across course names, assignment titles/instructions, announcements, materials, and topics."), view: z.enum(["all", "due_soon", "today", "tomorrow", "missing", "assigned", "submitted", "returned", "reclaimed", "recent"]).default("all").describe("Student-centered filter for the requested view."), days: z.number().int().min(1).max(31).default(7).describe("Window in days for due_soon; ignored by other views."), limit: z.number().int().min(1).max(100).default(50).describe("Maximum results per returned category.") }, _meta: v2Auth, annotations: readAnnotations }, async (input) => {
+  server.registerTool("student_classroom_overview", { description: "Answer student questions across accessible Classroom data without requiring Google IDs. Use for assignments, due dates, missing/assigned/turned-in/returned work, announcements, course materials, topics, recent activity, catch-up summaries, and keyword searches. Assignment-focused views (due_soon, today, tomorrow, missing, assigned, submitted, returned, reclaimed) return assignment results without unrelated announcement, material, topic, or activity content; use all or recent for those categories.", inputSchema: { courseQuery: z.string().min(1).optional().describe("Optional natural course name or keyword."), searchQuery: z.string().min(1).optional().describe("Optional keyword to search across course names, assignment titles/instructions, announcements, materials, and topics."), view: z.enum(["all", "due_soon", "today", "tomorrow", "missing", "assigned", "submitted", "returned", "reclaimed", "recent"]).default("all").describe("Student-centered filter for the requested view."), days: z.number().int().min(1).max(31).default(7).describe("Window in days for due_soon; ignored by other views."), limit: z.number().int().min(1).max(100).default(50).describe("Maximum results per returned category.") }, _meta: v2Auth, annotations: readAnnotations }, async (input) => {
     try { return { content: [{ type: "text", text: JSON.stringify(await getStudentOverview(clients, input)) }] }; }
     catch (error) { return errorResult(error, "overview_failed", "Classroom Desk could not build the student overview."); }
   });
+  if (identity.catalogMode !== "student") {
   const teacherError = (error: unknown) => {
     if (error instanceof V2WorkflowError && error.code === "teacher_authorization_required") {
       return { isError: true as const, content: [{ type: "text" as const, text: JSON.stringify({ error: error.code, message: friendlyError(error.code, error.message), authorizationUrl: identity.teacherAuthorizationUrl ?? "https://classroom.jarvis404.com/app/teacher" }) }] };
@@ -117,6 +118,7 @@ export function createV2BetaServer(clients: V2Clients, identity: McpIdentity = {
     try { return { content: [{ type: "text", text: JSON.stringify(await getTeacherSubmissions(clients, courseId, courseWorkId)) }] }; }
     catch (error) { return teacherError(error); }
   });
+  }
   server.registerTool("get_assignment_workspace", { description: "Resolve an assignment from its course/title or IDs, then return student-friendly instructions, due information, attachment metadata, current submission state, and the supported next step. Use before helping with one assignment or when the student asks what is attached.", inputSchema: assignmentSelectorSchema, _meta: v2Auth, annotations: readAnnotations }, async (selector) => {
     try { return { content: [{ type: "text", text: JSON.stringify(await getAssignmentWorkspace(clients, selector)) }] }; }
     catch (error) { return errorResult(error, "workspace_failed", "Classroom Desk could not resolve that assignment."); }
