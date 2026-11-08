@@ -28,6 +28,7 @@ Thumbs.db
 !/scripts/verify-encrypted-records.mjs
 !/scripts/production-release-preflight.mjs
 !/scripts/test-worker-http-local.mjs
+!/scripts/qa-public-ui-browser.mjs
 .neon
 # Local release artifacts and synthetic test outputs
 *.zip

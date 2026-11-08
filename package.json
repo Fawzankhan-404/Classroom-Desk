@@ -16,7 +16,8 @@
     "start:http": "node dist/http.js",
     "start:local-web-test": "node dist/local-http.js",
     "verify:public-local": "node dist/local-e2e.js",
-    "test": "vitest run src --maxWorkers=1"
+    "test": "vitest run src --maxWorkers=1",
+    "test:browser:public-ui": "npm run build && node scripts/qa-public-ui-browser.mjs"
   },
   "dependencies": {
     "@googleapis/classroom": "^15.0.0",
