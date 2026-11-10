@@ -21,7 +21,7 @@ import { logHttp, logOAuthCallbackRedirect, logOAuthCallbackRejected } from "./l
 import { socialPreviewPngBase64 } from "./social-preview-asset.js";
 import { classroomDeskFaviconPngBase64, classroomDeskFaviconSvg, classroomDeskLogoPngBase64 } from "./logo-asset.js";
 import { accessGuidance, MCP_ONBOARDING_TOOLS, registerMcpOnboarding } from "../saas/mcp-access.js";
-import { contributionCheckoutScript, supportFormScript } from "./support-scripts.js";
+import { contributionCheckoutScript } from "./support-scripts.js";
 
 type Session = { userId: string; catalogMode: "full" | "student"; transport: StreamableHTTPServerTransport; server: McpServer };
 type AuthenticatedRequest = Request & { auth?: AuthInfo };
@@ -140,7 +140,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   });
   app.get("/assets/connect.js", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=86400, no-transform");
-    res.type("js").send(connectScript() + pricingReferralScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectGuideCompletionScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript() + connectionCardScript() + supportFormScript() + contributionCheckoutScript());
+    res.type("js").send(connectScript() + pricingReferralScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectGuideCompletionScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript() + connectionCardScript() + contributionCheckoutScript());
   });
   app.get("/", (_req, res) => res.type("html").send(page("Classroom Desk", "home", operator, support, config.origin, homeBody(saasFlags))));
   app.get("/connect", (_req, res) => res.type("html").send(page("Connect to ChatGPT", "connect", operator, support, config.origin, connectBody())));
@@ -182,7 +182,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   `)));
   app.get("/support", (_req, res) => res.type("html").send(page("Support", "support", operator, support, config.origin, `
     <article class="doc support-card" id="project-support" aria-labelledby="project-support-title">
-      <style>.support-compose form{display:grid;gap:.75rem;max-width:620px;margin-top:1rem}.support-compose label{display:grid;gap:.25rem;font-weight:650}.support-compose input,.support-compose textarea{font:inherit;min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;padding:.65rem}.support-compose textarea{resize:vertical}.support-compose button{justify-self:start}.support-compose [role=status],[data-contribution-status]{min-height:1.5em}.contribution-choice,.contribution-custom{display:flex;align-items:center;gap:.65rem;border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;margin:.4rem 0;cursor:pointer}.contribution-custom{flex-wrap:wrap}.custom-amount-field{display:flex;align-items:center;gap:.4rem}.custom-amount-field input{width:min(12rem,55vw);font:inherit;border:1px solid var(--line);border-radius:7px;padding:.4rem}.contribution-choice:has(input:checked),.contribution-custom:has(input:checked){border-color:var(--green);background:var(--soft)}[data-contribution-form] fieldset{border:0;padding:0;margin:1rem 0}[data-contribution-form] legend{font-weight:750;margin-bottom:.5rem}[data-contribution-form] [type=submit]{width:100%;margin:.7rem 0}[data-contribution-form] [role=status]{color:var(--deep)}@media(max-width:560px){.support-compose button{width:100%}}</style>
+      <style>[data-contribution-status]{min-height:1.5em}.contribution-choice,.contribution-custom{display:flex;align-items:center;gap:.65rem;border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;margin:.4rem 0;cursor:pointer}.contribution-custom{flex-wrap:wrap}.custom-amount-field{display:flex;align-items:center;gap:.4rem}.custom-amount-field input{width:min(12rem,55vw);font:inherit;border:1px solid var(--line);border-radius:7px;padding:.4rem}.contribution-choice:has(input:checked),.contribution-custom:has(input:checked){border-color:var(--green);background:var(--soft)}[data-contribution-form] fieldset{border:0;padding:0;margin:1rem 0}[data-contribution-form] legend{font-weight:750;margin-bottom:.5rem}[data-contribution-form] [type=submit]{width:100%;margin:.7rem 0}[data-contribution-form] [role=status]{color:var(--deep)}</style>
       <p class="eyebrow">Independent open-source project</p>
       <h1 id="project-support-title">How can we help?</h1>
       <p>Need help connecting Google Classroom, using Classroom Desk, or managing your account? Email us and we’ll help you find the next step.</p>
@@ -191,7 +191,6 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
         <h2 id="contact-support-title">Contact support</h2>
         <p><a class="button" href="mailto:${support}?subject=Classroom%20Desk%20%E2%80%94%20Support%20Request">Email Support</a></p>
         <p class="fine-print">${support} · Please don’t email passwords, authorization codes, or private Classroom/student information.</p>
-        <details class="support-compose"><summary>Write a support message</summary><form data-support-compose data-recipient="${support}"><label>Your name<input name="name" maxlength="100" required autocomplete="name"></label><label>Email for reply<input name="email" type="email" maxlength="254" required autocomplete="email"></label><label>Subject<input name="subject" maxlength="120" required></label><label>Message<textarea name="message" minlength="10" maxlength="4000" rows="5" required></textarea></label><button class="button secondary" type="submit">Open message in email app</button><p class="fine-print" data-support-compose-status role="status">Your email app will open so you can review and send the message. Classroom Desk does not receive it from this form.</p><noscript><p>JavaScript is off. Use the Email Support link above.</p></noscript></form></details>
       </section>
 
       <section aria-labelledby="support-resources-title">
