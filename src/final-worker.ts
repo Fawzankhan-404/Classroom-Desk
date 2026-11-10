@@ -27,6 +27,7 @@ import { registerInternalConnectionStatus } from "./saas/connection-status.js";
 import { verifyRazorpaySignature } from "./saas/razorpay.js";
 import { parseRazorpayEvent } from "./saas/billing-events.js";
 import { RazorpayClient } from "./saas/razorpay-client.js";
+import { loadTestContributionOptions } from "./saas/contributions.js";
 import { reconcileRecentPayments } from "./saas/reconciliation.js";
 import { PublicOAuthProvider } from "./public/oauth.js";
 import { evaluateInternalPolicy, registerInternalLink, internalTokenMatches } from "./saas/internal-link.js";
@@ -64,6 +65,13 @@ type Bindings = {
   RAZORPAY_KEY_SECRET?: string;
   RAZORPAY_STUDENT_PLAN_ID?: string;
   RAZORPAY_TEACHER_PLAN_ID?: string;
+  SAAS_CONTRIBUTIONS_TEST_ENABLED?: string;
+  RAZORPAY_CONTRIBUTION_MODE?: string;
+  RAZORPAY_CONTRIBUTION_KEY_ID?: string;
+  RAZORPAY_CONTRIBUTION_KEY_SECRET?: string;
+  RAZORPAY_CONTRIBUTION_WEBHOOK_SECRET?: string;
+  RAZORPAY_CONTRIBUTION_MAX_AMOUNT_PAISE?: string;
+  V2_CONTRIBUTION_RATE_LIMIT?: { limit(input: { key: string }): Promise<{ success: boolean }> };
 };
 
 const betaGrant = (scopes: string[]) => isExactV2UnifiedGrant(scopes);
@@ -125,6 +133,9 @@ export default {
         GOOGLE_OAUTH_CALLBACK_URL: `${requestOrigin}/oauth/google/callback`, MCP_RESOURCE_URL: `${requestOrigin}/mcp`, MCP_STUDENT_RESOURCE_URL: `${requestOrigin}/mcp/student`,
       });
       config.saasFlags = loadSaaSFeatureFlags(bindings);
+      const contributions = loadTestContributionOptions(bindings, bindings.V2_CONTRIBUTION_RATE_LIMIT);
+      config.contributionsEnabled = Boolean(contributions);
+      config.contributionMaxAmountRupees = contributions ? Math.floor(contributions.maxAmountPaise / 100) : undefined;
       config.googleScopes = V2_UNIFIED_SCOPES;
       config.teacherScopes = V2_TEACHER_SCOPES;
       if (config.saasFlags.teacherDraftWrites) config.teacherWriteScopes = V2_TEACHER_WRITE_SCOPES;
@@ -229,6 +240,7 @@ export default {
             razorpayKeySecret: bindings.RAZORPAY_KEY_SECRET,
             razorpayPlanIds: { student: bindings.RAZORPAY_STUDENT_PLAN_ID, teacher: bindings.RAZORPAY_TEACHER_PLAN_ID },
             billingEnabled: config.saasFlags?.billingUi === true,
+            contributions,
             teacherFeaturesEnabled: config.saasFlags?.teacherFeatures === true,
             teacherDraftWritesEnabled: config.saasFlags?.teacherDraftWrites === true,
             referralRewardsEnabled: config.saasFlags?.referralRewards === true,

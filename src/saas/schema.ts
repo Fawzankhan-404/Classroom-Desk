@@ -1,5 +1,5 @@
 /** Additive SaaS schema. Apply with a reviewed direct Neon migration, never at Worker request time. */
-export const SAAS_SCHEMA_VERSION = 9;
+export const SAAS_SCHEMA_VERSION = 10;
 export const SaaSMigration = `
 CREATE TABLE IF NOT EXISTS classroom_desk_users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -257,4 +257,22 @@ CREATE TABLE IF NOT EXISTS classroom_desk_account_deletion_requests (
   completed_at timestamptz
 );
 CREATE UNIQUE INDEX IF NOT EXISTS classroom_desk_open_deletion_request_idx ON classroom_desk_account_deletion_requests(user_id) WHERE status = 'requested';
+CREATE TABLE IF NOT EXISTS classroom_desk_contributions (
+  id text PRIMARY KEY NOT NULL,
+  request_key_hash text NOT NULL UNIQUE,
+  amount_paise integer NOT NULL CHECK (amount_paise >= 1000),
+  currency text NOT NULL DEFAULT 'INR' CHECK (currency = 'INR'),
+  status text NOT NULL CHECK (status IN ('creating','pending','paid','reconciliation_required')),
+  provider_order_id text UNIQUE,
+  provider_payment_id text UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  paid_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS classroom_desk_contributions_created_idx ON classroom_desk_contributions(created_at);
+CREATE TABLE IF NOT EXISTS classroom_desk_contribution_webhook_events (
+  event_id text PRIMARY KEY NOT NULL,
+  payload_hash text NOT NULL,
+  received_at timestamptz NOT NULL DEFAULT now()
+);
 `;

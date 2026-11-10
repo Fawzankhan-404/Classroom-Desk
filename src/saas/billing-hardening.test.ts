@@ -69,6 +69,24 @@ describe("billing provider boundaries (all fetches mocked)", () => {
     expect(trialOrderReceipt("one")).not.toBe(trialOrderReceipt("two"));
   });
 
+  it("creates a voluntary contribution order with its own notes and exact paise amount", async () => {
+    const contributionId = "con_00000000-0000-4000-8000-000000000001";
+    const fetch = vi.fn(async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body).toMatchObject({ amount: 49900, currency: "INR", notes: { kind: "contribution", product: "classroom_desk_voluntary_contribution", contribution_id: contributionId } });
+      expect(body.receipt).toMatch(/^cd_[a-f0-9]{32}$/);
+      return Response.json({ id: "order_contribution", amount: 49900, currency: "INR", status: "created", notes: body.notes });
+    });
+    vi.stubGlobal("fetch", fetch);
+    await expect(new RazorpayClient("synthetic-key", secret).createContributionOrder(contributionId, 49900)).resolves.toMatchObject({ id: "order_contribution" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a contribution order response that changes the amount or product", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "order_contribution", amount: 9900, currency: "INR", status: "created", notes: { kind: "subscription" } })));
+    await expect(new RazorpayClient("synthetic-key", secret).createContributionOrder("con_00000000-0000-4000-8000-000000000001", 49900)).rejects.toThrow("contribution_order_mismatch");
+  });
+
   it("rejects a payment response belonging to a different requested ID", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "pay_other", amount: 900, currency: "INR", status: "captured" })));
     await expect(new RazorpayClient("synthetic-key", secret).getPayment("pay_requested")).rejects.toThrow("billing_payment_mismatch");

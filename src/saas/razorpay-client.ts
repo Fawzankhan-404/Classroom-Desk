@@ -92,6 +92,22 @@ export class RazorpayClient {
     return order;
   }
 
+  async createContributionOrder(contributionId: string, amountPaise: number): Promise<RazorpayOrder> {
+    if (!/^con_[0-9a-f-]{36}$/i.test(contributionId) || !Number.isSafeInteger(amountPaise) || amountPaise < 1_000) throw new Error("invalid_contribution_order");
+    const receipt = `cd_${createHash("sha256").update(contributionId).digest("hex").slice(0, 32)}`;
+    const order = await this.post<RazorpayOrder>("/orders", {
+      amount: amountPaise,
+      currency: "INR",
+      receipt,
+      notes: { product: "classroom_desk_voluntary_contribution", contribution_id: contributionId, kind: "contribution" },
+    });
+    if (!order || !/^order_[A-Za-z0-9_]+$/.test(order.id) || order.amount !== amountPaise || order.currency !== "INR" || order.status !== "created"
+      || order.notes?.product !== "classroom_desk_voluntary_contribution" || order.notes.kind !== "contribution" || order.notes.contribution_id !== contributionId) {
+      throw new Error("contribution_order_mismatch");
+    }
+    return order;
+  }
+
   async createSubscription(planId: string, totalCount: number, notes: Record<string, string>): Promise<RazorpaySubscription> {
     const subscription = await this.post<RazorpaySubscription>("/subscriptions", { plan_id: planId, total_count: totalCount, customer_notify: 1, notes });
     if (!subscription || !/^sub_[A-Za-z0-9_]+$/.test(subscription.id) || subscription.plan_id !== planId) throw new Error("billing_subscription_mismatch");

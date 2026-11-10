@@ -21,6 +21,7 @@ async function setup(
   config: PublicOAuthConfig = authConfig,
   options: Parameters<typeof createPublicApp>[5] = {},
   referralRewards = false,
+  runtimeOverrides: Partial<RuntimeConfig> = {},
 ) {
   const store = new MemoryPublicAuthStore();
   let revoked: string[] = [];
@@ -28,6 +29,7 @@ async function setup(
   const appConfig: RuntimeConfig = {
     ...runtimeConfig,
     ...config,
+    ...runtimeOverrides,
     saasFlags: { billingUi: false, teacherFeatures: false, teacherDraftWrites: false, referralRewards, enforceEntitlements: false },
   };
   const { app } = createPublicApp(appConfig, store, provider, undefined, undefined, options);
@@ -179,26 +181,30 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain(".table-scroll:focus-visible");
     } finally { await close(ctx.server); }
   });
-  it("provides direct email support, verified help links, and accurately disabled online contributions", async () => {
+  it("provides an honest mail-app support form and accurately disabled online contributions by default", async () => {
     const ctx = await setup(new URL("https://classroom.example"));
     try {
       const response = await fetch(`${ctx.origin}/support`);
       const html = await response.text();
       expect(response.status).toBe(200);
       expect(html).toContain('href="mailto:support@example.invalid?subject=Classroom%20Desk%20%E2%80%94%20Support%20Request">Email Support</a>');
-      expect(html).not.toContain("<form");
-      expect(html).not.toContain("support-name");
-      expect(html).not.toContain("support-email");
+      expect(html).toContain('data-support-compose data-recipient="support@example.invalid"');
+      expect(html).toContain('name="name" maxlength="100" required autocomplete="name"');
+      expect(html).toContain('name="email" type="email" maxlength="254" required autocomplete="email"');
+      expect(html).toContain('name="subject" maxlength="120" required');
+      expect(html).toContain('name="message" minlength="10" maxlength="4000" rows="5" required');
+      expect(html).toContain("Classroom Desk does not receive it from this form.");
       expect(html).toContain('href="/connect">Getting started and account connection</a>');
       expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk">Source code and project community</a>');
       expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk/issues">Report a bug or request a feature</a>');
       expect(html).toContain('href="/privacy">Privacy policy</a>');
       expect(html).toContain("Contributions are voluntary. They do not buy a subscription or unlock paid features.");
-      expect(html).toContain("Online contributions are not available yet while the payment account and test checkout are being verified.");
+      expect(html).toContain("Online contributions are not available yet. The payment account and a separate test checkout must be verified before contributions are enabled.");
       const scriptResponse = await fetch(`${ctx.origin}/assets/connect.js`);
       const script = await scriptResponse.text();
       expect(scriptResponse.status).toBe(200);
-      expect(script).not.toContain("data-support-form");
+      expect(script).toContain("window.location.href=href");
+      expect(script).toContain("Your email app will open");
     } finally { await close(ctx.server); }
   });
   it("keeps the mobile header on one row and moves the connect action into the mobile menu", async () => {
@@ -513,10 +519,9 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain("Support the developer");
       expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk"');
       expect(html).toContain("Contributions are voluntary. They do not buy a subscription or unlock paid features.");
-      expect(html).toContain("Online contributions are not available yet while the payment account and test checkout are being verified.");
-      expect(html).not.toContain("support-form");
-      expect(html).not.toContain("support-name");
-      expect(html).not.toContain("support-message");
+      expect(html).toContain("Online contributions are not available yet. The payment account and a separate test checkout must be verified before contributions are enabled.");
+      expect(html).toContain("data-support-compose");
+      expect(html).toContain("data-support-compose-status");
       expect(html).not.toContain("buymeacoffee.com");
       expect(html).not.toContain("github.com/sponsors/");
       expect(html).not.toContain("href=\"https://rzp.io/");
@@ -547,6 +552,20 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(connectResponse.status).toBe(200);
       expect(connectHtml).not.toContain('href="/support#project-support">Support the Project</a>');
       expect(connectHtml).not.toContain("Support Classroom Desk</h1>");
+    } finally { await close(ctx.server); }
+  });
+  it("shows test-only contribution choices only when an explicitly validated test configuration enables them", async () => {
+    const ctx = await setup(authConfig, {}, false, { contributionsEnabled: true, contributionMaxAmountRupees: 5000 });
+    try {
+      const response = await fetch(`${ctx.origin}/support`);
+      const html = await response.text();
+      expect(html).toContain('data-contribution-form data-max-rupees="5000"');
+      for (const amount of [49, 99, 199, 499]) expect(html).toContain(`value="${amount}"`);
+      expect(html).toContain('min="10" max="5000"');
+      expect(html).toContain("Continue to secure test checkout");
+      expect(html).toContain("do not change your subscription or account access");
+      expect(response.headers.get("content-security-policy")).toContain("https://checkout.razorpay.com");
+      expect(response.headers.get("content-security-policy")).toContain("https://api.razorpay.com");
     } finally { await close(ctx.server); }
   });
   it("rejects unauthenticated, malformed, and expired bearer tokens", async () => {

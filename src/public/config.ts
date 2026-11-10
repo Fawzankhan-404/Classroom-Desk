@@ -9,6 +9,7 @@ export type RuntimeConfig = PublicOAuthConfig & {
   studentMcpResource?: URL;
   operatorName?: string; supportEmail?: string; chatgptPluginUrl?: string;
   saasFlags?: SaaSFeatureFlags;
+  contributionsEnabled?: boolean; contributionMaxAmountRupees?: number;
 };
 const required = (name: string, env: NodeJS.ProcessEnv): string => {
   const value = env[name]?.trim();

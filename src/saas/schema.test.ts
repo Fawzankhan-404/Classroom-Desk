@@ -50,7 +50,7 @@ describe("SaaS schema upgrade compatibility", () => {
     ]);
 
     await pg.exec(SaaSMigration);
-    expect(SAAS_SCHEMA_VERSION).toBe(9);
+    expect(SAAS_SCHEMA_VERSION).toBe(10);
     expect((await pg.query(`SELECT google_subject FROM classroom_desk_users`)).rows).toEqual([{ google_subject: "synthetic-legacy-subject" }]);
     expect((await pg.query<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_name='classroom_desk_payments' AND column_name='amount_refunded_paise'`)).rows).toEqual([{ column_name: "amount_refunded_paise" }]);
     const operationColumns=await pg.query<{table_name:string;column_name:string}>(`SELECT table_name,column_name FROM information_schema.columns WHERE (table_name,column_name) IN (('classroom_desk_entitlement_grants','last_operation_id'),('classroom_desk_payments','last_operation_id'),('classroom_desk_referrals','qualified_operation_id')) ORDER BY table_name,column_name`);
@@ -59,5 +59,7 @@ describe("SaaS schema upgrade compatibility", () => {
       {table_name:"classroom_desk_payments",column_name:"last_operation_id"},
       {table_name:"classroom_desk_referrals",column_name:"qualified_operation_id"},
     ]);
+    expect((await pg.query(`SELECT to_regclass('classroom_desk_contributions') AS name`)).rows).toEqual([{ name: "classroom_desk_contributions" }]);
+    expect((await pg.query(`SELECT to_regclass('classroom_desk_contribution_webhook_events') AS name`)).rows).toEqual([{ name: "classroom_desk_contribution_webhook_events" }]);
   });
 });
