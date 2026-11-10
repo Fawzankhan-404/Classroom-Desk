@@ -22,10 +22,10 @@ import { socialPreviewPngBase64 } from "./social-preview-asset.js";
 import { classroomDeskFaviconPngBase64, classroomDeskFaviconSvg, classroomDeskLogoPngBase64 } from "./logo-asset.js";
 import { accessGuidance, MCP_ONBOARDING_TOOLS, registerMcpOnboarding } from "../saas/mcp-access.js";
 
-type Session = { userId: string; transport: StreamableHTTPServerTransport; server: McpServer };
+type Session = { userId: string; catalogMode: "full" | "student"; transport: StreamableHTTPServerTransport; server: McpServer };
 type AuthenticatedRequest = Request & { auth?: AuthInfo };
 export type RawBodyRequest = Request & { rawBody?: Buffer };
-type McpFactory = (auth: OAuth2Client, userId: string) => Promise<McpServer>;
+type McpFactory = (auth: OAuth2Client, userId: string, catalogMode: "full" | "student") => Promise<McpServer>;
 type PublicAppOptions = { mcpFactory?: McpFactory; resourceName?: string; registerRoutes?: (app: express.Express) => void; entitlementCheck?: (userId: string) => Promise<{ allowed: boolean; reason: string }>; loadPricingReferral?: (cookieHeader: string | undefined) => Promise<PricingReferralView>; publicOnly?: boolean; internalDelegationSecret?: string; stagingSubjectFingerprint?: boolean };
 
 export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, provider = new PublicOAuthProvider(store, config), readyCheck?: () => Promise<void>, clientsFactory: (auth: OAuth2Client) => ClassroomClients = createClients, options: PublicAppOptions = {}) {
@@ -70,7 +70,8 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   app.use(express.urlencoded({ extended: false, limit: "4kb" }));
   app.use(express.json({ limit: "64kb", verify: (req, _res, buffer) => { (req as RawBodyRequest).rawBody = Buffer.from(buffer); } }));
 
-  const metadataUrl = new URL("/.well-known/oauth-protected-resource/mcp", config.origin).toString();
+  const studentMcpResource = config.studentMcpResource ?? new URL("/mcp/student", config.origin);
+  const metadataUrlFor = (resource: URL) => new URL(`/.well-known/oauth-protected-resource${resource.pathname}`, config.origin).toString();
   app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
   app.get("/sitemap.xml", (_req, res) => {
     const publicPaths = ["/", "/connect", "/pricing", "/support", "/privacy", "/terms", "/refunds"];
@@ -137,7 +138,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   });
   app.get("/assets/connect.js", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=86400, no-transform");
-    res.type("js").send(connectScript() + supportFormScript() + pricingReferralScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript() + connectionCardScript());
+    res.type("js").send(connectScript() + supportFormScript() + pricingReferralScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectGuideCompletionScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript() + connectionCardScript());
   });
   app.get("/", (_req, res) => res.type("html").send(page("Classroom Desk", "home", operator, support, config.origin, homeBody(saasFlags))));
   app.get("/connect", (_req, res) => res.type("html").send(page("Connect to ChatGPT", "connect", operator, support, config.origin, connectBody())));
@@ -265,6 +266,12 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   };
   app.get("/authorize", rejectUnsafeAuthorizationRedirect);
   app.post("/authorize", rejectUnsafeAuthorizationRedirect);
+  app.get("/.well-known/oauth-protected-resource/mcp/student", (_req, res) => res.json({
+    resource: studentMcpResource.href,
+    authorization_servers: [config.origin.href],
+    scopes_supported: [MCP_SCOPE, MCP_OFFLINE_SCOPE],
+    resource_name: "Classroom Desk Student",
+  }));
   app.use(mcpAuthRouter({
     provider, issuerUrl: config.origin, baseUrl: config.origin, resourceServerUrl: config.mcpResource,
     scopesSupported: [MCP_SCOPE, MCP_OFFLINE_SCOPE], resourceName: options.resourceName ?? "Classroom Desk MCP access",
@@ -363,6 +370,8 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   });
 
   const authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const resource = req.path === "/mcp/student" ? studentMcpResource : config.mcpResource;
+    const metadataUrl = metadataUrlFor(resource);
     const match = /^Bearer ([A-Za-z0-9._~+/-]+=*)$/.exec(req.get("authorization") ?? "");
     if (!match?.[1]) {
       res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${metadataUrl}"`);
@@ -370,7 +379,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
     }
     try {
       const auth = await provider.verifyAccessToken(match[1]);
-      if (!auth.scopes.includes(MCP_SCOPE) || auth.resource?.href !== config.mcpResource.href) throw new Error("invalid");
+      if (!auth.scopes.includes(MCP_SCOPE) || auth.resource?.href !== resource.href) throw new Error("invalid");
       req.auth = auth;
       return next();
     } catch {
@@ -388,14 +397,15 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
     } catch { return res.status(503).json({ error: "disconnect_failed", message: "Disconnect could not be confirmed. Try again." }); }
   });
 
-  app.options("/mcp", (_req, res) => {
+  app.options(["/mcp", "/mcp/student"], (_req, res) => {
     res.setHeader("Access-Control-Allow-Origin", config.origin.origin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID");
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
     res.status(204).end();
   });
-  app.all("/mcp", authenticate, async (req: AuthenticatedRequest, res) => {
+  app.all(["/mcp", "/mcp/student"], authenticate, async (req: AuthenticatedRequest, res) => {
+    const catalogMode: "full" | "student" = req.path === "/mcp/student" ? "student" : "full";
     res.setHeader("Access-Control-Allow-Origin", config.origin.origin);
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
     if (!["GET", "POST", "DELETE"].includes(req.method)) {
@@ -432,11 +442,12 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
         if (!entitlement?.allowed) return denyTool(entitlement?.reason ?? "temporarily_unavailable");
       } catch { return denyTool("temporarily_unavailable"); }
     }
+    if (catalogMode === "student" && !options.mcpFactory) return res.status(503).json({ error: "student_catalog_unavailable" });
     const makeServer = async () => {
       let auth = await provider.googleAuthForUser(userId).catch(() => undefined);
       if (!auth && protectedInvocation) return undefined;
       auth ??= new OAuth2Client(); // Discovery/onboarding never calls Google.
-      const mcp = options.mcpFactory ? await options.mcpFactory(auth, userId) : await createServer(clientsFactory(auth), { publicV1: true });
+      const mcp = options.mcpFactory ? await options.mcpFactory(auth, userId, catalogMode) : await createServer(clientsFactory(auth), { publicV1: true });
       registerMcpOnboarding(mcp, () => options.entitlementCheck?.(userId) ?? Promise.resolve({ allowed: false, reason: "account_setup_required" }), config.origin.origin, options.stagingSubjectFingerprint ? userId : undefined);
       return mcp;
     };
@@ -455,7 +466,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
     }
     const sessionId = req.get("mcp-session-id");
     let session = sessionId ? sessions.get(sessionId) : undefined;
-    if (sessionId && (!session || session.userId !== userId)) return res.status(404).json({ error: "session_not_found" });
+    if (sessionId && (!session || session.userId !== userId || session.catalogMode !== catalogMode)) return res.status(404).json({ error: "session_not_found" });
     if (!session) {
       if (req.method !== "POST") return res.status(400).json({ error: "initialization_required" });
       const mcp = await makeServer();
@@ -463,7 +474,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => crypto.randomUUID(),
         enableJsonResponse: true,
-        onsessioninitialized: (newSessionId) => { sessions.set(newSessionId, { userId, transport, server: mcp }); },
+        onsessioninitialized: (newSessionId) => { sessions.set(newSessionId, { userId, catalogMode, transport, server: mcp }); },
         onsessionclosed: async (closedId) => {
           const existing = sessions.get(closedId);
           sessions.delete(closedId);
@@ -471,7 +482,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
         },
       });
       transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
-      session = { userId, transport, server: mcp };
+      session = { userId, catalogMode, transport, server: mcp };
       await mcp.connect(transport);
     }
     try {
@@ -512,10 +523,21 @@ function legacyHomeBody(flags: ReturnType<typeof loadSaaSFeatureFlags>, now = ne
 
 function homeBody(flags: ReturnType<typeof loadSaaSFeatureFlags>, now = new Date()) {
   const html = legacyHomeBody(flags, now);
-  const card = html.match(/<section id="how-it-works"[\s\S]*?(<div class="connection-card"[\s\S]*?<\/div><\/section>)/)?.[1] ?? '';
-  return html
-    .replace('<p class="home-note">Illustrative product experience. Connect your account for live Classroom answers.</p>', card)
-    .replace(/<section id="how-it-works"[\s\S]*?<\/section>/, '');
+  const sectionStart = html.indexOf('<section id="how-it-works"');
+  const sectionEnd = html.indexOf('<section class="section trust-section"', sectionStart);
+  if (sectionStart < 0 || sectionEnd < 0) return html;
+
+  const section = html.slice(sectionStart, sectionEnd);
+  const cardStart = section.indexOf('<div class="connection-card"');
+  const cardEnd = section.lastIndexOf('</div></section>');
+  if (cardStart < 0 || cardEnd < cardStart) return html;
+
+  const card = section.slice(cardStart, cardEnd + '</div>'.length)
+    .replace('class="connection-card"', 'class="connection-card hero-connection-card"')
+    .replace('<span>Classroom Desk</span>', '<span>Connect in 3 steps</span>');
+  const before = html.slice(0, sectionStart)
+    .replace('<p class="home-note">Illustrative product experience. Connect your account for live Classroom answers.</p>', `<p class="hero-connection-title">Connect in 3 steps.</p>${card}`);
+  return before + html.slice(sectionEnd);
 }
 
 function pricingBody(flags: ReturnType<typeof loadSaaSFeatureFlags>, referralView: PricingReferralView, referralCode: string | null, invalidReferralLink: boolean, origin: URL, now = new Date()) {
@@ -582,7 +604,7 @@ function connectBody() {
 }
 
 function connectGuideMarkup(inline = false) {
-  return `<div class="connect-guide ${inline ? "inline-guide" : ""}" data-connect-guide><div class="guide-steps"><p class="step-kicker">Step <span data-guide-number>1</span> of 3</p><section data-guide-step><h2>Open ChatGPT</h2><p>Go to ChatGPT's apps or developer settings.</p><a class="button" href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer">Open ChatGPT</a><p class="help-text">ChatGPT may ask you to turn on Developer mode first. If you do not see the option, your plan or workspace may not allow custom connections. Ask your workspace admin.</p></section><section data-guide-step hidden><h2>Add Classroom Desk</h2><p>Create a new connection, name it Classroom Desk, and paste this address. If ChatGPT asks how to sign in, choose OAuth.</p><div class="copy-chip"><code>https://classroom.jarvis404.com/mcp</code><button type="button" data-copy-mcp="https://classroom.jarvis404.com/mcp">Copy</button></div><p class="help-text">Button names vary between ChatGPT versions. ChatGPT may call this the server URL.</p></section><section data-guide-step hidden><h2>Approve Google and ask</h2><p>ChatGPT will send you to Google. Review the permissions, approve them, then try:</p><div class="copy-chip"><code>What assignments do I have?</code><button type="button" data-copy-prompt="What assignments do I have?">Copy</button></div><p class="help-text">This guide cannot detect or complete the connection for you.</p></section></div><div class="guide-visual" aria-hidden="true"><span class="example-badge">Illustration</span><div class="guide-visual-board"><span></span><span></span><span></span><span></span></div></div><div class="guide-controls"><button class="button secondary" type="button" data-guide-back hidden>Back</button><button class="button" type="button" data-guide-next>Next</button><a class="text-link" href="/support">Need help?</a></div></div>`;
+  return `<div class="connect-guide ${inline ? "inline-guide" : ""}" data-connect-guide><div class="guide-steps"><p class="step-kicker">Step <span data-guide-number>1</span> of 3</p><section data-guide-step><h2>Open ChatGPT</h2><p>Go to ChatGPT's apps or developer settings.</p><a class="button" href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer">Open ChatGPT</a><p class="help-text">ChatGPT may ask you to turn on Developer mode first. If you do not see the option, your plan or workspace may not allow custom connections. Ask your workspace admin.</p></section><section data-guide-step hidden><h2>Add Classroom Desk</h2><p>Create a new connection, name it Classroom Desk, and paste this address. If ChatGPT asks how to sign in, choose OAuth.</p><div class="copy-chip"><code>https://classroom.jarvis404.com/mcp</code><button type="button" data-copy-mcp="https://classroom.jarvis404.com/mcp">Copy</button></div><p class="help-text">Button names vary between ChatGPT versions. ChatGPT may call this the server URL.</p></section><section data-guide-step hidden><h2>Approve Google and ask</h2><p>ChatGPT will send you to Google. Review the permissions, approve them, then try:</p><div class="copy-chip"><code>What assignments do I have?</code><button type="button" data-copy-prompt="What assignments do I have?">Copy</button></div><p class="help-text">This guide cannot detect or complete the connection for you.</p></section></div><div class="guide-visual" aria-hidden="true"><span class="example-badge">Illustration</span><div class="guide-visual-board"><span></span><span></span><span></span><span></span></div></div><p class="guide-completion" data-guide-completion role="status" aria-live="polite" hidden>Guide complete. This does not confirm your ChatGPT connection or Google authorization. Continue in ChatGPT to finish setup.</p><div class="guide-controls"><button class="button secondary" type="button" data-guide-back hidden>Back</button><button class="button" type="button" data-guide-next>Next</button><a class="text-link" href="/support">Need help?</a></div></div>`;
 }
 
 function connectGuideModal() {
@@ -606,6 +628,7 @@ function connectScript() {
       section.remove();
       const style = document.createElement("style");
       style.textContent = ".hero-connection-title{margin:0 0 10px;color:#0b6247;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.hero-connection-card{max-width:560px;min-height:0;margin:24px 0 0;padding:20px;border-radius:18px}.hero-connection-card[data-connection-card] section{min-height:132px}.hero-connection-card[data-connection-card] h3{font-size:clamp(22px,2.5vw,30px);margin:14px 0 6px}.hero-connection-card[data-connection-card] p{font-size:15px}.hero-connection-card .connection-card-track{margin:16px 0 20px}.hero-connection-card .connection-card-actions{margin-top:16px}.hero-connection-card .connection-card-actions .text-link{margin-left:auto}@media(max-width:1023px){.hero-connection-card{max-width:680px}}@media(max-width:767px){.hero-connection-card{margin-top:20px;padding:17px}.hero-connection-card[data-connection-card] section{min-height:142px}.hero-connection-card .connection-url{align-items:stretch;flex-direction:column}.hero-connection-card .connection-card-actions{gap:10px;flex-wrap:wrap}.hero-connection-card .connection-card-actions .text-link{width:100%;margin-left:0}}@media(prefers-reduced-motion:reduce){.hero-connection-card{backdrop-filter:none;-webkit-backdrop-filter:none}}";
+      style.textContent += ".home-stage-inner,.home-masthead,.home-copy,.home-console,.hero-connection-card,.home-example-panel,.home-prompt-tabs{min-width:0;box-sizing:border-box}.home-stage-inner{width:100%}@media(max-width:767px){.home-masthead{grid-template-columns:minmax(0,1fr)}.home-copy,.home-console,.hero-connection-card,.home-example-panel,.home-prompt-tabs{width:100%;max-width:100%}.home-copy h1,.home-intro,.home-example-panel .example-question,.home-example-panel .example-answer,.home-prompt-tabs button{min-width:0;max-width:100%;overflow-wrap:anywhere}.home-prompt-tabs{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.home-prompt-tabs button{white-space:normal}}";
       document.head.append(style);
     }
     const bindCopy = (button, value) => {
@@ -749,7 +772,91 @@ function homeMotionScript() {
 }
 
 function connectionCardScript() {
-  return String.raw`(() => { const card = document.querySelector("[data-connection-card]"); if (!card) return; const steps = [...card.querySelectorAll("[data-connection-step]")]; const status = card.querySelector("[data-connection-progress]"); const segments = [...card.querySelectorAll(".connection-card-track i")]; const icons = ["<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 18h12a3 3 0 0 0 .4-6A6 6 0 0 0 7 10.5 3.5 3.5 0 0 0 6 18Z\"/><path d=\"M9 14h6M12 11v6\"/></svg>", "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 7h8v10H8z\"/><path d=\"M5 10V5h5M19 14v5h-5M10 5l-2 2 2 2M14 19l2-2-2-2\"/></svg>", "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"m8.5 12 2.3 2.3 4.8-5\"/></svg>"]; const reduced = window.matchMedia("(prefers-reduced-motion: reduce)"); let index = 0; steps.forEach((step, i) => { const icon = step.querySelector(".connection-card-icon"); if (icon) { icon.innerHTML = icons[i]; icon.setAttribute("role", "img"); icon.setAttribute("aria-label", ["ChatGPT connection", "MCP server connection", "Google authorization verified connection"][i]); } }); const render = () => { steps.forEach((step, i) => { step.hidden = i !== index; step.setAttribute("aria-hidden", String(i !== index)); }); if (status) status.textContent = String(index + 1).padStart(2, "0") + " / 03"; segments.forEach((segment, i) => segment.classList.toggle("is-active", i <= index)); card.querySelector("[data-connection-back]")?.toggleAttribute("disabled", index === 0); card.querySelector("[data-connection-next]")?.toggleAttribute("disabled", index === steps.length - 1); }; const advance = delta => { index = Math.max(0, Math.min(steps.length - 1, index + delta)); render(); }; card.querySelector("[data-connection-back]")?.addEventListener("click", () => advance(-1)); card.querySelector("[data-connection-next]")?.addEventListener("click", () => advance(1)); card.addEventListener("keydown", event => { if (event.key === "ArrowRight" || event.key === "ArrowDown") { event.preventDefault(); advance(1); } if (event.key === "ArrowLeft" || event.key === "ArrowUp") { event.preventDefault(); advance(-1); } }); let startX = 0; let startY = 0; card.addEventListener("touchstart", event => { const touch = event.changedTouches[0]; startX = touch.clientX; startY = touch.clientY; }, { passive: true }); card.addEventListener("touchend", event => { const touch = event.changedTouches[0]; const dx = touch.clientX - startX; const dy = touch.clientY - startY; if (Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy)) advance(dx < 0 ? 1 : -1); }, { passive: true }); card.addEventListener("wheel", event => { if (Math.abs(event.deltaY) < 12) return; advance(event.deltaY > 0 ? 1 : -1); }, { passive: true }); card.querySelector("[data-copy-mcp-card]")?.addEventListener("click", async event => { const button = event.currentTarget; try { await navigator.clipboard.writeText("https://classroom.jarvis404.com/mcp"); button.textContent = "Copied"; window.setTimeout(() => button.textContent = "Copy URL", 1400); } catch { button.textContent = "Select URL"; } }); if (document.body.classList.contains("home-page")) { document.querySelectorAll("[data-connect-open]").forEach(button => { const link = document.createElement("a"); link.className = button.className; link.href = "/connect"; link.textContent = button.textContent; button.replaceWith(link); }); document.querySelector(".home-note")?.remove(); const disclosure = document.querySelector(".home-example-panel small"); if (disclosure) disclosure.textContent = "Example conversation"; document.querySelector(".home-example-panel .demo-status")?.remove(); } render(); })();`;
+  return String.raw`(() => {
+    const cards = [...document.querySelectorAll("[data-connection-card]")];
+    const icons = ["<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 18h12a3 3 0 0 0 .4-6A6 6 0 0 0 7 10.5 3.5 3.5 0 0 0 6 18Z\"/><path d=\"M9 14h6M12 11v6\"/></svg>", "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 7h8v10H8z\"/><path d=\"M5 10V5h5M19 14v5h-5M10 5l-2 2 2 2M14 19l2-2-2-2\"/></svg>", "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"m8.5 12 2.3 2.3 4.8-5\"/></svg>"];
+    const labels = ["ChatGPT connection", "MCP server connection", "Google authorization verified connection"];
+    cards.forEach(card => {
+      const steps = [...card.querySelectorAll("[data-connection-step]")];
+      if (!steps.length) return;
+      const status = card.querySelector("[data-connection-progress]");
+      const segments = [...card.querySelectorAll(".connection-card-track i")];
+      let index = 0;
+      steps.forEach((step, i) => {
+        const icon = step.querySelector(".connection-card-icon");
+        if (icon && icons[i]) {
+          icon.innerHTML = icons[i];
+          icon.setAttribute("role", "img");
+          icon.setAttribute("aria-label", labels[i]);
+        }
+      });
+      const render = () => {
+        steps.forEach((step, i) => {
+          step.hidden = i !== index;
+          step.setAttribute("aria-hidden", String(i !== index));
+        });
+        if (status) {
+          status.textContent = String(index + 1).padStart(2, "0") + " / " + String(steps.length).padStart(2, "0");
+          status.setAttribute("aria-live", "polite");
+        }
+        segments.forEach((segment, i) => segment.classList.toggle("is-active", i <= index));
+        card.querySelector("[data-connection-back]")?.toggleAttribute("disabled", index === 0);
+        card.querySelector("[data-connection-next]")?.toggleAttribute("disabled", index === steps.length - 1);
+      };
+      const advance = delta => {
+        const nextIndex = Math.max(0, Math.min(steps.length - 1, index + delta));
+        if (nextIndex === index) return;
+        index = nextIndex;
+        render();
+      };
+      card.querySelector("[data-connection-back]")?.addEventListener("click", () => advance(-1));
+      card.querySelector("[data-connection-next]")?.addEventListener("click", () => advance(1));
+      card.addEventListener("keydown", event => {
+        if (event.key === "ArrowRight" || event.key === "ArrowDown") { event.preventDefault(); advance(1); }
+        if (event.key === "ArrowLeft" || event.key === "ArrowUp") { event.preventDefault(); advance(-1); }
+      });
+      let startX = 0;
+      let startY = 0;
+      card.addEventListener("touchstart", event => {
+        const touch = event.changedTouches[0];
+        startX = touch.clientX;
+        startY = touch.clientY;
+      }, { passive: true });
+      card.addEventListener("touchend", event => {
+        const touch = event.changedTouches[0];
+        const dx = touch.clientX - startX;
+        const dy = touch.clientY - startY;
+        if (Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy)) advance(dx < 0 ? 1 : -1);
+      }, { passive: true });
+      card.addEventListener("wheel", event => {
+        if (Math.abs(event.deltaY) >= 12) advance(event.deltaY > 0 ? 1 : -1);
+      }, { passive: true });
+      card.querySelector("[data-copy-mcp-card]")?.addEventListener("click", async event => {
+        const button = event.currentTarget;
+        try {
+          await navigator.clipboard.writeText("https://classroom.jarvis404.com/mcp");
+          button.textContent = "Copied";
+        } catch {
+          button.textContent = "Select URL";
+        }
+        window.setTimeout(() => button.textContent = button.textContent === "Copied" ? "Copy URL" : "Select URL", 1400);
+      });
+      render();
+    });
+    if (document.body.classList.contains("home-page")) {
+      document.querySelectorAll("[data-connect-open]").forEach(button => {
+        const link = document.createElement("a");
+        link.className = button.className;
+        link.href = "/connect";
+        link.textContent = button.textContent;
+        button.replaceWith(link);
+      });
+      document.querySelector(".home-note")?.remove();
+      const disclosure = document.querySelector(".home-example-panel small");
+      if (disclosure) disclosure.textContent = "Example conversation";
+      document.querySelector(".home-example-panel .demo-status")?.remove();
+    }
+  })();`;
 }
 
 function connectDemoScript() {
@@ -770,6 +877,10 @@ function connectModalStateScript() {
 
 function connectGuideBackStateScript() {
   return `document.querySelectorAll("[data-connect-guide]").forEach(root => { const back = root.querySelector("[data-guide-back]"); if (!back) return; const apply = () => { const first = root.dataset.step === "0"; back.hidden = false; back.disabled = first; back.setAttribute("aria-disabled", String(first)); }; apply(); new MutationObserver(apply).observe(root, { attributes: true, attributeFilter: ["data-step"] }); });`;
+}
+
+function connectGuideCompletionScript() {
+  return `document.querySelectorAll("[data-connect-guide]").forEach(root => { const next = root.querySelector("[data-guide-next]"); const back = root.querySelector("[data-guide-back]"); const completion = root.querySelector("[data-guide-completion]"); if (!next || !completion) return; root.addEventListener("click", event => { if (event.target !== next || next.textContent.trim() !== "Done" || root.dataset.step !== "2") return; queueMicrotask(() => { root.dataset.completed = "true"; completion.hidden = false; next.textContent = "Guide complete"; next.disabled = true; next.setAttribute("aria-disabled", "true"); }); }, true); back?.addEventListener("click", () => { delete root.dataset.completed; completion.hidden = true; next.disabled = false; next.setAttribute("aria-disabled", "false"); }); });`;
 }
 
 function connectModalBackDisabledScript() {
@@ -843,6 +954,7 @@ function designStyles() {
 :root{--paper:#f7f9f6;--ink:#17231d;--muted:#4d6055;--line:#cbd8cf;--soft:#e8f1eb;--deep:#15543b;--green:#166c48}
 body{font-family:"Segoe UI",Arial,sans-serif;letter-spacing:-.012em}
 .connection-card[data-connection-card]{max-width:680px;min-height:360px;margin:28px 0 0;padding:28px;border:1px solid rgb(255 255 255 / .72);border-radius:24px;background:linear-gradient(145deg,rgb(255 255 255 / .86),rgb(232 247 239 / .72));box-shadow:0 24px 54px rgb(34 56 45 / .14),inset 0 1px 0 #fff;backdrop-filter:blur(16px);display:block;outline:none}.connection-card[data-connection-card]:focus-visible{outline:3px solid var(--emerald-500);outline-offset:4px}.connection-card-head,.connection-card-actions{display:flex;align-items:center;gap:14px}.connection-card-head{justify-content:space-between;color:var(--emerald-900);font-size:13px;font-weight:700}.connection-card-head strong{color:var(--emerald-700);letter-spacing:.08em}.connection-card-track{display:flex;gap:8px;margin:26px 0 34px}.connection-card-track i{height:4px;flex:1;border-radius:99px;background:var(--emerald-100)}.connection-card-track i:first-child{background:var(--emerald-500)}.connection-card[data-connection-card] section{min-height:170px}.connection-card-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:12px;background:var(--emerald-700);color:#fff;font-weight:800}.connection-card[data-connection-card] h3{margin:18px 0 8px;font-size:clamp(26px,3vw,38px);letter-spacing:-.05em}.connection-card[data-connection-card] p{max-width:520px;color:var(--ink-2);font-size:17px}.connection-url{display:flex;align-items:center;gap:10px;margin-top:20px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:rgb(255 255 255 / .66)}.connection-url code{flex:1;overflow-wrap:anywhere;color:var(--emerald-900);font-size:13px}.connection-card-actions{margin-top:26px}.connection-card-actions .text-link{margin-left:auto}.connection-card-actions button:disabled{opacity:.45;cursor:not-allowed}
+ .hero-connection-title{margin:0 0 10px;color:#0b6247;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.hero-connection-card{max-width:560px;min-height:0;margin:14px 0 0;padding:20px;border-radius:18px}.hero-connection-card[data-connection-card] section{min-height:132px}.hero-connection-card[data-connection-card] h3{font-size:clamp(22px,2.5vw,30px);margin:14px 0 6px}.hero-connection-card[data-connection-card] p{font-size:15px}.hero-connection-card .connection-card-track{margin:16px 0 20px}.hero-connection-card .connection-card-actions{margin-top:16px}.hero-connection-card .connection-card-actions .text-link{margin-left:auto}
 .home-note{display:none}
 .site-header{max-width:1200px;padding:1.15rem 1.6rem;border-bottom:1px solid var(--line)}
 .brand{font-size:1.02rem;letter-spacing:-.03em}.logo{width:44px;height:44px;object-fit:cover;border-radius:11px;border:1px solid var(--line);background:white}
@@ -898,8 +1010,10 @@ html{scroll-behavior:smooth}body{background:var(--paper);color:var(--ink);font-f
  .modal-shell .step-kicker{display:none}.modal-footer button{min-height:44px;min-width:88px}.modal-footer .button.secondary{background:#f4fbf7;color:#10251c;border:1px solid #f4fbf7}.modal-footer .button.secondary:disabled{background:#355a4a!important;color:#d7e6de!important;border-color:#8bc7a7!important;opacity:1}.modal-footer .button:not(.secondary){background:#0e7c5a;color:#fff;border:1px solid #55c49a}.modal-footer button:focus-visible{outline:3px solid #b8f3d5;outline-offset:3px}
  /* Intelligent Performance adaptation: a paper stage, focused product proof, and restrained glass surfaces. */
  .home-page{background:#ececeb;color:#202020}.home-page main{max-width:none;padding:0 24px 72px}.home-stage{position:relative;isolation:isolate;min-height:clamp(760px,calc(100svh - 64px),980px);margin:0 -24px;padding:clamp(36px,7vh,80px) max(24px,calc((100% - 1200px)/2)) 64px;overflow:hidden;background:linear-gradient(135deg,rgba(236,236,234,.92),rgba(236,236,234,.72)),#ececeb}.home-stage:after{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(circle at 12% 10%,rgba(18,144,106,.16),transparent 34%),radial-gradient(circle at 88% 23%,rgba(208,143,106,.14),transparent 31%),linear-gradient(180deg,rgba(255,255,255,.14),transparent 48%,rgba(20,32,27,.08));pointer-events:none}.stage-motion{position:absolute;inset:0;z-index:-3;width:100%;height:100%;object-fit:cover;opacity:.24;mix-blend-mode:multiply;pointer-events:none}.stage-motion--narrow{display:none}.home-stage-noise{position:absolute;inset:0;z-index:-1;width:100%;height:100%;opacity:.24;mix-blend-mode:multiply;pointer-events:none}.home-stage-inner{position:relative;z-index:1;max-width:1200px;margin:0 auto}.home-masthead{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,510px);gap:clamp(36px,6vw,88px);align-items:center}.home-copy{max-width:660px}.home-eyebrow{color:#0b6247}.home-copy h1{max-width:680px;margin:18px 0 20px;color:#202020;font-size:clamp(42px,min(5.2vw,8vh),72px);font-weight:520;letter-spacing:-.062em;line-height:1.01}.home-copy h1 span{color:#0e7c5a}.home-intro{max-width:610px;margin:0;color:#394a42;font-size:clamp(17px,1.65vw,22px);line-height:1.48;letter-spacing:-.02em}.home-copy .actions{margin-top:28px}.home-note{max-width:520px;margin:20px 0 0;color:#52645a;font-size:14px}.home-console{position:relative;overflow:hidden;border:1px solid rgba(255,255,255,.56);border-radius:22px;background:linear-gradient(145deg,rgba(255,255,255,.58),rgba(255,255,255,.18)),rgba(240,246,242,.38);box-shadow:0 26px 70px rgba(34,56,45,.18),inset 0 1px 0 rgba(255,255,255,.72);backdrop-filter:blur(18px) saturate(1.12);-webkit-backdrop-filter:blur(18px) saturate(1.12)}.home-console:before{content:"";position:absolute;inset:0;background:linear-gradient(120deg,rgba(255,255,255,.35),transparent 32%,rgba(255,255,255,.12) 68%,transparent);pointer-events:none}.console-top{position:relative;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 20px;border-bottom:1px solid rgba(20,32,27,.12);color:#33483d;font-size:12px;letter-spacing:.02em}.console-title{display:inline-flex;align-items:center;gap:8px;font-weight:700}.console-mark{width:8px;height:8px;border-radius:50%;background:#0e7c5a;box-shadow:0 0 0 4px rgba(14,124,90,.12)}.console-status{color:#587064}.home-example-panel{position:relative;z-index:1;min-height:315px;padding:30px 28px 18px;background:transparent!important;border-radius:0;box-shadow:none;color:#17211d}.home-example-panel .example-badge{border-color:rgba(14,124,90,.36);color:#0b6247;background:rgba(255,255,255,.35)}.home-example-panel .example-question{max-width:390px;margin:24px 0 16px;color:#14201b!important;font-size:clamp(27px,3vw,39px);font-weight:620;letter-spacing:-.045em;line-height:1.08}.home-example-panel .example-answer{max-width:430px;margin:0;color:#3f5549!important;font-size:16px;line-height:1.58}.home-example-panel small{max-width:400px;margin-top:22px;color:#60756a}.home-example-panel .example-actions{display:flex;align-items:center;gap:12px;margin-top:22px}.home-example-panel .demo-status{margin:0}.home-prompt-tabs{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:16px 20px 20px;border-top:1px solid rgba(20,32,27,.12)}.home-prompt-tabs .prompt-label{grid-column:1/-1;margin:0 0 2px;color:#587064;font-size:11px;letter-spacing:.1em;text-transform:uppercase}.home-prompt-tabs button{min-height:54px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 11px;border:1px solid rgba(20,32,27,.14);border-radius:11px;background:rgba(255,255,255,.38);color:#20352a;font-size:13px;line-height:1.25}.home-prompt-tabs button:hover,.home-prompt-tabs button[aria-selected=true]{border-color:rgba(14,124,90,.55);background:rgba(255,255,255,.68);color:#0b6247}.home-prompt-tabs button span{color:#6a7b71;font-size:10px;white-space:nowrap}.capability-section{margin-top:clamp(54px,9vh,96px)}.capability-heading{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,390px);gap:24px;align-items:end;margin-bottom:25px}.capability-heading .eyebrow{grid-column:1/-1;margin:0}.capability-heading h2{margin:0;max-width:680px;color:#202020;font-size:clamp(30px,3.3vw,48px);letter-spacing:-.052em;line-height:1.05}.capability-heading>p:last-child{margin:0;color:#52645a;line-height:1.55}.capability-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(12px,1.5vw,22px)}.capability-card{position:relative;min-height:310px;display:flex;flex-direction:column;overflow:hidden;padding:23px;border:1px solid rgba(255,255,255,.58);border-radius:17px;background:linear-gradient(145deg,rgba(255,255,255,.68),rgba(255,255,255,.24)),rgba(220,238,228,.34);box-shadow:0 12px 30px rgba(34,56,45,.12),inset 0 1px 0 rgba(255,255,255,.78);backdrop-filter:blur(13px);-webkit-backdrop-filter:blur(13px)}.capability-card:after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 86% 12%,rgba(14,124,90,.12),transparent 34%);pointer-events:none}.capability-card-top{position:relative;z-index:1;display:flex;justify-content:space-between;color:#4e6759;font-size:11px;letter-spacing:.09em;text-transform:uppercase}.capability-card h3{position:relative;z-index:1;max-width:300px;margin:42px 0 10px;color:#17251e;font-size:clamp(21px,2vw,28px);letter-spacing:-.04em;line-height:1.1}.capability-card p{position:relative;z-index:1;max-width:330px;margin:0;color:#52645a;line-height:1.52}.capability-visual{position:relative;z-index:1;width:100%;height:92px;margin-top:auto;color:#0e7c5a;opacity:.72}.home-page .how-section,.home-page .trust-section,.home-page .pricing-teaser,.home-page .faq-section,.home-page .closing-cta{max-width:1200px;margin-left:auto;margin-right:auto}.home-page .how-section{margin-top:34px}.home-page .closing-cta{box-shadow:0 18px 44px rgba(34,56,45,.12)}
- @media(max-width:1023px){.home-masthead{grid-template-columns:1fr;gap:34px}.home-copy{max-width:760px}.home-console{max-width:680px;width:100%;margin-inline:auto}.capability-heading{grid-template-columns:1fr}.capability-heading>p:last-child{max-width:560px}.capability-cards{grid-template-columns:1fr 1fr}.capability-card:last-child{grid-column:1/-1}}
- @media(max-width:767px){.home-page main{padding-inline:16px}.home-stage{min-height:0;margin-inline:-16px;padding:38px 16px 50px;background:linear-gradient(180deg,rgba(236,236,234,.84),rgba(236,236,234,.94)),#ececeb}.stage-motion--wide{display:none}.stage-motion--narrow{display:block;opacity:.14}.home-masthead{gap:30px}.home-copy h1{font-size:clamp(40px,12vw,60px)}.home-intro{font-size:18px}.home-copy .actions{align-items:stretch;flex-direction:column;gap:12px}.home-copy .actions .button{width:100%}.home-note{margin-top:17px}.home-console{border-radius:17px}.console-top{padding:14px 15px}.home-example-panel{min-height:310px;padding:24px 20px 14px}.home-example-panel .example-question{font-size:31px}.home-prompt-tabs{grid-template-columns:1fr 1fr;padding:14px 15px 15px}.home-prompt-tabs button{min-height:58px;display:block;text-align:left}.home-prompt-tabs button span{display:block;margin-top:6px}.capability-section{margin-top:56px}.capability-heading h2{font-size:34px}.capability-cards{grid-template-columns:1fr}.capability-card:last-child{grid-column:auto}.capability-card{min-height:270px}.home-page .how-section{margin-top:0}}
+  @media(max-width:1023px){.home-masthead{grid-template-columns:1fr;gap:34px}.home-copy{max-width:760px}.home-console{max-width:680px;width:100%;margin-inline:auto}.hero-connection-card{max-width:680px}.capability-heading{grid-template-columns:1fr}.capability-heading>p:last-child{max-width:560px}.capability-cards{grid-template-columns:1fr 1fr}.capability-card:last-child{grid-column:1/-1}}
+  @media(max-width:767px){.home-page main{padding-inline:16px}.home-stage{min-height:0;margin-inline:-16px;padding:38px 16px 50px;background:linear-gradient(180deg,rgba(236,236,234,.84),rgba(236,236,234,.94)),#ececeb}.stage-motion--wide{display:none}.stage-motion--narrow{display:block;opacity:.14}.home-masthead{gap:30px}.home-copy h1{font-size:clamp(40px,12vw,60px)}.home-intro{font-size:18px}.home-copy .actions{align-items:stretch;flex-direction:column;gap:12px}.home-copy .actions .button{width:100%}.home-note{margin-top:17px}.hero-connection-card{margin-top:12px;padding:17px}.hero-connection-card[data-connection-card] section{min-height:142px}.hero-connection-card .connection-url{align-items:stretch;flex-direction:column}.hero-connection-card .connection-card-actions{gap:10px;flex-wrap:wrap}.hero-connection-card .connection-card-actions .text-link{width:100%;margin-left:0}.home-console{border-radius:17px}.console-top{padding:14px 15px}.home-example-panel{min-height:310px;padding:24px 20px 14px}.home-example-panel .example-question{font-size:31px}.home-prompt-tabs{grid-template-columns:1fr 1fr;padding:14px 15px 15px}.home-prompt-tabs button{min-height:58px;display:block;text-align:left}.home-prompt-tabs button span{display:block;margin-top:6px}.capability-section{margin-top:56px}.capability-heading h2{font-size:34px}.capability-cards{grid-template-columns:1fr}.capability-card:last-child{grid-column:auto}.capability-card{min-height:270px}.home-page .how-section{margin-top:0}}
+  .home-stage-inner,.home-masthead,.home-copy,.home-console,.hero-connection-card,.home-example-panel,.home-prompt-tabs{min-width:0;box-sizing:border-box}.home-stage-inner{width:100%}
+  @media(max-width:767px){.home-masthead{grid-template-columns:minmax(0,1fr)}.home-copy,.home-console,.hero-connection-card,.home-example-panel,.home-prompt-tabs{width:100%;max-width:100%}.home-copy h1,.home-intro,.home-example-panel .example-question,.home-example-panel .example-answer,.home-prompt-tabs button{min-width:0;max-width:100%;overflow-wrap:anywhere}.home-prompt-tabs{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.home-prompt-tabs button{white-space:normal}}
  @keyframes homeRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
  @media(prefers-reduced-motion:no-preference){.home-page .home-masthead{animation:homeRise .72s cubic-bezier(.16,1,.3,1) both}.home-page .capability-section{animation:homeRise .72s cubic-bezier(.22,1,.36,1) .12s both}}
  @media(max-height:720px) and (min-width:768px){.home-stage{min-height:900px}.home-masthead{align-items:start}.home-copy h1{font-size:clamp(40px,5vw,62px)}}

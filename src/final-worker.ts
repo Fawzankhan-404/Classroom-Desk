@@ -122,7 +122,7 @@ export default {
         PUBLIC_APP_ORIGIN: requestOrigin, PUBLIC_OPERATOR_NAME: bindings.V2_PUBLIC_OPERATOR_NAME,
         PUBLIC_SUPPORT_EMAIL: bindings.V2_PUBLIC_SUPPORT_EMAIL, PUBLIC_AUTH_ENCRYPTION_KEY_B64: bindings.V2_PUBLIC_AUTH_ENCRYPTION_KEY_B64,
         GOOGLE_OAUTH_CLIENT_ID: bindings.V2_GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET: bindings.V2_GOOGLE_OAUTH_CLIENT_SECRET,
-        GOOGLE_OAUTH_CALLBACK_URL: `${requestOrigin}/oauth/google/callback`, MCP_RESOURCE_URL: `${requestOrigin}/mcp`,
+        GOOGLE_OAUTH_CALLBACK_URL: `${requestOrigin}/oauth/google/callback`, MCP_RESOURCE_URL: `${requestOrigin}/mcp`, MCP_STUDENT_RESOURCE_URL: `${requestOrigin}/mcp/student`,
       });
       config.saasFlags = loadSaaSFeatureFlags(bindings);
       config.googleScopes = V2_UNIFIED_SCOPES;
@@ -172,7 +172,7 @@ export default {
         loadPricingReferral: (cookieHeader) => loadPricingReferralView(saasStore, cookieHeader, config.saasFlags?.referralRewards === true),
         stagingSubjectFingerprint: stagingDiagnosticsEnabled,
         entitlementCheck: (userId) => resolveMcpAccess(saasStore,userId,bindings.MCP_GRANDFATHERED_SUBJECT_HASHES,stagingTestEntitlement),
-        mcpFactory: async (auth, userId) => {
+        mcpFactory: async (auth, userId, catalogMode) => {
           const clients = createClients(auth);
           const grantedScopes = await publicProvider.googleGrantScopes(userId);
           const teacherEntitled = await hasTeacherMcpEntitlement(saasStore, userId, config.saasFlags?.teacherFeatures === true);
@@ -209,7 +209,7 @@ export default {
               }
             }
             return undefined;
-          }, attachmentAccess: { authorizations: attachmentAuthorizations, reader, pickerUrl: (id) => pickerUrl(config.origin.toString(), id) } }, { name: "classroom-desk", version: "2.0.0", linkWebsiteAccount: (code, mcpId) => saasStore.linking.consume(code, mcpId), accountStatus: (mcpId) => saasStore.accountStatusForMcpUser(mcpId, requestOrigin), teacherAuthorizationUrl: new URL("/app/teacher", requestOrigin).toString(), teacherWriteAuthorizationUrl: new URL("/app/teacher", requestOrigin).toString(), teacherDraftWritesEnabled: config.saasFlags?.teacherDraftWrites === true });
+          }, attachmentAccess: { authorizations: attachmentAuthorizations, reader, pickerUrl: (id) => pickerUrl(config.origin.toString(), id) } }, { name: "classroom-desk", version: "2.0.0", catalogMode, linkWebsiteAccount: (code, mcpId) => saasStore.linking.consume(code, mcpId), accountStatus: (mcpId) => saasStore.accountStatusForMcpUser(mcpId, requestOrigin), teacherAuthorizationUrl: new URL("/app/teacher", requestOrigin).toString(), teacherWriteAuthorizationUrl: new URL("/app/teacher", requestOrigin).toString(), teacherDraftWritesEnabled: config.saasFlags?.teacherDraftWrites === true });
         },
         registerRoutes: (routeApp) => {
           registerInternalLink(routeApp,saasStore,bindings.INTERNAL_DELEGATION_SECRET,bindings.MCP_GRANDFATHERED_SUBJECT_HASHES,bindings.MCP_ACCESS_POLICY_SECRET);
