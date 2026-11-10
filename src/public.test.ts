@@ -205,6 +205,18 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(script).not.toContain('fetch("/api/support"');
     } finally { await close(ctx.server); }
   });
+  it("keeps the mobile header on one row and moves the connect action into the mobile menu", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/support`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).toContain(".header-cta{display:none!important}");
+      expect(html).toContain('class="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu"');
+      expect(html).toContain('<nav id="mobile-menu" class="mobile-menu" aria-label="Mobile navigation" hidden>');
+      expect(html).toContain('<button class="button" type="button" data-connect-open>Connect to ChatGPT</button></nav>');
+    } finally { await close(ctx.server); }
+  });
   it("uses the supplied Classroom Desk artwork as the primary site logo", async () => {
     const ctx = await setup();
     try {
