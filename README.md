@@ -14,12 +14,15 @@
   </p>
 
   <p>
+    <a href="https://github.com/Fawzankhan-404/Classroom-Desk/actions/workflows/quality.yml"><img alt="Quality gates" src="https://github.com/Fawzankhan-404/Classroom-Desk/actions/workflows/quality.yml/badge.svg?branch=main"></a>
     <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/License-Apache--2.0-176B4D?style=flat-square"></a>
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white">
     <img alt="Cloudflare Workers" src="https://img.shields.io/badge/Cloudflare-Workers-F38020?style=flat-square&logo=cloudflare&logoColor=white">
     <img alt="Model Context Protocol" src="https://img.shields.io/badge/Protocol-MCP-635BFF?style=flat-square">
   </p>
 </div>
+
+![Classroom Desk social preview](assets/classroom-desk-social-preview.png)
 
 ---
 
@@ -121,7 +124,7 @@ Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), use 
 
 Classroom Desk remains free and open source under Apache-2.0. Contributions are optional and help with maintenance, hosting, infrastructure, documentation, and future development. They do not unlock functionality, purchase a hosted plan, or change account permissions. They are not charitable donations and no tax deduction is promised.
 
-Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for project information and contact options. The page currently provides a GitHub repository link and an email link; it does not include a support form or confirm email delivery. Voluntary online contributions are not enabled, and the GitHub Sponsors profile is not active. Subscription checkout is a separate account feature; live payment readiness must be verified by the service operator before activation. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for contribution requirements.
+Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for project information and a form that prepares a message in your email app. You review and send that message yourself; the website cannot confirm delivery. Voluntary online contributions are not enabled, and the GitHub Sponsors profile is not active. Subscription checkout is a separate account feature; live payment readiness must be verified by the service operator before activation. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for contribution requirements.
 
 ## License and attribution
 

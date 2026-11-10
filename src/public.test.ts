@@ -153,6 +153,29 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain(".table-scroll:focus-visible");
     } finally { await close(ctx.server); }
   });
+  it("provides an accessible support form that prepares an email without claiming delivery", async () => {
+    const ctx = await setup(new URL("https://classroom.example"));
+    try {
+      const response = await fetch(`${ctx.origin}/support`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).toContain('<form class="support-form" data-support-form');
+      for (const field of ["support-name", "support-email", "support-subject", "support-message"]) expect(html).toContain(`for="${field}"`);
+      expect(html).toContain('type="email" autocomplete="email" maxlength="254" required');
+      expect(html).toContain('maxlength="2000" required');
+      expect(html).toContain('role="status" aria-live="polite"');
+      expect(html).toContain("Classroom Desk cannot confirm delivery");
+      const scriptResponse = await fetch(`${ctx.origin}/assets/connect.js`);
+      const script = await scriptResponse.text();
+      expect(scriptResponse.status).toBe(200);
+      expect(script).toContain('form.reportValidity()');
+      expect(script).toContain('encodeURIComponent("Classroom Desk support: " + subject)');
+      expect(script).toContain('window.location.href = uri');
+      expect(script).toContain("this website cannot confirm delivery");
+      expect(script).toContain('join("\\n")');
+      expect(script).not.toContain('fetch("/api/support"');
+    } finally { await close(ctx.server); }
+  });
   it("uses the supplied Classroom Desk artwork as the primary site logo", async () => {
     const ctx = await setup();
     try {

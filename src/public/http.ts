@@ -137,7 +137,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
   });
   app.get("/assets/connect.js", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=86400, no-transform");
-    res.type("js").send(connectScript() + pricingReferralScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript() + connectionCardScript());
+    res.type("js").send(connectScript() + supportFormScript() + pricingReferralScript() + connectModalBridgeScript() + connectModalMarkupScript() + connectModalStateScript() + connectGuideBackStateScript() + connectModalBackDisabledScript() + connectModalProgressScript() + connectDemoScript() + connectDemoStyleScript() + connectAccountGuidanceScript() + connectModalCleanupScript() + homeMotionScript() + connectionCardScript());
   });
   app.get("/", (_req, res) => res.type("html").send(page("Classroom Desk", "home", operator, support, config.origin, homeBody(saasFlags))));
   app.get("/connect", (_req, res) => res.type("html").send(page("Connect to ChatGPT", "connect", operator, support, config.origin, connectBody())));
@@ -181,6 +181,19 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
     <article class="doc support-card" id="project-support" aria-labelledby="project-support-title">
       <h1 id="project-support-title">Support Classroom Desk</h1>
       <p class="updated">Optional support for a free, open-source project.</p>
+      <section aria-labelledby="contact-support-title">
+        <h2 id="contact-support-title">Contact support</h2>
+        <p>This form prepares a message in your email app. Review it and choose Send there; Classroom Desk cannot confirm delivery. Please do not include passwords, Google authorization codes, or private Classroom/student information.</p>
+        <form class="support-form" data-support-form data-support-email="${support}">
+          <div class="support-field"><label for="support-name">Name</label><input id="support-name" name="name" autocomplete="name" maxlength="100" required></div>
+          <div class="support-field"><label for="support-email">Email address</label><input id="support-email" name="email" type="email" autocomplete="email" maxlength="254" required></div>
+          <div class="support-field"><label for="support-subject">Subject</label><input id="support-subject" name="subject" maxlength="120" required></div>
+          <div class="support-field"><label for="support-message">Message</label><textarea id="support-message" name="message" rows="7" maxlength="2000" required></textarea><small>Up to 2,000 characters. Do not include private student records or login credentials.</small></div>
+          <button class="button" type="submit">Prepare email</button>
+          <p class="support-form-status" data-support-status role="status" aria-live="polite"></p>
+        </form>
+        <p>If no email app opens, contact <a data-direct-support href="${mailto}">${support}</a>.</p>
+      </section>
       <p>Classroom Desk is an independently developed, open-source project that connects Google Classroom with ChatGPT, making it easier for students to access their courses, assignments, deadlines, and learning information.</p>
       <p>Building and maintaining this project takes time and resources. Contributions help us keep improving it and make access more affordable for students who need it.</p>
       <p><a class="button" href="https://github.com/Fawzankhan-404/Classroom-Desk" target="_blank" rel="noopener noreferrer">View Classroom Desk on GitHub</a></p>
@@ -194,7 +207,7 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
 
       <h2>Every contribution helps</h2>
       <p>Whether you're a student, developer, educator, or someone who believes in accessible education, your support helps keep Classroom Desk moving forward.</p>
-      <p><a class="button secondary" href="mailto:${support}">Support Classroom Desk</a></p>
+      <p><a class="button secondary" href="mailto:${support}">Email about supporting the project</a></p>
       <p class="fine-print">Classroom Desk is an independent open-source project. Contributions are voluntary and do not purchase a subscription or guarantee access to paid features.</p>
       <p class="fine-print">Online contributions are not enabled yet. No payment can be made from this page until the merchant account and contribution checkout have been separately approved and configured.</p>
     </article>
@@ -635,6 +648,32 @@ function connectScript() {
     const guides = [...document.querySelectorAll("[data-connect-guide]")]; const setGuide = (root, index) => { const steps = [...root.querySelectorAll("[data-guide-step]")]; const number = root.querySelector("[data-guide-number]"); const back = root.querySelector("[data-guide-back]"); const next = root.querySelector("[data-guide-next]"); steps.forEach((s, i) => { s.hidden = i !== index; }); if (number) number.textContent = String(index + 1); if (back) back.hidden = index === 0; if (next) next.textContent = index === steps.length - 1 ? "Done" : "Next"; root.dataset.step = String(index); }; guides.forEach(root => { let index = 0; const next = root.querySelector("[data-guide-next]"); const back = root.querySelector("[data-guide-back]"); next?.addEventListener("click", () => { if (index < 2) { index += 1; setGuide(root, index); } }); back?.addEventListener("click", () => { index = Math.max(0, index - 1); setGuide(root, index); }); setGuide(root, 0); }); const modal = document.querySelector("[data-connect-modal]"); let lastTrigger = null; const open = trigger => { lastTrigger = trigger; modal?.showModal(); document.body.classList.add("modal-open"); modal?.querySelector("button")?.focus(); }; document.querySelectorAll("[data-connect-open]").forEach(b => b.addEventListener("click", () => open(b))); modal?.querySelector("[data-connect-close]")?.addEventListener("click", () => modal.close()); modal?.addEventListener("click", e => { if (e.target === modal) modal.close(); }); modal?.addEventListener("close", () => { document.body.classList.remove("modal-open"); lastTrigger?.focus(); }); const menu = document.querySelector(".menu-toggle"); const mobile = document.querySelector("#mobile-menu"); menu?.addEventListener("click", () => { const open = menu.getAttribute("aria-expanded") === "true"; menu.setAttribute("aria-expanded", String(!open)); mobile.hidden = open; }); const tabs = [...document.querySelectorAll("[data-prompt-tab]")]; const answers = ["What assignments do I have?", "What deadlines are coming up?", "Show my recent Classroom activity.", "Show announcements from my courses.", "Find missing or returned work.", "Explain the instructions for my assignment."]; const replies = ["You have three current items: a Physics lab report, History reading notes, and a returned Biology assignment. Check each Classroom item for its latest details.", "Your next example deadline is a Physics lab report tomorrow, followed by History reading notes on Friday.", "Your recent example activity includes one returned assignment and two course updates.", "Your courses have example announcements about a reading reminder and a lab session.", "Example results show one returned item and one missing item. Open Classroom for the source details.", "I can explain instructions returned from Classroom. For an attachment, authorize that exact file first."]; const q = document.querySelector("[data-example-question]"); const a = document.querySelector("[data-example-answer]"); tabs.forEach((tab, i) => { tab.addEventListener("click", () => { tabs.forEach(t => t.setAttribute("aria-selected", "false")); tab.setAttribute("aria-selected", "true"); if(q) q.textContent = answers[i]; if(a) a.textContent = replies[i]; }); tab.addEventListener("keydown", e => { if (!["ArrowDown","ArrowRight","ArrowUp","ArrowLeft","Home","End"].includes(e.key)) return; e.preventDefault(); let j = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key.includes("Down") || e.key.includes("Right") ? 1 : -1) + tabs.length) % tabs.length; tabs[j].focus(); tabs[j].click(); }); }); })();`;
 }
 
+function supportFormScript() {
+  return `(() => {
+    const form = document.querySelector("[data-support-form]");
+    if (!(form instanceof HTMLFormElement)) return;
+    const status = form.querySelector("[data-support-status]");
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const values = new FormData(form);
+      const name = String(values.get("name") || "").trim();
+      const email = String(values.get("email") || "").trim();
+      const subject = String(values.get("subject") || "").trim();
+      const message = String(values.get("message") || "").trim();
+      const recipient = form.dataset.supportEmail || "";
+      if (!name || !email || !subject || !message || !recipient) {
+        if (status) status.textContent = "Complete each field and use the email link below if the form cannot prepare a message.";
+        return;
+      }
+      const body = ["Name: " + name, "Reply email: " + email, "", message, "", "Do not reply with passwords, Google authorization codes, or private Classroom/student information."].join("\\n");
+      const uri = "mailto:" + recipient + "?subject=" + encodeURIComponent("Classroom Desk support: " + subject) + "&body=" + encodeURIComponent(body);
+      if (status) status.textContent = "Your email app should open with a draft. Review it and select Send there; this website cannot confirm delivery.";
+      window.location.href = uri;
+    });
+  })();`;
+}
+
 function pricingReferralScript() {
   return `(() => {
     const writeClipboard = async text => {
@@ -772,7 +811,7 @@ function page(title: string, active: string, operator: string, support: string, 
 ${title === "Classroom Desk" ? '<link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/5c3ec08f-2dbf-4c0a-8588-f6106a789443.webp" media="(min-width:768px)" fetchpriority="high"><link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/0f4926a4-e660-4df2-9195-2bfb3e341bdd.webp" media="(max-width:767px)" fetchpriority="high">' : ""}
 <link rel="icon" type="image/svg+xml" href="/assets/classroom-desk-favicon.svg">
 <link rel="apple-touch-icon" href="/assets/classroom-desk-app-icon.png">
-<style>${siteStyles()}${designStyles()}${pricingReferralStyles()}.numbered-steps b{color:#176b4b!important}.site-header .brand,.desktop-nav a,.header-actions a{min-height:44px;display:inline-flex;align-items:center}.header-cta{min-height:44px!important}.modal-header .eyebrow{color:#b8f3d5}.close-button{min-width:44px;min-height:44px;flex-shrink:0}.copy-chip button{min-width:44px;min-height:44px}@media(max-width:767px) and (max-height:900px){.modal-shell .guide-visual{display:none}}${active === "support" ? ".support-amounts article{min-height:0}.support-custom-amount{display:grid;gap:.5rem;max-width:420px;margin:1rem 0}.support-custom-amount label{font-weight:750;color:var(--deep)}.support-custom-amount input{min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;padding:.8rem;font:inherit;color:var(--deep);background:var(--soft)}.support-custom-amount input:disabled{opacity:.65;cursor:not-allowed}" : ""}</style>
+<style>${siteStyles()}${designStyles()}${pricingReferralStyles()}.numbered-steps b{color:#176b4b!important}.site-header .brand,.desktop-nav a,.header-actions a{min-height:44px;display:inline-flex;align-items:center}.header-cta{min-height:44px!important}.modal-header .eyebrow{color:#b8f3d5}.close-button{min-width:44px;min-height:44px;flex-shrink:0}.copy-chip button{min-width:44px;min-height:44px}@media(max-width:767px) and (max-height:900px){.modal-shell .guide-visual{display:none}}${active === "support" ? ".support-form{display:grid;gap:16px;max-width:680px;margin:24px 0}.support-field{display:grid;gap:6px}.support-field label{font-weight:650}.support-field input,.support-field textarea{box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);padding:12px 14px;font:inherit}.support-field textarea{resize:vertical}.support-field small{color:var(--muted)}.support-form-status{min-height:1.5em;margin:0;color:var(--emerald-700)}.support-form :focus-visible{outline:2px solid var(--emerald-600);outline-offset:3px}" : ""}</style>
 </head>
 <body class="${compact ? "compact" : ""}${title === "Classroom Desk" ? " home-page" : ""}">
 <a class="skip-link" href="#main-content">Skip to content</a>

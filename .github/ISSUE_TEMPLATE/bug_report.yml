@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible Classroom Desk defect.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |-
+        Do not include passwords, OAuth codes, access tokens, private course names, student records, or screenshots containing personal data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the problem without private Classroom data.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |-
+        1. Open…
+        2. Select…
+        3. Observe…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser, OS, and whether this was hosted or self-hosted.
+    validations:
+      required: true

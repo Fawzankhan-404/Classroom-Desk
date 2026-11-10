@@ -21,4 +21,6 @@ jobs:
       - run: npm test
       - run: node tools/source-secret-check.mjs
       - run: npm run build
+      - run: npm run build:worker
       - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high
