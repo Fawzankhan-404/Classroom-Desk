@@ -33,7 +33,7 @@ The repository contains a TypeScript application with a web experience, MCP tool
 
 | Experience | What it includes | Data and action boundary |
 |---|---|---|
-| **Student** | Supported course, coursework, deadline, announcement, material, and personal submission information. | Results depend on the connected Google account, its permissions, and course membership. A Drive-file action requires an explicit request and does not submit work to Classroom. |
+| **Student** | Supported course, coursework, deadline, announcement, material, and personal submission information. | Results depend on the connected Google account, its permissions, and course membership. A student may explicitly select one teacher-provided Classroom attachment in Google Picker for bounded reading. Generated-PDF transfer to Drive is currently unavailable, and Classroom Desk does not submit work. |
 | **Teacher dashboard** | A rubric and six sample responses with evidence-based draft marks, review flags, and local demo approval. | The assessment workspace uses synthetic records labeled **DEMO**. Demo approval never changes a real grade. |
 | **Teacher Classroom access** | Separate teacher operations are available only when the account has the required Google authorization and Google confirms the relevant course role. | Choosing Teacher changes the dashboard preference; it does not grant teacher access. Availability depends on deployment configuration and consent. |
 | **Gradebook** | No automatic grade publication. | Google Classroom gradebook writeback is disabled. |
@@ -121,7 +121,7 @@ Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), use 
 
 Classroom Desk remains free and open source under Apache-2.0. Contributions are optional and help with maintenance, hosting, infrastructure, documentation, and future development. They do not unlock functionality, purchase a hosted plan, or change account permissions. They are not charitable donations and no tax deduction is promised.
 
-Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for project information. Razorpay payment eligibility and a hosted support page are still awaiting account verification and owner approval; no checkout link or GitHub funding button is active yet. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for the remaining steps.
+Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for project information and contact options. The page currently provides a GitHub repository link and an email link; it does not include a support form or confirm email delivery. Voluntary online contributions are not enabled, and the GitHub Sponsors profile is not active. Subscription checkout is a separate account feature; live payment readiness must be verified by the service operator before activation. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for contribution requirements.
 
 ## License and attribution
 

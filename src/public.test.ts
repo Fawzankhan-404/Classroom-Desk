@@ -118,6 +118,41 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(body.token_endpoint).toContain("/token");
     } finally { await close(ctx.server); }
   });
+  it("publishes only public pages in the XML sitemap", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/sitemap.xml`);
+      const xml = await response.text();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("application/xml");
+      for (const path of ["/", "/connect", "/pricing", "/support", "/privacy", "/terms", "/refunds"]) {
+        expect(xml).toContain(`<loc>${authConfig.origin.origin}${path}</loc>`);
+      }
+      expect(xml).not.toMatch(/\/(?:app|api|mcp|oauth|login)(?:[<\/]|$)/);
+    } finally { await close(ctx.server); }
+  });
+  it("keeps private account, authentication, and MCP routes out of crawler guidance", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/robots.txt`);
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/plain");
+      expect(text).toContain("Allow: /");
+      for (const path of ["/app", "/api", "/account/", "/auth/", "/oauth/", "/login", "/logout", "/session/", "/connect/google", "/register", "/disconnect", "/authorize", "/token", "/revoke", "/mcp"]) expect(text).toContain(`Disallow: ${path}`);
+      expect(text).toContain(`Sitemap: ${authConfig.origin.origin}/sitemap.xml`);
+    } finally { await close(ctx.server); }
+  });
+  it("makes the horizontally scrollable pricing comparison keyboard reachable", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/pricing`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).toContain('<div class="table-scroll" role="region" aria-label="Plan requirements comparison" tabindex="0">');
+      expect(html).toContain(".table-scroll:focus-visible");
+    } finally { await close(ctx.server); }
+  });
   it("uses the supplied Classroom Desk artwork as the primary site logo", async () => {
     const ctx = await setup();
     try {

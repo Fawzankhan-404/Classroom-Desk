@@ -47,5 +47,10 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "overrides": {
+    "googleapis-common": {
+      "gaxios": "7.3.1"
+    }
   }
 }
