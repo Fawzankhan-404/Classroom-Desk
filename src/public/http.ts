@@ -189,9 +189,10 @@ export function createPublicApp(config: RuntimeConfig, store: PublicAuthStore, p
           <div class="support-field"><label for="support-email">Email address</label><input id="support-email" name="email" type="email" autocomplete="email" maxlength="254" required></div>
           <div class="support-field"><label for="support-subject">Subject</label><input id="support-subject" name="subject" maxlength="120" required></div>
           <div class="support-field"><label for="support-message">Message</label><textarea id="support-message" name="message" rows="7" maxlength="2000" required></textarea><small>Up to 2,000 characters. Do not include private student records or login credentials.</small></div>
-          <button class="button" type="submit">Prepare email</button>
+          <button class="button" type="button" data-support-prepare>Prepare email</button>
           <p class="support-form-status" data-support-status role="status" aria-live="polite"></p>
         </form>
+        <noscript><p>This form needs JavaScript to prepare an email. It does not send form data to this website; use the email link below instead.</p></noscript>
         <p>If no email app opens, contact <a data-direct-support href="${mailto}">${support}</a>.</p>
       </section>
       <p>Classroom Desk is an independently developed, open-source project that connects Google Classroom with ChatGPT, making it easier for students to access their courses, assignments, deadlines, and learning information.</p>
@@ -653,8 +654,7 @@ function supportFormScript() {
     const form = document.querySelector("[data-support-form]");
     if (!(form instanceof HTMLFormElement)) return;
     const status = form.querySelector("[data-support-status]");
-    form.addEventListener("submit", event => {
-      event.preventDefault();
+    form.querySelector("[data-support-prepare]")?.addEventListener("click", () => {
       if (!form.reportValidity()) return;
       const values = new FormData(form);
       const name = String(values.get("name") || "").trim();
@@ -827,7 +827,7 @@ ${title === "Classroom Desk" ? '<link rel="preload" as="image" href="https://d2o
   <p class="disclaimer">Classroom Desk is an independent integration and is not affiliated with or endorsed by Google or OpenAI. Google Classroom, ChatGPT, and OpenAI are trademarks of their respective owners.</p>
 </footer>
 ${active === "home" ? "" : connectGuideModal()}
- <script src="/assets/connect.js?v=20261025-hero3" defer></script>
+ <script src="/assets/connect.js?v=20261110-support2" defer></script>
 </body>
 </html>`;
 }

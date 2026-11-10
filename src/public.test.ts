@@ -160,6 +160,8 @@ describe("public OAuth and HTTP authorization boundary", () => {
       const html = await response.text();
       expect(response.status).toBe(200);
       expect(html).toContain('<form class="support-form" data-support-form');
+      expect(html).toContain('type="button" data-support-prepare>Prepare email</button>');
+      expect(html).toContain("This form needs JavaScript to prepare an email");
       for (const field of ["support-name", "support-email", "support-subject", "support-message"]) expect(html).toContain(`for="${field}"`);
       expect(html).toContain('type="email" autocomplete="email" maxlength="254" required');
       expect(html).toContain('maxlength="2000" required');
@@ -169,6 +171,7 @@ describe("public OAuth and HTTP authorization boundary", () => {
       const script = await scriptResponse.text();
       expect(scriptResponse.status).toBe(200);
       expect(script).toContain('form.reportValidity()');
+      expect(script).toContain('form.querySelector("[data-support-prepare]")?.addEventListener("click"');
       expect(script).toContain('encodeURIComponent("Classroom Desk support: " + subject)');
       expect(script).toContain('window.location.href = uri');
       expect(script).toContain("this website cannot confirm delivery");
