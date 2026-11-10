@@ -9,6 +9,9 @@ export function sameOriginMutation(req: express.Request): boolean {
 }
 
 export function requireSameOrigin(req: express.Request, res: express.Response, next: express.NextFunction): void {
-  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS" || sameOriginMutation(req)) return next();
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS" || sameOriginMutation(req)) {
+    next();
+    return;
+  }
   res.status(403).json({ error: "same_origin_required" });
 }
