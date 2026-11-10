@@ -10,7 +10,8 @@
     <a href="https://github.com/Fawzankhan-404/Classroom-Desk"><strong>GitHub repository</strong></a> &nbsp;·&nbsp;
     <a href="docs/GETTING_STARTED.md">Get started</a> &nbsp;·&nbsp;
     <a href="docs/CHATGPT_CONNECTION_GUIDE.md">Connect ChatGPT</a> &nbsp;·&nbsp;
-    <a href="docs/OPEN_SOURCE_ARCHITECTURE.md">Architecture</a>
+    <a href="docs/OPEN_SOURCE_ARCHITECTURE.md">Architecture</a> &nbsp;·&nbsp;
+    <a href="CODE_OF_CONDUCT.md">Code of Conduct</a>
   </p>
 
   <p>
@@ -118,13 +119,22 @@ For vulnerability reports, follow the private process in [SECURITY.md](SECURITY.
 
 ## Contributing
 
-Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), use synthetic fixtures, and include focused tests for behavior changes. Do not include private Classroom content, production database exports, credentials, or OAuth tokens in issues or pull requests.
+Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [`Code of Conduct`](CODE_OF_CONDUCT.md), use synthetic fixtures, and include focused tests for behavior changes. Do not include private Classroom content, production database exports, credentials, or OAuth tokens in issues or pull requests.
+
+## Roadmap
+
+- Keep the student read-only Classroom experience reliable and easy to connect.
+- Complete provider sandbox verification before enabling voluntary online contributions.
+- Expand teacher workflows only when the required Google authorization, course-role checks, and deployment availability are verified.
+- Keep generated-PDF transfer to Drive and Classroom gradebook writes unavailable unless their implementation and authorization boundaries are separately reviewed.
+
+This roadmap describes priorities, not delivery dates or guarantees.
 
 ## Support Classroom Desk
 
 Classroom Desk remains free and open source under Apache-2.0. Contributions are optional and help with maintenance, hosting, infrastructure, documentation, and future development. They do not unlock functionality, purchase a hosted plan, or change account permissions. They are not charitable donations and no tax deduction is promised.
 
-Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for project information and a form that prepares a message in your email app. You review and send that message yourself; the website cannot confirm delivery. Voluntary online contributions are not enabled, and the GitHub Sponsors profile is not active. Subscription checkout is a separate account feature; live payment readiness must be verified by the service operator before activation. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for contribution requirements.
+Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for direct email support, the connection guide, project source, and issue reporting. Email opens in your own mail app; the website cannot confirm delivery. Voluntary online contributions are not enabled, and no verified GitHub Sponsors destination is configured. Subscription checkout is a separate account feature; live payment readiness must be verified by the service operator before activation. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for contribution requirements.
 
 ## License and attribution
 

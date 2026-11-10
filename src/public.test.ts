@@ -179,30 +179,26 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain(".table-scroll:focus-visible");
     } finally { await close(ctx.server); }
   });
-  it("provides an accessible support form that prepares an email without claiming delivery", async () => {
+  it("provides direct email support, verified help links, and accurately disabled online contributions", async () => {
     const ctx = await setup(new URL("https://classroom.example"));
     try {
       const response = await fetch(`${ctx.origin}/support`);
       const html = await response.text();
       expect(response.status).toBe(200);
-      expect(html).toContain('<form class="support-form" data-support-form');
-      expect(html).toContain('type="button" data-support-prepare>Prepare email</button>');
-      expect(html).toContain("This form needs JavaScript to prepare an email");
-      for (const field of ["support-name", "support-email", "support-subject", "support-message"]) expect(html).toContain(`for="${field}"`);
-      expect(html).toContain('type="email" autocomplete="email" maxlength="254" required');
-      expect(html).toContain('maxlength="2000" required');
-      expect(html).toContain('role="status" aria-live="polite"');
-      expect(html).toContain("Classroom Desk cannot confirm delivery");
+      expect(html).toContain('href="mailto:support@example.invalid?subject=Classroom%20Desk%20%E2%80%94%20Support%20Request">Email Support</a>');
+      expect(html).not.toContain("<form");
+      expect(html).not.toContain("support-name");
+      expect(html).not.toContain("support-email");
+      expect(html).toContain('href="/connect">Getting started and account connection</a>');
+      expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk">Source code and project community</a>');
+      expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk/issues">Report a bug or request a feature</a>');
+      expect(html).toContain('href="/privacy">Privacy policy</a>');
+      expect(html).toContain("Contributions are voluntary. They do not buy a subscription or unlock paid features.");
+      expect(html).toContain("Online contributions are not available yet while the payment account and test checkout are being verified.");
       const scriptResponse = await fetch(`${ctx.origin}/assets/connect.js`);
       const script = await scriptResponse.text();
       expect(scriptResponse.status).toBe(200);
-      expect(script).toContain('form.reportValidity()');
-      expect(script).toContain('form.querySelector("[data-support-prepare]")?.addEventListener("click"');
-      expect(script).toContain('encodeURIComponent("Classroom Desk support: " + subject)');
-      expect(script).toContain('window.location.href = uri');
-      expect(script).toContain("this website cannot confirm delivery");
-      expect(script).toContain('join("\\n")');
-      expect(script).not.toContain('fetch("/api/support"');
+      expect(script).not.toContain("data-support-form");
     } finally { await close(ctx.server); }
   });
   it("keeps the mobile header on one row and moves the connect action into the mobile menu", async () => {
@@ -511,17 +507,16 @@ describe("public OAuth and HTTP authorization boundary", () => {
       const html = await response.text();
       expect(response.status).toBe(200);
       expect(html).toContain('<article class="doc support-card" id="project-support"');
-      expect(html).toContain("Support Classroom Desk");
-      expect(html).toContain("independently developed, open-source project");
-      expect(html).toContain("Student access");
-      expect(html).toContain("Hosting and maintenance");
-      expect(html).toContain("Open-source development");
+      expect(html).toContain("How can we help?");
+      expect(html).toContain("independently developed and open source");
+      expect(html).toContain("student access, hosting, maintenance, security, and community development");
+      expect(html).toContain("Support the developer");
       expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk"');
-      expect(html).toContain("Support Classroom Desk");
-      expect(html).toContain("Contributions are voluntary and do not purchase a subscription");
-      expect(html).toContain("Online contributions are not enabled yet");
-      expect(html).not.toContain('id="support-custom-amount"');
-      expect(html).not.toContain("No payment can be made from this page right now.");
+      expect(html).toContain("Contributions are voluntary. They do not buy a subscription or unlock paid features.");
+      expect(html).toContain("Online contributions are not available yet while the payment account and test checkout are being verified.");
+      expect(html).not.toContain("support-form");
+      expect(html).not.toContain("support-name");
+      expect(html).not.toContain("support-message");
       expect(html).not.toContain("buymeacoffee.com");
       expect(html).not.toContain("github.com/sponsors/");
       expect(html).not.toContain("href=\"https://rzp.io/");
