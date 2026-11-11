@@ -95,15 +95,17 @@ document.addEventListener('submit',async e=>{
    if(!r.ok){if(data.error==='login_required'){s.innerHTML='Your sign-in expired. <a href="'+(data.action||'/login?next=/app/experience')+'">Sign in again</a> to choose a dashboard.';}else{s.textContent=data.message||'We could not save your dashboard choice. Try again.';}if(b)b.disabled=false;return;}
    s.textContent='Dashboard choice saved. Loading your dashboard…';location.assign(data.redirect||'/app');return;
   }
+  if(path==='/api/billing/subscription/cancel'){
+   const data=await r.json().catch(()=>({}));
+   if(!r.ok){s.textContent='We could not confirm whether your renewal has been stopped. Check your subscription status or contact support before trying again.';if(b)b.disabled=false;return;}
+   if(data.cancelled!==true)throw new Error();
+   s.textContent='Cancellation was accepted. The provider will stop future renewal at the end of the billing period; existing paid access continues until its confirmed end date.';f.hidden=true;return;
+  }
   if(!r.ok)throw new Error();
   if(path==='/session/end'){location.assign('/');return;}
   if(path==='/api/classroom/link/start'){
    const data=await r.json();const output=document.querySelector('#pairing-code');output.textContent='Pairing code: '+data.code+' · expires '+new Date(data.expiresAt).toLocaleTimeString();output.setAttribute('tabindex','0');const copy=document.createElement('button');copy.type='button';copy.textContent='Copy code';copy.dataset.copy=data.code;copy.className='copy-pairing-code';output.append(' ',copy);
    s.textContent='Use this code only with your older Classroom Desk connection in ChatGPT. It does not grant Google access.';if(b)b.disabled=false;return;
-  }
-  if(path==='/api/billing/subscription/cancel'){
-   const data=await r.json();if(data.cancelled!==true)throw new Error();
-   s.textContent='Cancellation was accepted. The provider will stop future renewal at the end of the billing period; existing paid access continues until its confirmed end date.';f.hidden=true;return;
   }
   s.textContent='Your deletion request was recorded for review. Your account remains active.';f.hidden=true;
  }catch{s.textContent='The request could not be completed. Your account state has not been confirmed. Try again or contact support.';if(b)b.disabled=false;}

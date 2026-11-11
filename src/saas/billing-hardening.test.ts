@@ -97,6 +97,11 @@ describe("billing provider boundaries (all fetches mocked)", () => {
     await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_requested", true)).rejects.toThrow("billing_cancellation_unconfirmed");
   });
 
+  it("does not treat an immediate cancellation response as a cycle-end schedule", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_requested", plan_id: "plan_student", status: "cancelled", has_scheduled_changes: false })));
+    await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_requested", true)).rejects.toThrow("billing_cancellation_unconfirmed");
+  });
+
   it("accepts a cycle-end cancellation only when Razorpay confirms a scheduled change", async () => {
     const fetch = vi.fn(async (_url: unknown, init: RequestInit) => {
       expect(JSON.parse(String(init.body))).toEqual({ cancel_at_cycle_end: true });

@@ -439,7 +439,10 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
       if (subscription.id !== subscriptionId) return res.status(502).json({ error: "billing_provider_mismatch" });
       return res.json({ cancelled: true, subscriptionId: subscription.id, scheduledAtCycleEnd: true, accessContinuesUntilProviderPaidThrough: true });
     }
-    catch { return res.status(502).json({ error: "billing_provider_unavailable" }); }
+    catch (error) {
+      if (error instanceof Error && error.message === "billing_cancellation_unconfirmed") return res.status(502).json({ error: "cancellation_unconfirmed" });
+      return res.status(502).json({ error: "billing_provider_unavailable" });
+    }
   });
   app.get("/api/referrals", async (req, res) => {
     if (!options.referralRewardsEnabled) return res.status(503).json({ error: "referrals_not_enabled" });

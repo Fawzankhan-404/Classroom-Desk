@@ -294,7 +294,9 @@ describe("Account portal with isolated PostgreSQL persistence", () => {
     expect(html).toContain('name="confirm" value="yes" required');
     expect(renderSubscription(overview,false)).not.toContain('action="/api/billing/subscription/cancel"');
 
-    const cancelSubscription=vi.fn(async(id:string)=>({id,status:"cancelled"}));
+    const cancelSubscription=vi.fn()
+      .mockResolvedValueOnce({id:"sub_synthetic_cancel",status:"active",has_scheduled_changes:true})
+      .mockRejectedValueOnce(new Error("billing_cancellation_unconfirmed"));
     const app=express();app.use(express.json());app.use(express.urlencoded({extended:false}));
     registerWebsiteRoutes(app,{store,secureCookies:false,billingEnabled:true,razorpay:{cancelSubscription} as never});
     const server=createServer(app);await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));
@@ -310,6 +312,10 @@ describe("Account portal with isolated PostgreSQL persistence", () => {
       expect(confirmed.status).toBe(200);
       expect(await confirmed.json()).toMatchObject({cancelled:true,scheduledAtCycleEnd:true,accessContinuesUntilProviderPaidThrough:true});
       expect(cancelSubscription).toHaveBeenCalledWith("sub_synthetic_cancel",true);
+      const unconfirmed=await post({confirm:"yes"});
+      expect(unconfirmed.status).toBe(502);
+      expect(await unconfirmed.json()).toEqual({error:"cancellation_unconfirmed"});
+      expect(cancelSubscription).toHaveBeenCalledTimes(2);
     }finally{await new Promise<void>(r=>server.close(()=>r()));}
   });
 });
