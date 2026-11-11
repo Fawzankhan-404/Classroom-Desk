@@ -98,10 +98,15 @@ describe("billing provider boundaries (all fetches mocked)", () => {
   });
 
   it("accepts a cycle-end cancellation only when Razorpay confirms a scheduled change", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_requested", plan_id: "plan_student", status: "active", has_scheduled_changes: true })));
+    const fetch = vi.fn(async (_url: unknown, init: RequestInit) => {
+      expect(JSON.parse(String(init.body))).toEqual({ cancel_at_cycle_end: true });
+      return Response.json({ id: "sub_requested", plan_id: "plan_student", status: "active", has_scheduled_changes: true });
+    });
+    vi.stubGlobal("fetch", fetch);
     await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_requested", true)).resolves.toMatchObject({
       id: "sub_requested", has_scheduled_changes: true,
     });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("bounds fetch and response-body stalls, including implementations ignoring abort", async () => {

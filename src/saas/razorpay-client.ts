@@ -115,7 +115,7 @@ export class RazorpayClient {
   }
 
   async cancelSubscription(subscriptionId: string, cancelAtCycleEnd = true): Promise<RazorpaySubscription> {
-    const subscription = await this.post<RazorpaySubscription>(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, { cancel_at_cycle_end: cancelAtCycleEnd ? 1 : 0 });
+    const subscription = await this.post<RazorpaySubscription>(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, { cancel_at_cycle_end: cancelAtCycleEnd });
     if (!subscription || subscription.id !== subscriptionId) throw new Error("billing_subscription_mismatch");
     // Razorpay can keep an end-of-cycle cancellation in the active state. In
     // that case it must explicitly report the scheduled change; an unchanged
