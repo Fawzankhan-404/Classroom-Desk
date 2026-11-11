@@ -1,19 +1,21 @@
 # Support payment setup status
 
-## Implementation status (2026-11-10)
+## Implementation status (2026-11-11)
 
-- The support page now has a validated message composer that opens the visitor’s email app. Classroom Desk does not receive or claim delivery of that message.
+- The production support page provides direct email and GitHub links. It has no in-site support form; email composition depends on the visitor's configured mail app, and Classroom Desk does not receive or claim delivery of messages.
 - A separate, default-off Razorpay contribution path is prepared in source. It uses a dedicated test key pair and webhook secret, a verified maximum amount, separate D1 order/event records, and no subscription or entitlement writes.
 - The supported test-mode choices are ₹49, ₹99, ₹199, ₹499, and custom INR from ₹10 through an explicitly configured account maximum. The maximum must be read from the merchant account; this document does not invent one.
 - Contributions remain unavailable unless a verified Razorpay test account has been configured, the dedicated test enable flag is explicitly set, and migration `0017_voluntary_contributions.sql` has been applied to the intended database.
-- Do not copy subscription Razorpay credentials into the contribution configuration. Live-mode contributions are not implemented or enabled by this candidate.
-- The live/test merchant mode, account activation, KYC status, permitted merchant category, and configured per-order maximum have not been verified from the Razorpay dashboard in this run. No payment has been initiated.
+- Do not copy subscription Razorpay credentials into the contribution configuration. Production contributions are not implemented or enabled by this candidate.
+- On 2026-11-11, the authenticated Razorpay dashboard showed Live Mode and account access as active, with activation dated Aug 01 2026. This does not establish KYC completion or eligibility to accept voluntary open-source contributions.
+- The dashboard's approved website entry is `https://courses.jarvis404.com/`, which does not match Classroom Desk production at `https://classroom.jarvis404.com/`. The webhook settings showed no configured webhook. No checkout or payment was initiated.
 
-## Verified in this task
+## Verified in the 2026-11-11 dashboard inspection
 
-- The connected Razorpay dashboard contains no payment page titled “Support Classroom Desk.” An unrelated payment page is inactive.
-- The dashboard surfaced a live-mode control, but the connected read-only integration cannot inspect merchant KYC or account eligibility. The account's company-registration view did not expose a completed verification status during this check.
-- Razorpay's public material describes Payment Pages as supporting configurable pages and variable donation amounts. That does not establish this merchant's eligibility to collect voluntary open-source project contributions.
+- The authenticated dashboard was in Live Mode and showed account access as complete. A live API key was present; its value is intentionally not recorded here.
+- The dashboard contained no configured webhook. No payment was initiated.
+- The approved website entry did not match the Classroom Desk production hostname. The dashboard evidence does not establish that this hostname is approved.
+- Merchant eligibility for collecting voluntary contributions to an independently maintained open-source software project, KYC completion, and applicable transaction limits remain unverified. Account activation alone is not proof of any of these.
 - No approved, active Razorpay support URL is available. `.github/FUNDING.yml` must remain absent until the owner verifies and approves the hosted URL.
 
 ## Proposed page configuration for owner review
@@ -28,11 +30,11 @@
 
 ## Owner actions required
 
-1. In the Razorpay Dashboard, confirm account activation, KYC completion, and **Live Mode** eligibility. Ask Razorpay Support to confirm that voluntary contributions for maintaining an independent open-source software project are permitted for this merchant/account category. Keep that confirmation in the merchant dashboard or support correspondence.
+1. Ask Razorpay Support to confirm that voluntary contributions for maintaining an independent open-source software project are permitted for this merchant/account category and clarify any applicable per-transaction limits. The dashboard showed Live Mode and account access active, but the approved website entry is for `courses.jarvis404.com`, and KYC completion and contribution eligibility were not verified. Do not treat activation as contribution approval.
 2. Once eligibility is confirmed, the owner can choose between the isolated website checkout implementation and a Razorpay Payment Page. Do not publish or enable either until the exact configuration and destination have been reviewed and approved. If using a Payment Page, use voluntary INR amounts ₹49, ₹99, ₹199, and ₹499, with a custom amount of at least ₹10 where the account supports it; set the maximum from verified account limits.
 3. For website checkout, first configure separate test credentials, webhook secret, explicit test-mode flag, and the verified order maximum. Apply migration 0017 only to the correct environment. Run mocked regression tests, then a Razorpay test-mode checkout using provider test credentials; do not enter real card details or activate live mode.
 4. Review the checkout or page preview and the exact support copy. Keep all contribution links outside Google OAuth and ChatGPT connector flows. No production deployment, production migration, published Payment Page, or live charge is authorized by this setup note.
-5. Before enabling any production contribution flow, verify account activation, merchant eligibility, live credentials, webhook configuration, amount limits, and callback behavior in the authenticated Razorpay dashboard; then obtain explicit owner approval for the exact release and activation.
+5. Before enabling any production contribution flow, verify the Classroom Desk hostname is approved, contribution eligibility and amount limits are confirmed, separate live contribution credentials and a webhook are configured, and callback behavior is tested; then obtain explicit owner approval for the exact release and activation. No production webhook was configured in the 2026-11-11 inspection.
 
 ## Project promise
 
