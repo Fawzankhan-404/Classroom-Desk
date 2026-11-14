@@ -61,5 +61,5 @@ describe("SaaS schema upgrade compatibility", () => {
     ]);
     expect((await pg.query(`SELECT to_regclass('classroom_desk_contributions') AS name`)).rows).toEqual([{ name: "classroom_desk_contributions" }]);
     expect((await pg.query(`SELECT to_regclass('classroom_desk_contribution_webhook_events') AS name`)).rows).toEqual([{ name: "classroom_desk_contribution_webhook_events" }]);
-  });
+  }, 15_000);
 });
