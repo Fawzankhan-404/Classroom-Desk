@@ -217,12 +217,17 @@ export async function getStudentOverview(clients: V2Clients, input: { courseQuer
   const assignments = allAssignments.slice(0, limit);
 
   const allAnnouncements = bundles.flatMap(({ course, announcements: items }) => items.filter((item) => queryMatches({ description: item.text }, course.name, input.searchQuery)).map((item) => ({ courseId: course.id, courseName: cleanText(course.name, 300), announcementId: item.id, text: cleanText(item.text), updatedAt: item.updateTime ?? item.creationTime ?? null, attachments: attachmentMetadata(item.materials) }))).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-  const announcements = allAnnouncements.slice(0, limit);
+  // Assignment-focused views should not transmit unrelated announcements,
+  // materials, topics, or activity. These can include course and file
+  // metadata that is not needed to answer a deadline or submission question.
+  const assignmentFocusedView = ["due_soon", "today", "tomorrow", "missing", "assigned", "submitted", "returned", "reclaimed"].includes(view)
+    && !input.searchQuery?.trim();
+  const announcements = assignmentFocusedView ? [] : allAnnouncements.slice(0, limit);
   const allCourseMaterials = bundles.flatMap(({ course, materials }) => materials.filter((item) => queryMatches(item, course.name, input.searchQuery)).map((item) => ({ courseId: course.id, courseName: cleanText(course.name, 300), materialId: item.id, title: cleanText(item.title, 500), description: cleanText(item.description), updatedAt: item.updateTime ?? item.creationTime ?? null, attachments: attachmentMetadata(item.materials) }))).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-  const courseMaterials = allCourseMaterials.slice(0, limit);
+  const courseMaterials = assignmentFocusedView ? [] : allCourseMaterials.slice(0, limit);
   const allTopics = bundles.flatMap(({ course, topics }) => topics.filter((topic) => !input.searchQuery || contains(topic.name, input.searchQuery) || contains(course.name, input.searchQuery)).map((topic) => ({ courseId: course.id, courseName: cleanText(course.name, 300), topicId: topic.topicId, name: cleanText(topic.name, 300) })));
-  const topics = allTopics.slice(0, limit);
-  const recentActivity = [
+  const topics = assignmentFocusedView ? [] : allTopics.slice(0, limit);
+  const recentActivity = assignmentFocusedView ? [] : [
     ...assignments.map((item) => ({ type: "assignment", courseName: item.courseName, title: item.title, updatedAt: item.updatedAt })),
     ...announcements.map((item) => ({ type: "announcement", courseName: item.courseName, title: item.text?.slice(0, 180), updatedAt: item.updatedAt })),
     ...courseMaterials.map((item) => ({ type: "course_material", courseName: item.courseName, title: item.title, updatedAt: item.updatedAt })),

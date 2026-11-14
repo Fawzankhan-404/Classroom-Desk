@@ -69,6 +69,24 @@ describe("billing provider boundaries (all fetches mocked)", () => {
     expect(trialOrderReceipt("one")).not.toBe(trialOrderReceipt("two"));
   });
 
+  it("creates a voluntary contribution order with its own notes and exact paise amount", async () => {
+    const contributionId = "con_00000000-0000-4000-8000-000000000001";
+    const fetch = vi.fn(async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body).toMatchObject({ amount: 49900, currency: "INR", notes: { kind: "contribution", product: "classroom_desk_voluntary_contribution", contribution_id: contributionId } });
+      expect(body.receipt).toMatch(/^cd_[a-f0-9]{32}$/);
+      return Response.json({ id: "order_contribution", amount: 49900, currency: "INR", status: "created", notes: body.notes });
+    });
+    vi.stubGlobal("fetch", fetch);
+    await expect(new RazorpayClient("synthetic-key", secret).createContributionOrder(contributionId, 49900)).resolves.toMatchObject({ id: "order_contribution" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a contribution order response that changes the amount or product", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "order_contribution", amount: 9900, currency: "INR", status: "created", notes: { kind: "subscription" } })));
+    await expect(new RazorpayClient("synthetic-key", secret).createContributionOrder("con_00000000-0000-4000-8000-000000000001", 49900)).rejects.toThrow("contribution_order_mismatch");
+  });
+
   it("rejects a payment response belonging to a different requested ID", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "pay_other", amount: 900, currency: "INR", status: "captured" })));
     await expect(new RazorpayClient("synthetic-key", secret).getPayment("pay_requested")).rejects.toThrow("billing_payment_mismatch");
@@ -79,11 +97,21 @@ describe("billing provider boundaries (all fetches mocked)", () => {
     await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_requested", true)).rejects.toThrow("billing_cancellation_unconfirmed");
   });
 
+  it("does not treat an immediate cancellation response as a cycle-end schedule", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_requested", plan_id: "plan_student", status: "cancelled", has_scheduled_changes: false })));
+    await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_requested", true)).rejects.toThrow("billing_cancellation_unconfirmed");
+  });
+
   it("accepts a cycle-end cancellation only when Razorpay confirms a scheduled change", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "sub_requested", plan_id: "plan_student", status: "active", has_scheduled_changes: true })));
+    const fetch = vi.fn(async (_url: unknown, init: RequestInit) => {
+      expect(JSON.parse(String(init.body))).toEqual({ cancel_at_cycle_end: true });
+      return Response.json({ id: "sub_requested", plan_id: "plan_student", status: "active", has_scheduled_changes: true });
+    });
+    vi.stubGlobal("fetch", fetch);
     await expect(new RazorpayClient("synthetic-key", secret).cancelSubscription("sub_requested", true)).resolves.toMatchObject({
       id: "sub_requested", has_scheduled_changes: true,
     });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("bounds fetch and response-body stalls, including implementations ignoring abort", async () => {

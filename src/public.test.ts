@@ -21,6 +21,7 @@ async function setup(
   config: PublicOAuthConfig = authConfig,
   options: Parameters<typeof createPublicApp>[5] = {},
   referralRewards = false,
+  runtimeOverrides: Partial<RuntimeConfig> = {},
 ) {
   const store = new MemoryPublicAuthStore();
   let revoked: string[] = [];
@@ -28,6 +29,7 @@ async function setup(
   const appConfig: RuntimeConfig = {
     ...runtimeConfig,
     ...config,
+    ...runtimeOverrides,
     saasFlags: { billingUi: false, teacherFeatures: false, teacherDraftWrites: false, referralRewards, enforceEntitlements: false },
   };
   const { app } = createPublicApp(appConfig, store, provider, undefined, undefined, options);
@@ -68,6 +70,9 @@ describe("public V1 scopes and projections", () => {
     const base = { GOOGLE_OAUTH_CLIENT_ID: "test-id", GOOGLE_OAUTH_CLIENT_SECRET: "test-secret", PUBLIC_APP_ORIGIN: "https://classroom.example" };
     expect(() => loadRuntimeConfig({ ...base, NODE_ENV: "production", PUBLIC_APP_ORIGIN: "http://classroom.example" })).toThrow("HTTPS");
     expect(() => loadRuntimeConfig({ ...base, MCP_RESOURCE_URL: "https://other.example/mcp" })).toThrow("MCP_RESOURCE_URL");
+    expect(() => loadRuntimeConfig({ ...base, MCP_STUDENT_RESOURCE_URL: "https://other.example/mcp/student" })).toThrow("MCP_STUDENT_RESOURCE_URL");
+    expect(() => loadRuntimeConfig({ ...base, MCP_STUDENT_RESOURCE_URL: "https://classroom.example/mcp/other" })).toThrow("MCP_STUDENT_RESOURCE_URL");
+    expect(loadRuntimeConfig(base).studentMcpResource?.href).toBe("https://classroom.example/mcp/student");
     expect(() => loadRuntimeConfig({ ...base, GOOGLE_OAUTH_CALLBACK_URL: "https://other.example/oauth/google/callback" })).toThrow("Google callback");
     expect(() => loadRuntimeConfig({ ...base, PORT: "0" })).toThrow("PORT");
     expect(() => loadRuntimeConfig({ ...base, NODE_ENV: "production", PUBLIC_AUTH_STORE: "memory" })).toThrow("encrypted persistent authorization store");
@@ -77,6 +82,29 @@ describe("public V1 scopes and projections", () => {
 });
 
 describe("public OAuth and HTTP authorization boundary", () => {
+  it("accepts only the exact legacy or student OAuth resource and preserves the student's audience", async () => {
+    const origin = new URL("https://classroom.example");
+    const studentResource = new URL("/mcp/student", origin);
+    const store = new MemoryPublicAuthStore();
+    const provider = new PublicOAuthProvider(store, { ...authConfig, origin, mcpResource: new URL("/mcp", origin), studentMcpResource: studentResource });
+    const clientId = "student-client";
+    const redirectUri = "https://chatgpt.com/connector/oauth/student-test";
+    const client = { client_id: clientId, redirect_uris: [redirectUri] } as never;
+    const params = { redirectUri, codeChallenge: "synthetic-pkce-challenge", state: "client-state", scopes: [MCP_SCOPE, MCP_OFFLINE_SCOPE], resource: studentResource };
+    const redirect = vi.fn<(status: number, url: string) => unknown>();
+    await provider.authorize(client, params, { setHeader: vi.fn(), redirect } as never);
+    const flow = await store.getFlow(new URL(redirect.mock.calls[0]![1]).searchParams.get("flow")!);
+    expect(flow?.params.resource?.href).toBe(studentResource.href);
+    await expect(provider.authorize(client, { ...params, resource: new URL("/mcp/other", origin) }, { setHeader: vi.fn(), redirect: vi.fn() } as never)).rejects.toThrow("Invalid resource");
+
+    const now = Date.now();
+    await store.putGrant({ userId: flow!.userId, refreshToken: "synthetic-google-refresh", scopes: [...PUBLIC_CLASSROOM_SCOPES], createdAt: now, updatedAt: now });
+    await store.putCode({ code: "student-resource-code", clientId, userId: flow!.userId, redirectUri, challenge: params.codeChallenge, resource: studentResource, scopes: params.scopes, expiresAt: now + 60_000 });
+    await expect(provider.exchangeAuthorizationCode(client, "student-resource-code", undefined, redirectUri, new URL("/mcp", origin))).rejects.toThrow("Invalid authorization code");
+    const issued = await provider.exchangeAuthorizationCode(client, "student-resource-code", undefined, redirectUri, studentResource);
+    await expect(provider.verifyAccessToken(issued.access_token)).resolves.toMatchObject({ resource: studentResource, scopes: params.scopes });
+  });
+
   it("limits unauthenticated readiness probes", async () => {
     const ctx = await setup();
     try {
@@ -116,6 +144,76 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(body.scopes_supported).toEqual([MCP_SCOPE, MCP_OFFLINE_SCOPE]);
       expect(body.authorization_endpoint).toContain("/authorize");
       expect(body.token_endpoint).toContain("/token");
+    } finally { await close(ctx.server); }
+  });
+  it("publishes only public pages in the XML sitemap", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/sitemap.xml`);
+      const xml = await response.text();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("application/xml");
+      for (const path of ["/", "/connect", "/pricing", "/support", "/privacy", "/terms", "/refunds"]) {
+        expect(xml).toContain(`<loc>${authConfig.origin.origin}${path}</loc>`);
+      }
+      expect(xml).not.toMatch(/\/(?:app|api|mcp|oauth|login)(?:[<\/]|$)/);
+    } finally { await close(ctx.server); }
+  });
+  it("keeps private account, authentication, and MCP routes out of crawler guidance", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/robots.txt`);
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/plain");
+      expect(text).toContain("Allow: /");
+      for (const path of ["/app", "/api", "/account/", "/auth/", "/oauth/", "/login", "/logout", "/session/", "/connect/google", "/register", "/disconnect", "/authorize", "/token", "/revoke", "/mcp"]) expect(text).toContain(`Disallow: ${path}`);
+      expect(text).toContain(`Sitemap: ${authConfig.origin.origin}/sitemap.xml`);
+    } finally { await close(ctx.server); }
+  });
+  it("makes the horizontally scrollable pricing comparison keyboard reachable", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/pricing`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).toContain('<div class="table-scroll" role="region" aria-label="Plan requirements comparison" tabindex="0">');
+      expect(html).toContain(".table-scroll:focus-visible");
+    } finally { await close(ctx.server); }
+  });
+  it("provides a direct support email link and accurately disabled online contributions by default", async () => {
+    const ctx = await setup(new URL("https://classroom.example"));
+    try {
+      const response = await fetch(`${ctx.origin}/support`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).toContain('href="mailto:support@example.invalid?subject=Classroom%20Desk%20%E2%80%94%20Support%20Request">Email Support</a>');
+      expect(html).not.toContain("support-compose");
+      expect(html).not.toContain("data-support-compose");
+      expect(html).toContain('href="/connect">Getting started and account connection</a>');
+      expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk">Source code and project community</a>');
+      expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk/issues">Report a bug or request a feature</a>');
+      expect(html).toContain('href="/privacy">Privacy policy</a>');
+      expect(html).toContain("Contributions are voluntary. They do not buy a subscription or unlock paid features.");
+      expect(html).toContain("Online contributions are not available yet. This page will not request a payment. For questions, contact support.");
+      expect(html).not.toContain("The payment account and a separate test checkout must be verified before contributions are enabled.");
+      expect(html).not.toMatch(/<form[^>]*data-contribution-form/);
+      const scriptResponse = await fetch(`${ctx.origin}/assets/connect.js`);
+      const script = await scriptResponse.text();
+      expect(scriptResponse.status).toBe(200);
+      expect(script).not.toContain("data-support-compose");
+    } finally { await close(ctx.server); }
+  });
+  it("keeps the mobile header on one row and moves the connect action into the mobile menu", async () => {
+    const ctx = await setup();
+    try {
+      const response = await fetch(`${ctx.origin}/support`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).toContain(".header-cta{display:none!important}");
+      expect(html).toContain('class="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu"');
+      expect(html).toContain('<nav id="mobile-menu" class="mobile-menu" aria-label="Mobile navigation" hidden>');
+      expect(html).toContain('<button class="button" type="button" data-connect-open>Connect to ChatGPT</button></nav>');
     } finally { await close(ctx.server); }
   });
   it("uses the supplied Classroom Desk artwork as the primary site logo", async () => {
@@ -412,17 +510,15 @@ describe("public OAuth and HTTP authorization boundary", () => {
       const html = await response.text();
       expect(response.status).toBe(200);
       expect(html).toContain('<article class="doc support-card" id="project-support"');
-      expect(html).toContain("Support Classroom Desk");
-      expect(html).toContain("independently developed, open-source project");
-      expect(html).toContain("Student access");
-      expect(html).toContain("Hosting and maintenance");
-      expect(html).toContain("Open-source development");
+      expect(html).toContain("How can we help?");
+      expect(html).toContain("independently developed and open source");
+      expect(html).toContain("student access, hosting, maintenance, security, and community development");
+      expect(html).toContain("Support the developer");
       expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk"');
-      expect(html).toContain("Support Classroom Desk");
-      expect(html).toContain("Contributions are voluntary and do not purchase a subscription");
-      expect(html).toContain("Online contributions are not enabled yet");
-      expect(html).not.toContain('id="support-custom-amount"');
-      expect(html).not.toContain("No payment can be made from this page right now.");
+      expect(html).toContain("Contributions are voluntary. They do not buy a subscription or unlock paid features.");
+      expect(html).toContain("Online contributions are not available yet. This page will not request a payment. For questions, contact support.");
+      expect(html).not.toContain("The payment account and a separate test checkout must be verified before contributions are enabled.");
+      expect(html).not.toContain("support-compose");
       expect(html).not.toContain("buymeacoffee.com");
       expect(html).not.toContain("github.com/sponsors/");
       expect(html).not.toContain("href=\"https://rzp.io/");
@@ -453,6 +549,20 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(connectResponse.status).toBe(200);
       expect(connectHtml).not.toContain('href="/support#project-support">Support the Project</a>');
       expect(connectHtml).not.toContain("Support Classroom Desk</h1>");
+    } finally { await close(ctx.server); }
+  });
+  it("shows test-only contribution choices only when an explicitly validated test configuration enables them", async () => {
+    const ctx = await setup(authConfig, {}, false, { contributionsEnabled: true, contributionMaxAmountRupees: 5000 });
+    try {
+      const response = await fetch(`${ctx.origin}/support`);
+      const html = await response.text();
+      expect(html).toContain('data-contribution-form data-max-rupees="5000"');
+      for (const amount of [49, 99, 199, 499]) expect(html).toContain(`value="${amount}"`);
+      expect(html).toContain('min="10" max="5000"');
+      expect(html).toContain("Continue to secure test checkout");
+      expect(html).toContain("do not change your subscription or account access");
+      expect(response.headers.get("content-security-policy")).toContain("https://checkout.razorpay.com");
+      expect(response.headers.get("content-security-policy")).toContain("https://api.razorpay.com");
     } finally { await close(ctx.server); }
   });
   it("rejects unauthenticated, malformed, and expired bearer tokens", async () => {

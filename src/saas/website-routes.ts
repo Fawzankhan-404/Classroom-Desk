@@ -14,12 +14,14 @@ import { renderExperienceSelector, renderStudentDashboard, renderTeacherCourse, 
 import type { DashboardExperience, SaaSUser } from "./types.js";
 import type { TeacherCourseworkDraftInput } from "../v2/teacher.js";
 import { classifyGoogleReadFailure } from "../v2/workflow.js";
+import { registerContributionRoutes, type ContributionOptions } from "./contributions.js";
 
 export interface WebsiteOAuthStateStore { putEphemeral(kind: string, key: string, value: unknown, owner: string, expiresAt: number): Promise<void>; takeEphemeral<T>(kind: string, key: string): Promise<T | undefined>; }
 export interface WebsiteRouteOptions {
   store: SaaSStore; oauth?: WebsiteOAuthConfig; oauthStateStore?: WebsiteOAuthStateStore; secureCookies: boolean;
   razorpay?: RazorpayClient; razorpayKeyId?: string; razorpayKeySecret?: string; razorpayPlanIds?: { student?: string; teacher?: string };
   billingEnabled?: boolean; teacherFeaturesEnabled?: boolean; teacherDraftWritesEnabled?: boolean; referralRewardsEnabled?: boolean;
+  contributions?: ContributionOptions;
   loadConnectionStatus?: (websiteUserId: string) => Promise<ConnectionStatus>;
   loadClassroomDashboard?: (websiteUserId: string) => Promise<StudentDashboardState>;
   loadTeacherDashboard?: (websiteUserId: string, coursePageToken?: string) => Promise<TeacherDashboardState>;
@@ -119,6 +121,7 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
     next();
   });
   app.use("/api", requireSameOrigin);
+  registerContributionRoutes(app, { db: options.store.db, options: options.contributions });
   const requireTeacherMutationAccount = async (req: express.Request, res: express.Response): Promise<string | undefined> => {
     if (options.teacherDraftWritesEnabled !== true) { res.status(503).type("html").send(message("Teacher draft creation is unavailable", "This feature is not available right now.")); return undefined; }
     const session = await currentSession(req.get("cookie"), options.store);
@@ -436,7 +439,10 @@ export function registerWebsiteRoutes(app: express.Express, options: WebsiteRout
       if (subscription.id !== subscriptionId) return res.status(502).json({ error: "billing_provider_mismatch" });
       return res.json({ cancelled: true, subscriptionId: subscription.id, scheduledAtCycleEnd: true, accessContinuesUntilProviderPaidThrough: true });
     }
-    catch { return res.status(502).json({ error: "billing_provider_unavailable" }); }
+    catch (error) {
+      if (error instanceof Error && error.message === "billing_cancellation_unconfirmed") return res.status(502).json({ error: "cancellation_unconfirmed" });
+      return res.status(502).json({ error: "billing_provider_unavailable" });
+    }
   });
   app.get("/api/referrals", async (req, res) => {
     if (!options.referralRewardsEnabled) return res.status(503).json({ error: "referrals_not_enabled" });

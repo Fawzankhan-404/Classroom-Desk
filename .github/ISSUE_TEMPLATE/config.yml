@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Account, billing, or private support request
+    url: https://classroom.jarvis404.com/support
+    about: Use the support page. Never post account identifiers or private Classroom data in a public issue.

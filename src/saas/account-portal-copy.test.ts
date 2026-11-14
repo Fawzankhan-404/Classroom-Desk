@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderConnection, renderProfile, renderReferrals, renderSubscription } from "./account-portal.js";
+import { accountScript, renderConnection, renderProfile, renderReferrals, renderSubscription } from "./account-portal.js";
 import type { AccountOverview } from "./account-portal.js";
 import type { SaaSUser } from "./types.js";
 
@@ -19,6 +19,11 @@ function overview(overrides: Partial<AccountOverview> = {}): AccountOverview {
 }
 
 describe("account portal customer-facing copy", () => {
+  it("does not claim cycle-end cancellation succeeded when provider confirmation is missing", () => {
+    expect(accountScript).toContain("We could not confirm whether your renewal has been stopped.");
+    expect(accountScript).toContain("Check your subscription status or contact support before trying again.");
+  });
+
   it("explains website sign-in and Classroom authorization as separate steps", () => {
     const html = renderProfile(overview());
     expect(html).toContain('<meta name="robots" content="noindex, nofollow">');

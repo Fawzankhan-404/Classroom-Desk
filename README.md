@@ -10,16 +10,20 @@
     <a href="https://github.com/Fawzankhan-404/Classroom-Desk"><strong>GitHub repository</strong></a> &nbsp;·&nbsp;
     <a href="docs/GETTING_STARTED.md">Get started</a> &nbsp;·&nbsp;
     <a href="docs/CHATGPT_CONNECTION_GUIDE.md">Connect ChatGPT</a> &nbsp;·&nbsp;
-    <a href="docs/OPEN_SOURCE_ARCHITECTURE.md">Architecture</a>
+    <a href="docs/OPEN_SOURCE_ARCHITECTURE.md">Architecture</a> &nbsp;·&nbsp;
+    <a href="CODE_OF_CONDUCT.md">Code of Conduct</a>
   </p>
 
   <p>
+    <a href="https://github.com/Fawzankhan-404/Classroom-Desk/actions/workflows/quality.yml"><img alt="Quality gates" src="https://github.com/Fawzankhan-404/Classroom-Desk/actions/workflows/quality.yml/badge.svg?branch=main"></a>
     <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/License-Apache--2.0-176B4D?style=flat-square"></a>
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white">
     <img alt="Cloudflare Workers" src="https://img.shields.io/badge/Cloudflare-Workers-F38020?style=flat-square&logo=cloudflare&logoColor=white">
     <img alt="Model Context Protocol" src="https://img.shields.io/badge/Protocol-MCP-635BFF?style=flat-square">
   </p>
 </div>
+
+![Classroom Desk social preview](assets/classroom-desk-social-preview.png)
 
 ---
 
@@ -33,7 +37,7 @@ The repository contains a TypeScript application with a web experience, MCP tool
 
 | Experience | What it includes | Data and action boundary |
 |---|---|---|
-| **Student** | Supported course, coursework, deadline, announcement, material, and personal submission information. | Results depend on the connected Google account, its permissions, and course membership. A Drive-file action requires an explicit request and does not submit work to Classroom. |
+| **Student** | Supported course, coursework, deadline, announcement, material, and personal submission information. | Results depend on the connected Google account, its permissions, and course membership. A student may explicitly select one teacher-provided Classroom attachment in Google Picker for bounded reading. Generated-PDF transfer to Drive is currently unavailable, and Classroom Desk does not submit work. |
 | **Teacher dashboard** | A rubric and six sample responses with evidence-based draft marks, review flags, and local demo approval. | The assessment workspace uses synthetic records labeled **DEMO**. Demo approval never changes a real grade. |
 | **Teacher Classroom access** | Separate teacher operations are available only when the account has the required Google authorization and Google confirms the relevant course role. | Choosing Teacher changes the dashboard preference; it does not grant teacher access. Availability depends on deployment configuration and consent. |
 | **Gradebook** | No automatic grade publication. | Google Classroom gradebook writeback is disabled. |
@@ -115,13 +119,22 @@ For vulnerability reports, follow the private process in [SECURITY.md](SECURITY.
 
 ## Contributing
 
-Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), use synthetic fixtures, and include focused tests for behavior changes. Do not include private Classroom content, production database exports, credentials, or OAuth tokens in issues or pull requests.
+Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [`Code of Conduct`](CODE_OF_CONDUCT.md), use synthetic fixtures, and include focused tests for behavior changes. Do not include private Classroom content, production database exports, credentials, or OAuth tokens in issues or pull requests.
+
+## Roadmap
+
+- Keep the student read-only Classroom experience reliable and easy to connect.
+- Complete provider sandbox verification before enabling voluntary online contributions.
+- Expand teacher workflows only when the required Google authorization, course-role checks, and deployment availability are verified.
+- Keep generated-PDF transfer to Drive and Classroom gradebook writes unavailable unless their implementation and authorization boundaries are separately reviewed.
+
+This roadmap describes priorities, not delivery dates or guarantees.
 
 ## Support Classroom Desk
 
 Classroom Desk remains free and open source under Apache-2.0. Contributions are optional and help with maintenance, hosting, infrastructure, documentation, and future development. They do not unlock functionality, purchase a hosted plan, or change account permissions. They are not charitable donations and no tax deduction is promised.
 
-Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for project information. Razorpay payment eligibility and a hosted support page are still awaiting account verification and owner approval; no checkout link or GitHub funding button is active yet. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for the remaining steps.
+Visit the [Classroom Desk support page](https://classroom.jarvis404.com/support) for direct email support, the connection guide, project source, and issue reporting. Email opens in your own mail app; the website cannot confirm delivery. Voluntary online contributions are not enabled, and no verified GitHub Sponsors destination is configured. Subscription checkout is a separate account feature; live payment readiness must be verified by the service operator before activation. See [the sponsorship setup checklist](docs/SPONSORSHIP_SETUP.md) for contribution requirements.
 
 ## License and attribution
 

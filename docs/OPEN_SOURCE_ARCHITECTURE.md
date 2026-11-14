@@ -19,7 +19,7 @@
 - `src/hackathon/demo-state.ts`: local synthetic assessment state and approval rules.
 - `migrations/`: ordered D1 schema changes.
 
-The Student MCP workflow includes one explicitly confirmed Google Drive file creation action for saving a generated PDF. It does not submit that file to Classroom. Classroom content and gradebook operations remain read-only in the current release candidate.
+Students can request bounded reading of one teacher-provided Classroom attachment after explicitly selecting that exact file in Google Picker. Generated-PDF transfer to Google Drive is currently unavailable. The student workflow does not submit student work or write grades.
 
 ## Authorization boundaries
 

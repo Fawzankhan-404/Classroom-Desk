@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest a focused improvement.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User need
+      description: What task or difficulty would this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest useful behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Privacy or authorization considerations
+      description: Mention data access or user confirmation the feature would require.
+    validations:
+      required: false

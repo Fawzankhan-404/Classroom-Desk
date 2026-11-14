@@ -47,6 +47,8 @@ export type PublicOAuthConfig = {
   /** Browser callback used by the authenticated incremental Teacher consent flow. */
   teacherGoogleCallbackUrl?: string;
   mcpResource: URL;
+  /** Separate resource for the student-only MCP catalog. */
+  studentMcpResource?: URL;
   googleScopes?: readonly string[];
   teacherScopes?: readonly string[];
   teacherGrantValidator?: (scopes: string[]) => boolean;
@@ -133,7 +135,8 @@ export class PublicOAuthProvider implements OAuthServerProvider {
 
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
     if (!this.isAllowedAuthorizationRedirect(client, params.redirectUri)) throw new Error("Unsupported MCP redirect origin");
-    if (params.resource && params.resource.href !== this.config.mcpResource.href) throw new Error("Invalid resource");
+    const studentResource = this.config.studentMcpResource ?? new URL("/mcp/student", this.config.origin);
+    if (params.resource && params.resource.href !== this.config.mcpResource.href && params.resource.href !== studentResource.href) throw new Error("Invalid resource");
     const requested = params.scopes ?? [];
     if (requested.some((scope) => scope !== MCP_SCOPE && scope !== MCP_OFFLINE_SCOPE) || (requested.length && !requested.includes(MCP_SCOPE))) throw new Error("Unsupported scope");
     const flow: GoogleFlow = {
@@ -381,7 +384,7 @@ export class PublicOAuthProvider implements OAuthServerProvider {
     if (!row) { logMcpTokenFailure("authorization_code", "missing"); throw new Error("Invalid authorization code"); }
     if (row.clientId !== client.client_id) { logMcpTokenFailure("authorization_code", "client_mismatch"); throw new Error("Invalid authorization code"); }
     if (row.redirectUri !== redirectUri) { logMcpTokenFailure("authorization_code", "redirect_mismatch"); throw new Error("Invalid authorization code"); }
-    if (!sameResource(row.resource, resource ?? this.config.mcpResource)) { logMcpTokenFailure("authorization_code", "resource_mismatch"); throw new Error("Invalid authorization code"); }
+    if (!sameResource(row.resource, resource ?? row.resource ?? this.config.mcpResource)) { logMcpTokenFailure("authorization_code", "resource_mismatch"); throw new Error("Invalid authorization code"); }
     const grant = await this.store.getGrant(row.userId);
     if (!grant) { logMcpTokenFailure("authorization_code", "grant_missing"); throw new Error("Google grant unavailable"); }
     if (!(await this.store.takeCode(authorizationCode))) { logMcpTokenFailure("authorization_code", "already_used"); throw new Error("Invalid authorization code"); }
@@ -394,7 +397,7 @@ export class PublicOAuthProvider implements OAuthServerProvider {
     if (!row) { logMcpTokenFailure("refresh_token", "missing"); throw new Error("Invalid refresh token"); }
     if (row.clientId !== client.client_id) { logMcpTokenFailure("refresh_token", "client_mismatch"); throw new Error("Invalid refresh token"); }
     if (!row.scopes.includes(MCP_OFFLINE_SCOPE) || invalidScopes) { logMcpTokenFailure("refresh_token", "scope_mismatch"); throw new Error("Invalid refresh token"); }
-    if (!sameResource(row.resource, resource ?? this.config.mcpResource)) { logMcpTokenFailure("refresh_token", "resource_mismatch"); throw new Error("Invalid refresh token"); }
+    if (!sameResource(row.resource, resource ?? row.resource ?? this.config.mcpResource)) { logMcpTokenFailure("refresh_token", "resource_mismatch"); throw new Error("Invalid refresh token"); }
     if (!(await this.store.getGrant(row.userId))) { logMcpTokenFailure("refresh_token", "grant_missing"); throw new Error("Google grant unavailable"); }
     return this.issueTokens(row.clientId, row.userId, scopes?.length ? scopes : row.scopes, row.resource, refreshToken);
   }

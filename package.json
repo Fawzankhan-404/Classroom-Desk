@@ -16,7 +16,8 @@
     "start:http": "node dist/http.js",
     "start:local-web-test": "node dist/local-http.js",
     "verify:public-local": "node dist/local-e2e.js",
-    "test": "vitest run src --maxWorkers=1"
+    "test": "vitest run src --maxWorkers=1",
+    "lint": "biome lint src"
   },
   "dependencies": {
     "@googleapis/classroom": "^15.0.0",
@@ -33,6 +34,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.6",
     "@cloudflare/workers-types": "^5.20261002.1",
     "@electric-sql/pglite": "^0.5.8",
     "@electric-sql/pglite-socket": "^0.2.11",
@@ -47,5 +49,14 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "overrides": {
+    "googleapis-common": {
+      "gaxios": "7.3.1"
+    }
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261109.1": true
   }
 }
