@@ -195,7 +195,9 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk/issues">Report a bug or request a feature</a>');
       expect(html).toContain('href="/privacy">Privacy policy</a>');
       expect(html).toContain("Contributions are voluntary. They do not buy a subscription or unlock paid features.");
-      expect(html).toContain("Online contributions are not available yet. The payment account and a separate test checkout must be verified before contributions are enabled.");
+      expect(html).toContain("Online contributions are not available yet. This page will not request a payment. For questions, contact support.");
+      expect(html).not.toContain("The payment account and a separate test checkout must be verified before contributions are enabled.");
+      expect(html).not.toMatch(/<form[^>]*data-contribution-form/);
       const scriptResponse = await fetch(`${ctx.origin}/assets/connect.js`);
       const script = await scriptResponse.text();
       expect(scriptResponse.status).toBe(200);
@@ -514,7 +516,8 @@ describe("public OAuth and HTTP authorization boundary", () => {
       expect(html).toContain("Support the developer");
       expect(html).toContain('href="https://github.com/Fawzankhan-404/Classroom-Desk"');
       expect(html).toContain("Contributions are voluntary. They do not buy a subscription or unlock paid features.");
-      expect(html).toContain("Online contributions are not available yet. The payment account and a separate test checkout must be verified before contributions are enabled.");
+      expect(html).toContain("Online contributions are not available yet. This page will not request a payment. For questions, contact support.");
+      expect(html).not.toContain("The payment account and a separate test checkout must be verified before contributions are enabled.");
       expect(html).not.toContain("support-compose");
       expect(html).not.toContain("buymeacoffee.com");
       expect(html).not.toContain("github.com/sponsors/");
