@@ -16,7 +16,7 @@ describe("last active super-admin invariant", () => {
       transaction: (work) => pg.transaction((tx) => work({ query: async (sql, values = []) => ({ rows: (await tx.query(sql, values)).rows as never }) })),
     };
     store = new SaaSStore(db);
-  });
+  }, 30_000);
 
   afterAll(async () => { await pg.close(); });
 

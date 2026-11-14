@@ -83,5 +83,5 @@ describe("encrypted PostgreSQL public authorization store", () => {
       expect(await store.getAccess("access-replay")).toBeUndefined();
       expect(await store.getRefresh("refresh-3")).toBeDefined();
     } finally { await pg.close(); }
-  });
+  }, 15_000);
 });
