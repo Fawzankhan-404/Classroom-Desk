@@ -844,7 +844,7 @@ function connectDemoStyleScript() {
 }
 
 function connectModalStateScript() {
-  return `document.querySelectorAll(".connect-modal").forEach(modal => { const root = modal.querySelector("[data-connect-guide]"); const footer = modal.querySelector(".modal-footer"); const sync = () => { const innerBack = root?.querySelector("[data-guide-back]"); const innerNext = root?.querySelector("[data-guide-next]"); const outerBack = footer?.querySelector("[data-guide-back]"); const outerNext = footer?.querySelector("[data-guide-next]"); if (outerBack && innerBack) outerBack.hidden = innerBack.hidden; if (outerNext && innerNext) outerNext.textContent = innerNext.textContent || "Next"; }; footer?.addEventListener("click", () => queueMicrotask(sync)); sync(); });`;
+  return `document.querySelectorAll(".connect-modal").forEach(modal => { const root = modal.querySelector("[data-connect-guide]"); const footer = modal.querySelector(".modal-footer"); const sync = () => { const innerBack = root?.querySelector("[data-guide-back]"); const innerNext = root?.querySelector("[data-guide-next]"); const outerBack = footer?.querySelector("[data-guide-back]"); const outerNext = footer?.querySelector("[data-guide-next]"); if (outerBack && innerBack) outerBack.hidden = innerBack.hidden; if (outerNext && innerNext) { outerNext.textContent = innerNext.textContent || "Next"; outerNext.disabled = innerNext.disabled; outerNext.setAttribute("aria-disabled", String(innerNext.disabled)); } }; const syncAfterClick = () => queueMicrotask(sync); root?.addEventListener("click", syncAfterClick); footer?.addEventListener("click", syncAfterClick); sync(); });`;
 }
 
 function connectGuideBackStateScript() {

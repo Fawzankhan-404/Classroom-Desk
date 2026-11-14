@@ -185,3 +185,57 @@ it("keeps the hero guide progress synchronized for keyboard, swipe, wheel, and c
   expect(httpSource).toContain('card.addEventListener("wheel"');
   expect(httpSource).toContain("Google authorization verified connection");
 });
+
+it("mirrors modal guide completion and reset state to the visible footer button", () => {
+  const httpSource = ts.createSourceFile("http.ts", readFileSync(new URL("./http.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
+  const declaration = httpSource.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "connectModalStateScript");
+  if (!declaration) throw new Error("connectModalStateScript declaration missing");
+  const generated = new Script(`${declaration.getText(httpSource)}\nconnectModalStateScript();`).runInNewContext() as string;
+  const footerListeners = new Map<string, () => void>();
+  const guideListeners = new Map<string, () => void>();
+  const attributes = new Map<string, string>();
+  const innerBack = { hidden: true };
+  const innerNext = { textContent: "Done", disabled: false };
+  const outerBack = { hidden: true };
+  const outerNext = {
+    textContent: "Next",
+    disabled: false,
+    setAttribute: (name: string, value: string) => attributes.set(name, value),
+  };
+  const footer = {
+    querySelector: (selector: string) => selector === "[data-guide-back]" ? outerBack : outerNext,
+    addEventListener: (name: string, listener: () => void) => footerListeners.set(name, listener),
+  };
+  const root = {
+    querySelector: (selector: string) => selector === "[data-guide-back]" ? innerBack : innerNext,
+    addEventListener: (name: string, listener: () => void) => guideListeners.set(name, listener),
+  };
+  const modal = {
+    querySelector: (selector: string) => selector === "[data-connect-guide]" ? root : footer,
+  };
+  new Script(generated).runInNewContext({
+    document: { querySelectorAll: () => [modal] },
+    queueMicrotask: (callback: () => void) => callback(),
+  });
+
+  expect(outerNext.textContent).toBe("Done");
+  expect(outerNext.disabled).toBe(false);
+  innerNext.textContent = "Guide complete";
+  innerNext.disabled = true;
+  guideListeners.get("click")?.();
+  expect(outerNext.textContent).toBe("Guide complete");
+  expect(outerNext.disabled).toBe(true);
+  expect(attributes.get("aria-disabled")).toBe("true");
+
+  innerNext.textContent = "Next";
+  innerNext.disabled = false;
+  guideListeners.get("click")?.();
+  expect(outerNext.textContent).toBe("Next");
+  expect(outerNext.disabled).toBe(false);
+  expect(attributes.get("aria-disabled")).toBe("false");
+
+  innerNext.textContent = "Guide complete";
+  innerNext.disabled = true;
+  footerListeners.get("click")?.();
+  expect(outerNext.disabled).toBe(true);
+});
